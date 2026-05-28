@@ -1,0 +1,391 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum RoleName {
+  SUPER_ADMIN
+  ADMIN
+  MANAGER
+  STAFF
+  CUSTOMER
+}
+
+enum ProductStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+enum OrderStatus {
+  PENDING
+  PROCESSING
+  DELIVERING
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentMethod {
+  QRIS
+  BANK_TRANSFER
+  COD
+  GATEWAY
+}
+
+enum PaymentStatus {
+  PENDING
+  WAITING_VERIFICATION
+  PAID
+  FAILED
+  EXPIRED
+  REFUNDED
+}
+
+enum ShipmentStatus {
+  PENDING
+  RATE_SELECTED
+  PICKED_UP
+  IN_TRANSIT
+  DELIVERED
+  FAILED
+}
+
+model User {
+  id                 String         @id @default(uuid())
+  googleId           String?        @unique
+  email              String         @unique
+  name               String
+  avatarUrl          String?
+  phone              String?
+  isOnboarded        Boolean        @default(false)
+  isActive           Boolean        @default(true)
+  roles              UserRole[]
+  addresses          Address[]
+  orders             Order[]
+  refreshTokens      RefreshToken[]
+  favorites          Favorite[]
+  auditLogs          AuditLog[]     @relation("AuditActor")
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  deletedAt          DateTime?
+
+  @@index([email])
+  @@index([deletedAt])
+}
+
+model Role {
+  id          String           @id @default(uuid())
+  name        RoleName         @unique
+  description String?
+  users       UserRole[]
+  permissions RolePermission[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+}
+
+model Permission {
+  id          String           @id @default(uuid())
+  action      String
+  subject     String
+  description String?
+  roles       RolePermission[]
+
+  @@unique([action, subject])
+}
+
+model UserRole {
+  userId String
+  roleId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role   Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+model RefreshToken {
+  id          String    @id @default(uuid())
+  userId      String
+  tokenHash   String    @db.VarChar(255)
+  familyId    String
+  revokedAt   DateTime?
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, familyId])
+  @@index([expiresAt])
+}
+
+model Address {
+  id            String    @id @default(uuid())
+  userId        String
+  label         String
+  recipientName String
+  phone         String
+  fullAddress   String    @db.Text
+  notes         String?
+  latitude      Decimal   @db.Decimal(10, 7)
+  longitude     Decimal   @db.Decimal(10, 7)
+  isDefault     Boolean   @default(false)
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orders        Order[]
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
+
+  @@index([userId, isDefault])
+  @@index([deletedAt])
+}
+
+model Category {
+  id        String    @id @default(uuid())
+  name      String
+  slug      String    @unique
+  icon      String?
+  sortOrder Int       @default(0)
+  products  Product[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+}
+
+model Product {
+  id            String        @id @default(uuid())
+  slug          String        @unique
+  sku           String        @unique
+  name          String
+  description   String        @db.Text
+  price         Int
+  originalPrice Int?
+  imageUrl      String
+  rating        Decimal       @default(0) @db.Decimal(3, 2)
+  reviewCount   Int           @default(0)
+  spicyLevel    Int?
+  isBestSeller  Boolean       @default(false)
+  isNew         Boolean       @default(false)
+  status        ProductStatus @default(ACTIVE)
+  stock         Int           @default(0)
+  categoryId    String
+  category      Category      @relation(fields: [categoryId], references: [id])
+  orderItems    OrderItem[]
+  favorites     Favorite[]
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  deletedAt     DateTime?
+
+  @@index([categoryId, status])
+  @@index([isBestSeller])
+  @@index([deletedAt])
+}
+
+model Topping {
+  id        String             @id @default(uuid())
+  name      String
+  price     Int
+  isActive  Boolean            @default(true)
+  orderItems OrderItemTopping[]
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+  deletedAt DateTime?
+}
+
+model Favorite {
+  userId    String
+  productId String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([userId, productId])
+}
+
+model Promo {
+  id             String    @id @default(uuid())
+  code           String    @unique
+  title          String
+  description    String
+  imageUrl       String?
+  discountPct    Int       @default(0)
+  discountAmount Int       @default(0)
+  minSubtotal    Int       @default(0)
+  startsAt       DateTime?
+  endsAt         DateTime?
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+}
+
+model CartSession {
+  id        String   @id @default(uuid())
+  userId    String?
+  token     String   @unique
+  payload   Json
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Order {
+  id                String         @id @default(uuid())
+  orderNumber       String         @unique
+  userId            String
+  addressId         String
+  status            OrderStatus    @default(PENDING)
+  subtotal          Int
+  discountTotal     Int            @default(0)
+  deliveryFee       Int
+  totalPrice        Int
+  paymentMethod     PaymentMethod
+  notes             String?
+  estimatedDelivery DateTime?
+  user              User           @relation(fields: [userId], references: [id])
+  address           Address        @relation(fields: [addressId], references: [id])
+  items             OrderItem[]
+  payment           Payment?
+  shipment          Shipment?
+  events            OrderEvent[]
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  deletedAt         DateTime?
+
+  @@index([userId, status])
+  @@index([createdAt])
+}
+
+model OrderItem {
+  id          String             @id @default(uuid())
+  orderId     String
+  productId   String
+  productName String
+  unitPrice   Int
+  quantity    Int
+  spicyLevel  Int?
+  notes       String?
+  order       Order              @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product     Product            @relation(fields: [productId], references: [id])
+  toppings    OrderItemTopping[]
+}
+
+model OrderItemTopping {
+  orderItemId String
+  toppingId   String
+  name        String
+  price       Int
+  orderItem   OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  topping     Topping   @relation(fields: [toppingId], references: [id])
+
+  @@id([orderItemId, toppingId])
+}
+
+model OrderEvent {
+  id        String      @id @default(uuid())
+  orderId   String
+  status    OrderStatus
+  note      String?
+  metadata  Json?
+  order     Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  createdAt DateTime    @default(now())
+}
+
+model Payment {
+  id                  String        @id @default(uuid())
+  orderId             String        @unique
+  method              PaymentMethod
+  status              PaymentStatus @default(PENDING)
+  amount              Int
+  provider            String?
+  providerReference   String?
+  manualBankName      String?
+  manualAccountName   String?
+  manualReceiptUrl    String?
+  verifiedByUserId    String?
+  verifiedAt          DateTime?
+  webhookPayload      Json?
+  order               Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  transactions        Transaction[]
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+  deletedAt           DateTime?
+
+  @@index([status, method])
+}
+
+model Transaction {
+  id                String        @id @default(uuid())
+  paymentId         String
+  status            PaymentStatus
+  amount            Int
+  providerReference String?
+  rawPayload         Json?
+  payment            Payment       @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  createdAt          DateTime      @default(now())
+
+  @@index([paymentId, createdAt])
+}
+
+model Shipment {
+  id             String         @id @default(uuid())
+  orderId        String         @unique
+  provider       String
+  service        String
+  status         ShipmentStatus @default(PENDING)
+  cost           Int
+  trackingNumber String?
+  trackingUrl    String?
+  metadata       Json?
+  order          Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+}
+
+model Banner {
+  id          String    @id @default(uuid())
+  title       String
+  description String?
+  imageUrl    String
+  href        String?
+  placement   String
+  isActive    Boolean   @default(true)
+  startsAt    DateTime?
+  endsAt      DateTime?
+  sortOrder   Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  @@index([placement, isActive])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  actorId   String?
+  action    String
+  entity    String
+  entityId  String?
+  before    Json?
+  after     Json?
+  ipAddress String?
+  userAgent String?
+  actor     User?    @relation("AuditActor", fields: [actorId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@index([actorId, createdAt])
+  @@index([entity, entityId])
+}

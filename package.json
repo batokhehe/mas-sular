@@ -1,0 +1,22 @@
+{
+  "name": "baso-nusantara-platform",
+  "private": true,
+  "packageManager": "pnpm@10.0.0",
+  "scripts": {
+    "dev": "docker compose up -d mysql redis rabbitmq && pnpm --parallel --filter backend --filter admin dev",
+    "build": "pnpm --filter backend build && pnpm --filter admin build",
+    "lint": "pnpm --filter backend lint && pnpm --filter admin lint",
+    "test": "pnpm --filter backend test",
+    "format": "pnpm --filter backend format && pnpm --filter admin format",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^19.6.1",
+    "@commitlint/config-conventional": "^19.6.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.2.11"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx,json,md,css}": "prettier --write"
+  }
+}
