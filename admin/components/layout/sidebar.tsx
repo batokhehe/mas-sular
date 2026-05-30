@@ -1,11 +1,17 @@
+'use client';
+
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import {
   BarChart3,
   Boxes,
   ClipboardList,
   CreditCard,
   FileText,
+  Gift,
+  Image,
   LayoutDashboard,
+  Layers,
   LifeBuoy,
   ReceiptText,
   Shield,
@@ -17,12 +23,12 @@ const sections = [
   {
     label: 'Menu',
     items: [
-      { href: '/dashboard', label: 'Ecommerce', icon: LayoutDashboard, active: true },
-      { href: '/analytics', label: 'Analytics', icon: BarChart3 },
+      { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
       { href: '/products', label: 'Products', icon: Boxes },
       { href: '/orders', label: 'Orders', icon: ClipboardList },
-      { href: '/payments', label: 'Transactions', icon: CreditCard },
-      { href: '/shipping', label: 'Logistics', icon: Truck },
+      { href: '/payments', label: 'Order Verification', icon: CreditCard },
+      { href: '/shipping', label: 'Shipping', icon: Truck },
+      { href: '/promos', label: 'Voucher', icon: Gift },
     ],
   },
   {
@@ -30,17 +36,20 @@ const sections = [
     items: [
       { href: '/users', label: 'Users', icon: Users },
       { href: '/roles', label: 'Roles & Permissions', icon: Shield },
-      { href: '/cms', label: 'Content CMS', icon: FileText },
-      { href: '/audit-logs', label: 'Audit Logs', icon: ReceiptText },
     ],
-  },
-  {
-    label: 'Support',
-    items: [{ href: '/orders', label: 'Customer Support', icon: LifeBuoy }],
   },
 ];
 
 export function Sidebar() {
+  const pathname = usePathname();
+
+  const isActive = (href: string) => {
+    if (href === '/dashboard') {
+      return pathname === '/dashboard';
+    }
+    return pathname.startsWith(href);
+  };
+
   return (
     <aside className="fixed inset-y-0 left-0 hidden w-[290px] border-r border-gray-200 bg-white md:block">
       <div className="flex h-16 items-center border-b border-gray-200 px-6">
@@ -57,13 +66,14 @@ export function Sidebar() {
             <div className="space-y-1">
               {section.items.map((item) => {
                 const Icon = item.icon;
+                const active = isActive(item.href);
                 return (
                   <Link
                     key={item.href}
                     href={item.href}
                     className={[
                       'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition',
-                      item.active ? 'bg-indigo-50 text-[#465fff]' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900',
+                      active ? 'bg-indigo-50 text-[#465fff]' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900',
                     ].join(' ')}
                   >
                     <Icon className="h-5 w-5" />

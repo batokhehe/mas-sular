@@ -70,13 +70,68 @@ The backend contracts were generated around those flows.
    pnpm --filter backend prisma:seed
    ```
 
-5. Run apps:
+5. Start infrastructure services:
+
+   ```bash
+   pnpm infra:up
+   ```
+
+6. Run apps individually:
 
    ```bash
    pnpm --filter backend dev
    pnpm --filter admin dev
    pnpm --filter frontend dev
    ```
+
+7. Run all apps at once from project root:
+
+   ```bash
+   pnpm dev:all
+   ```
+
+## Root Command Reference
+
+- `pnpm infra:up` – start MySQL, Redis, and RabbitMQ services
+- `pnpm infra:down` – stop Docker Compose services
+- `pnpm dev` – start infrastructure and run backend + admin + frontend in parallel
+- `pnpm dev:all` – start infrastructure and run backend + admin + frontend in parallel
+- `pnpm dev:backend` – run only the backend
+- `pnpm dev:admin` – run only the admin app
+- `pnpm dev:frontend` – run only the storefront
+- `pnpm build:all` – build all three apps
+- `pnpm lint:all` – lint all three apps
+
+## Deploying Standalone Projects
+
+Each app can be deployed independently.
+
+### Backend
+
+```bash
+cd backend
+pnpm install
+pnpm build
+pnpm start
+```
+
+### Admin
+
+```bash
+cd admin
+pnpm install
+pnpm build
+pnpm start
+```
+
+### Frontend
+
+```bash
+cd frontend
+pnpm install
+pnpm build
+pnpm start
+```
 
 ## URLs
 

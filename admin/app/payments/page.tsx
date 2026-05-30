@@ -1,9 +1,23 @@
+'use client';
+
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AdminShell } from '@/components/layout/admin-shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardTitle } from '@/components/ui/card';
+import { fetchAdminPendingPayments, rejectAdminPayment, verifyAdminPayment } from '@/lib/admin';
 
 export default function PaymentsPage() {
+  const queryClient = useQueryClient();
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['admin-payments', 'pending'],
+    queryFn: fetchAdminPendingPayments,
+    retry: false,
+  });
+  const refreshQueue = () => queryClient.invalidateQueries({ queryKey: ['admin-payments', 'pending'] });
+  const verifyMutation = useMutation({ mutationFn: verifyAdminPayment, onSuccess: refreshQueue });
+  const rejectMutation = useMutation({ mutationFn: rejectAdminPayment, onSuccess: refreshQueue });
+
   return (
     <AdminShell>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
@@ -16,15 +30,29 @@ export default function PaymentsPage() {
       <Card>
         <CardTitle>Manual Transfer Queue</CardTitle>
         <div className="mt-4 space-y-3">
-          {['BN-20260528-00001', 'BN-20260528-00004', 'BN-20260528-00009'].map((order) => (
-            <div key={order} className="flex items-center justify-between rounded-xl border border-gray-100 p-4">
+          {isLoading ? (
+            <p className="p-6 text-sm text-gray-500">Loading payments...</p>
+          ) : isError ? (
+            <p className="p-6 text-sm text-red-600">Unable to load payments. Please reauthenticate.</p>
+          ) : data?.length === 0 ? (
+            <p className="p-6 text-sm text-gray-500">No payments waiting for verification.</p>
+          ) : (
+            data?.map((payment) => (
+            <div key={payment.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-100 p-4">
               <div>
-                <p className="font-medium text-gray-800">{order}</p>
-                <p className="text-sm text-gray-500">Receipt uploaded, waiting admin review</p>
+                <p className="font-medium text-gray-800">{payment.order.orderNumber}</p>
+                <p className="text-sm text-gray-500">
+                  {payment.manualBankName ?? payment.method} · Rp {payment.amount.toLocaleString('id-ID')}
+                </p>
               </div>
-              <Badge tone="brand">Waiting Verification</Badge>
+              <div className="flex items-center gap-2">
+                <Badge tone="brand">{payment.status}</Badge>
+                <Button onClick={() => verifyMutation.mutate(payment.id)}>Verify</Button>
+                <Button className="bg-white text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50" onClick={() => rejectMutation.mutate(payment.id)}>Reject</Button>
+              </div>
             </div>
-          ))}
+            ))
+          )}
         </div>
       </Card>
     </AdminShell>

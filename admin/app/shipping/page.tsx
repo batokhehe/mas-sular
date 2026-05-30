@@ -1,25 +1,110 @@
+'use client';
+
+import Link from 'next/link';
+import { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { AdminShell } from '@/components/layout/admin-shell';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Card, CardTitle } from '@/components/ui/card';
+import { fetchAdminShipments, AdminShipment } from '@/lib/admin';
+
+const statusOptions = ['ALL', 'PENDING', 'RATE_SELECTED', 'PICKED_UP', 'IN_TRANSIT', 'DELIVERED', 'FAILED'] as const;
 
 export default function ShippingPage() {
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<typeof statusOptions[number]>('ALL');
+
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['admin-shipments'],
+    queryFn: fetchAdminShipments,
+    retry: false,
+  });
+
+  const shipments = useMemo(() => {
+    if (!data) return [];
+    return data.filter((shipment: AdminShipment) => {
+      const matchesSearch = [shipment.order.orderNumber, shipment.provider, shipment.service, shipment.trackingNumber ?? '']
+        .some((field) => field.toLowerCase().includes(search.toLowerCase()));
+      const matchesStatus = statusFilter === 'ALL' || shipment.status === statusFilter;
+      return matchesSearch && matchesStatus;
+    });
+  }, [data, search, statusFilter]);
+
   return (
     <AdminShell>
-      <div className="mb-6">
-        <h2 className="text-xl font-semibold text-gray-900">Shipping Management</h2>
-        <p className="mt-1 text-sm text-gray-500">Provider rates, Paxel/JNE tracking, shipment exceptions, and labels.</p>
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-semibold text-gray-900">Shipping Management</h2>
+          <p className="mt-1 text-sm text-gray-500">Provider rates, shipment status, and tracking updates.</p>
+        </div>
+        <Link href="/shipping/new">
+          <Button>New Shipment</Button>
+        </Link>
       </div>
-      <div className="grid gap-6 lg:grid-cols-2">
-        {['Paxel', 'JNE'].map((provider) => (
-          <Card key={provider}>
-            <div className="flex items-center justify-between">
-              <CardTitle>{provider}</CardTitle>
-              <Badge tone="success">Connected</Badge>
-            </div>
-            <p className="mt-3 text-sm text-gray-500">Rates and tracking provider abstraction is ready in backend shipping module.</p>
-          </Card>
-        ))}
-      </div>
+      <Card>
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search shipments by order, provider, or tracking"
+            className="h-11 w-full rounded-xl border border-gray-200 bg-gray-50 px-4 text-sm outline-none focus:border-[#465fff] focus:bg-white"
+          />
+          <select
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value as typeof statusOptions[number])}
+            className="h-11 rounded-xl border border-gray-200 bg-white px-4 text-sm outline-none focus:border-[#465fff]"
+          >
+            {statusOptions.map((status) => (
+              <option key={status} value={status}>
+                {status}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <CardTitle>Shipments</CardTitle>
+        <div className="mt-4 overflow-x-auto">
+          {isLoading ? (
+            <p className="p-6 text-sm text-gray-500">Loading shipments...</p>
+          ) : isError ? (
+            <p className="p-6 text-sm text-red-600">Unable to load shipments. Please reauthenticate.</p>
+          ) : shipments.length === 0 ? (
+            <p className="p-6 text-sm text-gray-500">No shipments match the current filters.</p>
+          ) : (
+            <table className="w-full min-w-[760px] text-left text-sm">
+              <thead>
+                <tr className="border-b border-gray-100 text-xs uppercase text-gray-400">
+                  <th className="py-3 font-medium">Order</th>
+                  <th className="py-3 font-medium">Provider</th>
+                  <th className="py-3 font-medium">Service</th>
+                  <th className="py-3 font-medium">Tracking</th>
+                  <th className="py-3 font-medium">Status</th>
+                  <th className="py-3 font-medium">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {shipments.map((shipment) => (
+                  <tr key={shipment.id} className="border-b border-gray-50 last:border-0">
+                    <td className="py-4 font-medium text-gray-800">{shipment.order.orderNumber}</td>
+                    <td className="py-4 text-gray-500">{shipment.provider}</td>
+                    <td className="py-4 text-gray-500">{shipment.service}</td>
+                    <td className="py-4 text-gray-500">{shipment.trackingNumber ?? '-'}</td>
+                    <td className="py-4">
+                      <Badge tone={shipment.status === 'DELIVERED' ? 'success' : 'brand'}>{shipment.status}</Badge>
+                    </td>
+                    <td className="py-4">
+                      <Link href={`/shipping/${shipment.id}`} className="text-sm font-medium text-[#465fff] hover:text-indigo-700">
+                        View
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </Card>
     </AdminShell>
   );
 }

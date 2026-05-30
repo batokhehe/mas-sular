@@ -1,7 +1,7 @@
 import { ValidationPipe, VersioningType } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import cookieParser from 'cookie-parser';
+import * as cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
@@ -14,8 +14,22 @@ async function bootstrap(): Promise<void> {
 
   app.setGlobalPrefix(process.env.API_PREFIX ?? 'api');
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: process.env.API_VERSION ?? '1' });
+  const allowedOrigins = (process.env.CORS_ORIGINS ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
   app.enableCors({
-    origin: (process.env.CORS_ORIGINS ?? '').split(',').filter(Boolean),
+    origin:
+      allowedOrigins.length === 0
+        ? true
+        : (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+            if (!origin || allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
+              callback(null, true);
+            } else {
+              callback(new Error('Not allowed by CORS'));
+            }
+          },
     credentials: true,
   });
   app.use(helmet());
@@ -38,7 +52,7 @@ async function bootstrap(): Promise<void> {
     .build();
   SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, swaggerConfig));
 
-  await app.listen(Number(process.env.PORT ?? 3001));
+  await app.listen(Number(process.env.PORT ?? 3001), '0.0.0.0');
 }
 
 void bootstrap();

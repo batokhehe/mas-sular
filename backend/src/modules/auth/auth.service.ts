@@ -1,6 +1,7 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
+import { StringValue } from 'ms';
 import { randomUUID } from 'crypto';
 import { OAuth2Client } from 'google-auth-library';
 import { PrismaService } from '../../database/prisma.service';
@@ -50,7 +51,11 @@ export class AuthService {
 
   async issueTokens(userId: string, email: string, roles: string[]) {
     const familyId = randomUUID();
-    const accessToken = await this.jwt.signAsync({ sub: userId, email, roles }, { expiresIn: process.env.JWT_ACCESS_TTL ?? '15m' });
+    const expiresIn = (process.env.JWT_ACCESS_TTL ?? '15m') as StringValue;
+    const accessToken = await this.jwt.signAsync(
+      { sub: userId, email, roles },
+      { expiresIn },
+    );
     const refreshToken = randomUUID();
     await this.prisma.refreshToken.create({
       data: {

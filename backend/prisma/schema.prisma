@@ -7,14 +7,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum RoleName {
-  SUPER_ADMIN
-  ADMIN
-  MANAGER
-  STAFF
-  CUSTOMER
-}
-
 enum ProductStatus {
   DRAFT
   ACTIVE
@@ -77,9 +69,19 @@ model User {
   @@index([deletedAt])
 }
 
+model Admin {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
 model Role {
   id          String           @id @default(uuid())
-  name        RoleName         @unique
+  name        String         @unique
   description String?
   users       UserRole[]
   permissions RolePermission[]

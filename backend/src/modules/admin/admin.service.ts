@@ -1,0 +1,453 @@
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { OrderStatus, PaymentStatus, Prisma, ShipmentStatus } from '@prisma/client';
+import { PrismaService } from '../../database/prisma.service';
+import { EventBus } from '../../infrastructure/events/event-bus';
+import { CreateBannerDto } from '../cms/application/dto/banner.dto';
+import {
+  CreateShipmentDto,
+  ListAdminOrdersQueryDto,
+  ListAdminShipmentsQueryDto,
+  RejectAdminPaymentDto,
+  UpdateOrderStatusDto,
+  UpdateShipmentDto,
+  VerifyAdminPaymentDto,
+} from './application/dto/admin-operations.dto';
+import { CreateCategoryDto } from './application/dto/create-category.dto';
+import { CreateProductDto } from './application/dto/create-product.dto';
+import { CreatePromoDto } from './application/dto/create-promo.dto';
+import { CreateRoleDto } from './application/dto/create-role.dto';
+import { UpdateBannerDto } from './application/dto/update-banner.dto';
+import { UpdateCategoryDto } from './application/dto/update-category.dto';
+import { UpdateProductDto } from './application/dto/update-product.dto';
+import { UpdatePromoDto } from './application/dto/update-promo.dto';
+import { UpdateRoleDto } from './application/dto/update-role.dto';
+import { UpdateUserDto } from './application/dto/update-user.dto';
+
+@Injectable()
+export class AdminService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly eventBus: EventBus,
+  ) {}
+
+  async getDashboard() {
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const [ordersToday, revenueToday, pendingPayments, activeProducts, lowStockProducts, totalOrders, totalUsers, pendingOrders, verifiedOrders, ordersByStatus] = await Promise.all([
+      this.prisma.order.count({ where: { deletedAt: null, createdAt: { gte: startOfToday } } }),
+      this.prisma.order.aggregate({
+        where: { deletedAt: null, payment: { status: PaymentStatus.PAID } },
+        _sum: { totalPrice: true },
+      }),
+      this.prisma.payment.count({ where: { deletedAt: null, status: PaymentStatus.WAITING_VERIFICATION } }),
+      this.prisma.product.count({ where: { deletedAt: null, status: 'ACTIVE' } }),
+      this.prisma.product.count({ where: { deletedAt: null, stock: { lte: 10 } } }),
+      this.prisma.order.count({ where: { deletedAt: null } }),
+      this.prisma.user.count({ where: { deletedAt: null } }),
+      this.prisma.order.count({ where: { deletedAt: null, status: OrderStatus.PENDING } }),
+      this.prisma.order.count({ where: { deletedAt: null, status: { in: [OrderStatus.PROCESSING, OrderStatus.DELIVERING, OrderStatus.COMPLETED] } } }),
+      this.prisma.order.groupBy({
+        by: ['status'],
+        where: { deletedAt: null },
+        _count: { status: true },
+      }),
+    ]);
+
+    return {
+      ordersToday,
+      totalOrders,
+      totalUsers,
+      pendingOrders,
+      verifiedOrders,
+      totalRevenue: revenueToday._sum.totalPrice ?? 0,
+      pendingPayments,
+      activeProducts,
+      lowStockProducts,
+      ordersByStatus: Object.fromEntries(ordersByStatus.map((item) => [item.status, item._count.status])),
+    };
+  }
+
+  async createProduct(dto: CreateProductDto) {
+    return this.prisma.product.create({ data: { ...dto } });
+  }
+
+  listProducts() {
+    return this.prisma.product.findMany({ where: { deletedAt: null }, orderBy: { createdAt: 'desc' } });
+  }
+
+  async getProduct(id: string) {
+    const product = await this.prisma.product.findUnique({ where: { id } });
+    if (!product || product.deletedAt) throw new NotFoundException('Product not found');
+    return product;
+  }
+
+  async updateProduct(id: string, dto: UpdateProductDto) {
+    await this.getProduct(id);
+    return this.prisma.product.update({ where: { id }, data: dto });
+  }
+
+  async deleteProduct(id: string) {
+    await this.getProduct(id);
+    return this.prisma.product.update({ where: { id }, data: { deletedAt: new Date() } });
+  }
+
+  async createCategory(dto: CreateCategoryDto) {
+    return this.prisma.category.create({ data: { ...dto } });
+  }
+
+  listCategories() {
+    return this.prisma.category.findMany({ where: { deletedAt: null }, orderBy: { sortOrder: 'asc' } });
+  }
+
+  async getCategory(id: string) {
+    const category = await this.prisma.category.findUnique({ where: { id } });
+    if (!category || category.deletedAt) throw new NotFoundException('Category not found');
+    return category;
+  }
+
+  async updateCategory(id: string, dto: UpdateCategoryDto) {
+    await this.getCategory(id);
+    return this.prisma.category.update({ where: { id }, data: dto });
+  }
+
+  async deleteCategory(id: string) {
+    await this.getCategory(id);
+    return this.prisma.category.update({ where: { id }, data: { deletedAt: new Date() } });
+  }
+
+  async createPromo(dto: CreatePromoDto) {
+    return this.prisma.promo.create({ data: { ...dto } });
+  }
+
+  listPromos() {
+    return this.prisma.promo.findMany({ where: { deletedAt: null }, orderBy: { createdAt: 'desc' } });
+  }
+
+  async getPromo(id: string) {
+    const promo = await this.prisma.promo.findUnique({ where: { id } });
+    if (!promo || promo.deletedAt) throw new NotFoundException('Promo not found');
+    return promo;
+  }
+
+  async updatePromo(id: string, dto: UpdatePromoDto) {
+    await this.getPromo(id);
+    return this.prisma.promo.update({ where: { id }, data: dto });
+  }
+
+  async deletePromo(id: string) {
+    await this.getPromo(id);
+    return this.prisma.promo.update({ where: { id }, data: { deletedAt: new Date() } });
+  }
+
+  async createBanner(dto: CreateBannerDto) {
+    return this.prisma.banner.create({ data: { ...dto } });
+  }
+
+  listBanners() {
+    return this.prisma.banner.findMany({ where: { deletedAt: null }, orderBy: [{ sortOrder: 'asc' }, { createdAt: 'desc' }] });
+  }
+
+  async getBanner(id: string) {
+    const banner = await this.prisma.banner.findUnique({ where: { id } });
+    if (!banner || banner.deletedAt) throw new NotFoundException('Banner not found');
+    return banner;
+  }
+
+  async updateBanner(id: string, dto: UpdateBannerDto) {
+    await this.getBanner(id);
+    return this.prisma.banner.update({ where: { id }, data: dto });
+  }
+
+  async deleteBanner(id: string) {
+    await this.getBanner(id);
+    return this.prisma.banner.update({ where: { id }, data: { deletedAt: new Date() } });
+  }
+
+  listOrders(query: ListAdminOrdersQueryDto) {
+    return this.prisma.order.findMany({
+      where: {
+        deletedAt: null,
+        status: query.status,
+        payment: query.paymentStatus ? { status: query.paymentStatus } : undefined,
+      },
+      include: {
+        user: { select: { id: true, name: true, email: true, phone: true } },
+        address: true,
+        items: { include: { toppings: true } },
+        payment: true,
+        shipment: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async getOrder(id: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { id },
+      include: {
+        user: { select: { id: true, name: true, email: true, phone: true } },
+        address: true,
+        items: { include: { toppings: true } },
+        payment: { include: { transactions: true } },
+        shipment: true,
+        events: { orderBy: { createdAt: 'desc' } },
+      },
+    });
+    if (!order || order.deletedAt) throw new NotFoundException('Order not found');
+    return order;
+  }
+
+  async updateOrderStatus(id: string, dto: UpdateOrderStatusDto) {
+    await this.getOrder(id);
+    const order = await this.prisma.order.update({
+      where: { id },
+      data: {
+        status: dto.status,
+        events: { create: { status: dto.status, note: dto.note ?? `Order marked as ${dto.status}` } },
+      },
+      include: { payment: true, shipment: true },
+    });
+    await this.eventBus.publish('orders', 'order.status_updated', {
+      id: order.id,
+      name: 'order.status_updated',
+      occurredAt: new Date(),
+      payload: { orderId: order.id, status: order.status },
+    });
+    return order;
+  }
+
+  listPayments(status: PaymentStatus = PaymentStatus.WAITING_VERIFICATION) {
+    return this.prisma.payment.findMany({
+      where: { deletedAt: null, status },
+      include: {
+        order: {
+          include: {
+            user: { select: { id: true, name: true, email: true, phone: true } },
+            items: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async verifyPayment(paymentId: string, adminId: string, dto: VerifyAdminPaymentDto) {
+    const payment = await this.prisma.payment.findUnique({ where: { id: paymentId } });
+    if (!payment || payment.deletedAt) throw new NotFoundException('Payment not found');
+
+    const updated = await this.prisma.payment.update({
+      where: { id: paymentId },
+      data: { status: PaymentStatus.PAID, verifiedByUserId: adminId, verifiedAt: new Date() },
+    });
+    await this.prisma.order.update({
+      where: { id: payment.orderId },
+      data: {
+        status: OrderStatus.PROCESSING,
+        events: { create: { status: OrderStatus.PROCESSING, note: dto.note ?? 'Payment verified by admin' } },
+      },
+    });
+    await this.eventBus.publish('payments', 'payment.paid', {
+      id: updated.id,
+      name: 'payment.paid',
+      occurredAt: new Date(),
+      payload: { paymentId: updated.id, orderId: updated.orderId },
+    });
+    return updated;
+  }
+
+  async rejectPayment(paymentId: string, dto: RejectAdminPaymentDto) {
+    const payment = await this.prisma.payment.findUnique({ where: { id: paymentId } });
+    if (!payment || payment.deletedAt) throw new NotFoundException('Payment not found');
+
+    const updated = await this.prisma.payment.update({
+      where: { id: paymentId },
+      data: { status: PaymentStatus.FAILED },
+    });
+    await this.prisma.order.update({
+      where: { id: payment.orderId },
+      data: {
+        status: OrderStatus.CANCELLED,
+        events: { create: { status: OrderStatus.CANCELLED, note: dto.note ?? 'Payment rejected by admin' } },
+      },
+    });
+    await this.eventBus.publish('payments', 'payment.failed', {
+      id: updated.id,
+      name: 'payment.failed',
+      occurredAt: new Date(),
+      payload: { paymentId: updated.id, orderId: updated.orderId },
+    });
+    return updated;
+  }
+
+  async createShipment(dto: CreateShipmentDto) {
+    await this.getOrder(dto.orderId);
+    return this.prisma.shipment.create({
+      data: {
+        orderId: dto.orderId,
+        provider: dto.provider,
+        service: dto.service,
+        cost: dto.cost,
+        status: dto.status ?? ShipmentStatus.PENDING,
+        trackingNumber: dto.trackingNumber,
+        trackingUrl: dto.trackingUrl,
+        metadata: dto.metadata as Prisma.InputJsonValue | undefined,
+      },
+      include: { order: true },
+    });
+  }
+
+  listShipments(query: ListAdminShipmentsQueryDto) {
+    return this.prisma.shipment.findMany({
+      where: { status: query.status },
+      include: { order: { include: { user: { select: { id: true, name: true, email: true, phone: true } } } } },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async getShipment(id: string) {
+    const shipment = await this.prisma.shipment.findUnique({
+      where: { id },
+      include: { order: { include: { user: { select: { id: true, name: true, email: true, phone: true } } } } },
+    });
+    if (!shipment) throw new NotFoundException('Shipment not found');
+    return shipment;
+  }
+
+  async updateShipment(id: string, dto: UpdateShipmentDto) {
+    await this.getShipment(id);
+    return this.prisma.shipment.update({
+      where: { id },
+      data: {
+        provider: dto.provider,
+        service: dto.service,
+        cost: dto.cost,
+        status: dto.status,
+        trackingNumber: dto.trackingNumber,
+        trackingUrl: dto.trackingUrl,
+        metadata: dto.metadata as Prisma.InputJsonValue | undefined,
+      },
+      include: { order: true },
+    });
+  }
+
+  async deleteShipment(id: string) {
+    await this.getShipment(id);
+    return this.prisma.shipment.delete({ where: { id } });
+  }
+
+  listUsers() {
+    return this.prisma.user.findMany({
+      where: { deletedAt: null },
+      include: { roles: { include: { role: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async getUser(id: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      include: { roles: { include: { role: true } }, addresses: true, orders: true },
+    });
+    if (!user || user.deletedAt) throw new NotFoundException('User not found');
+    return user;
+  }
+
+  async createRole(dto: CreateRoleDto) {
+    return this.prisma.role.create({
+      data: {
+        name: dto.name,
+        description: dto.description,
+        permissions: dto.permissionIds ? {
+          create: dto.permissionIds.map((permissionId) => ({ permissionId })),
+        } : undefined,
+      },
+      include: { permissions: { include: { permission: true } } },
+    });
+  }
+
+  listRoles() {
+    return this.prisma.role.findMany({
+      include: { permissions: { include: { permission: true } } },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  async getRole(id: string) {
+    const role = await this.prisma.role.findUnique({
+      where: { id },
+      include: { permissions: { include: { permission: true } } },
+    });
+    if (!role) throw new NotFoundException('Role not found');
+    return role;
+  }
+
+  async updateRole(id: string, dto: UpdateRoleDto) {
+    await this.getRole(id);
+
+    const updateData: Prisma.RoleUpdateInput = {
+      ...(dto.name ? { name: dto.name } : {}),
+      ...(dto.description !== undefined ? { description: dto.description } : {}),
+    };
+
+    if (dto.permissionIds) {
+      const [ , role ] = await this.prisma.$transaction([
+        this.prisma.rolePermission.deleteMany({ where: { roleId: id } }),
+        this.prisma.role.update({
+          where: { id },
+          data: {
+            ...updateData,
+            permissions: {
+              create: dto.permissionIds.map((permissionId) => ({ permissionId })),
+            },
+          },
+          include: { permissions: { include: { permission: true } } },
+        }),
+      ]);
+      return role;
+    }
+
+    return this.prisma.role.update({
+      where: { id },
+      data: updateData,
+      include: { permissions: { include: { permission: true } } },
+    });
+  }
+
+  async updateUser(id: string, dto: UpdateUserDto) {
+    await this.getUser(id);
+
+    const updateData: Prisma.UserUpdateInput = {
+      ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+    };
+
+    if (dto.roleIds) {
+      const [ , user ] = await this.prisma.$transaction([
+        this.prisma.userRole.deleteMany({ where: { userId: id } }),
+        this.prisma.user.update({
+          where: { id },
+          data: {
+            ...updateData,
+            roles: {
+              create: dto.roleIds.map((roleId) => ({ roleId })),
+            },
+          },
+          include: { roles: { include: { role: true } }, addresses: true, orders: true },
+        }),
+      ]);
+      return user;
+    }
+
+    return this.prisma.user.update({
+      where: { id },
+      data: updateData,
+      include: { roles: { include: { role: true } }, addresses: true, orders: true },
+    });
+  }
+
+  listPermissions() {
+    return this.prisma.permission.findMany({
+      orderBy: { subject: 'asc' },
+    });
+  }
+}

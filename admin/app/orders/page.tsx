@@ -1,8 +1,36 @@
+'use client';
+
+import Link from 'next/link';
+import { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { AdminShell } from '@/components/layout/admin-shell';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardTitle } from '@/components/ui/card';
+import { fetchAdminOrders, AdminOrder } from '@/lib/admin';
+
+const statusOptions = ['ALL', 'PENDING', 'PROCESSING', 'DELIVERING', 'COMPLETED', 'CANCELLED'] as const;
 
 export default function OrdersPage() {
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<typeof statusOptions[number]>('ALL');
+
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['admin-orders'],
+    queryFn: fetchAdminOrders,
+    retry: false,
+  });
+
+  const orders = useMemo(() => {
+    if (!data) return [];
+
+    return data.filter((order: AdminOrder) => {
+      const matchesSearch = [order.orderNumber, order.user?.name ?? '', order.user?.email ?? '']
+        .some((field) => field.toLowerCase().includes(search.toLowerCase()));
+      const matchesStatus = statusFilter === 'ALL' || order.status === statusFilter;
+      return matchesSearch && matchesStatus;
+    });
+  }, [data, search, statusFilter]);
+
   return (
     <AdminShell>
       <div className="mb-6">
@@ -10,35 +38,70 @@ export default function OrdersPage() {
         <p className="mt-1 text-sm text-gray-500">Track checkout, fulfillment, delivery, and customer support states.</p>
       </div>
       <Card>
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex-1">
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search order number, customer, or email"
+              className="h-11 w-full rounded-xl border border-gray-200 bg-gray-50 px-4 text-sm outline-none focus:border-[#465fff] focus:bg-white"
+            />
+          </div>
+          <select
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value as typeof statusOptions[number])}
+            className="h-11 rounded-xl border border-gray-200 bg-white px-4 text-sm outline-none focus:border-[#465fff]"
+          >
+            {statusOptions.map((status) => (
+              <option key={status} value={status}>
+                {status}
+              </option>
+            ))}
+          </select>
+        </div>
+
         <CardTitle>Recent Orders</CardTitle>
         <div className="mt-4 overflow-x-auto">
-          <table className="w-full min-w-[760px] text-left text-sm">
-            <thead>
-              <tr className="border-b border-gray-100 text-xs uppercase text-gray-400">
-                <th className="py-3 font-medium">Order</th>
-                <th className="py-3 font-medium">Customer</th>
-                <th className="py-3 font-medium">Status</th>
-                <th className="py-3 font-medium">Payment</th>
-                <th className="py-3 text-right font-medium">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {[
-                ['BN-20260528-00001', 'Naufal', 'Processing', 'Waiting Verification', 'Rp 106.000'],
-                ['BN-20260528-00002', 'Sular', 'Delivering', 'Paid', 'Rp 125.000'],
-              ].map((row) => (
-                <tr key={row[0]} className="border-b border-gray-50 last:border-0">
-                  <td className="py-4 font-medium text-gray-800">{row[0]}</td>
-                  <td className="py-4 text-gray-500">{row[1]}</td>
-                  <td className="py-4">
-                    <Badge tone="brand">{row[2]}</Badge>
-                  </td>
-                  <td className="py-4 text-gray-500">{row[3]}</td>
-                  <td className="py-4 text-right font-semibold text-gray-900">{row[4]}</td>
+          {isLoading ? (
+            <p className="p-6 text-sm text-gray-500">Loading orders...</p>
+          ) : isError ? (
+            <p className="p-6 text-sm text-red-600">Unable to load orders. Please reauthenticate.</p>
+          ) : orders.length === 0 ? (
+            <p className="p-6 text-sm text-gray-500">No orders match the current filters.</p>
+          ) : (
+            <table className="w-full min-w-[760px] text-left text-sm">
+              <thead>
+                <tr className="border-b border-gray-100 text-xs uppercase text-gray-400">
+                  <th className="py-3 font-medium">Order</th>
+                  <th className="py-3 font-medium">Customer</th>
+                  <th className="py-3 font-medium">Status</th>
+                  <th className="py-3 font-medium">Payment</th>
+                  <th className="py-3 text-right font-medium">Total</th>
+                  <th className="py-3 font-medium">Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {orders.map((order) => (
+                  <tr key={order.id} className="border-b border-gray-50 last:border-0">
+                    <td className="py-4 font-medium text-gray-800">{order.orderNumber}</td>
+                    <td className="py-4 text-gray-500">{order.user?.name ?? '-'}</td>
+                    <td className="py-4">
+                      <Badge tone={order.status === 'COMPLETED' ? 'success' : order.status === 'PENDING' ? 'danger' : 'brand'}>
+                        {order.status}
+                      </Badge>
+                    </td>
+                    <td className="py-4 text-gray-500">{order.payment?.status ?? order.paymentMethod}</td>
+                    <td className="py-4 text-right font-semibold text-gray-900">Rp {order.totalPrice.toLocaleString('id-ID')}</td>
+                    <td className="py-4">
+                      <Link href={`/orders/${order.id}`} className="text-sm font-medium text-[#465fff] hover:text-indigo-700">
+                        View
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       </Card>
     </AdminShell>

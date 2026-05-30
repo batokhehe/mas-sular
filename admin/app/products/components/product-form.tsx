@@ -1,0 +1,243 @@
+'use client';
+
+import { useMemo, useState } from 'react';
+import { AdminCategory, AdminProduct } from '@/lib/admin';
+import { Button } from '@/components/ui/button';
+import { Card, CardTitle } from '@/components/ui/card';
+
+interface ProductFormProps {
+  categories: AdminCategory[];
+  initialValues?: Partial<AdminProduct>;
+  onSubmit: (values: ProductFormValues) => Promise<void>;
+  onDelete?: () => Promise<void>;
+  isSubmitting?: boolean;
+  isDeleting?: boolean;
+  submitLabel: string;
+}
+
+export type ProductFormValues = {
+  sku: string;
+  slug: string;
+  name: string;
+  description: string;
+  price: number;
+  originalPrice?: number;
+  imageUrl: string;
+  spicyLevel?: number;
+  isBestSeller: boolean;
+  isNew: boolean;
+  status: 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
+  stock: number;
+  categoryId: string;
+};
+
+const statusOptions = ['DRAFT', 'ACTIVE', 'ARCHIVED'] as const;
+
+function toNumber(value: string) {
+  const parsed = Number(value);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+export function ProductForm({
+  categories,
+  initialValues,
+  onSubmit,
+  onDelete,
+  isSubmitting,
+  isDeleting,
+  submitLabel,
+}: ProductFormProps) {
+  const [values, setValues] = useState<ProductFormValues>({
+    sku: initialValues?.sku ?? '',
+    slug: initialValues?.slug ?? '',
+    name: initialValues?.name ?? '',
+    description: initialValues?.description ?? '',
+    price: initialValues?.price ?? 0,
+    originalPrice: initialValues?.originalPrice ?? undefined,
+    imageUrl: initialValues?.imageUrl ?? '',
+    spicyLevel: initialValues?.spicyLevel ?? undefined,
+    isBestSeller: initialValues?.isBestSeller ?? false,
+    isNew: initialValues?.isNew ?? false,
+    status: (initialValues?.status as ProductFormValues['status']) ?? 'ACTIVE',
+    stock: initialValues?.stock ?? 0,
+    categoryId: initialValues?.categoryId ?? categories[0]?.id ?? '',
+  });
+
+  const categoryOptions = useMemo(
+    () => categories.map((category) => ({ value: category.id, label: category.name })),
+    [categories],
+  );
+
+  const handleChange = (field: keyof ProductFormValues, value: string | boolean) => {
+    setValues((current) => ({
+      ...current,
+      [field]: typeof value === 'string' && ['price', 'stock', 'originalPrice', 'spicyLevel'].includes(field)
+        ? toNumber(value)
+        : value,
+    }));
+  };
+
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    await onSubmit(values);
+  };
+
+  return (
+    <Card>
+      <CardTitle>{submitLabel}</CardTitle>
+      <form onSubmit={handleSubmit} className="mt-4 space-y-6">
+        <div className="grid gap-4 lg:grid-cols-2">
+          <label className="space-y-2 text-sm text-gray-700">
+            <span>SKU</span>
+            <input
+              value={values.sku}
+              onChange={(event) => handleChange('sku', event.target.value)}
+              className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none focus:border-[#465fff] focus:bg-white"
+              required
+            />
+          </label>
+          <label className="space-y-2 text-sm text-gray-700">
+            <span>Slug</span>
+            <input
+              value={values.slug}
+              onChange={(event) => handleChange('slug', event.target.value)}
+              className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none focus:border-[#465fff] focus:bg-white"
+              required
+            />
+          </label>
+          <label className="space-y-2 text-sm text-gray-700 col-span-full">
+            <span>Name</span>
+            <input
+              value={values.name}
+              onChange={(event) => handleChange('name', event.target.value)}
+              className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none focus:border-[#465fff] focus:bg-white"
+              required
+            />
+          </label>
+          <label className="space-y-2 text-sm text-gray-700 col-span-full">
+            <span>Description</span>
+            <textarea
+              value={values.description}
+              onChange={(event) => handleChange('description', event.target.value)}
+              rows={5}
+              className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none focus:border-[#465fff] focus:bg-white"
+              required
+            />
+          </label>
+          <label className="space-y-2 text-sm text-gray-700">
+            <span>Price</span>
+            <input
+              type="number"
+              min={0}
+              value={values.price}
+              onChange={(event) => handleChange('price', event.target.value)}
+              className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none focus:border-[#465fff] focus:bg-white"
+              required
+            />
+          </label>
+          <label className="space-y-2 text-sm text-gray-700">
+            <span>Original Price</span>
+            <input
+              type="number"
+              min={0}
+              value={values.originalPrice ?? ''}
+              onChange={(event) => handleChange('originalPrice', event.target.value)}
+              className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none focus:border-[#465fff] focus:bg-white"
+            />
+          </label>
+          <label className="space-y-2 text-sm text-gray-700">
+            <span>Stock</span>
+            <input
+              type="number"
+              min={0}
+              value={values.stock}
+              onChange={(event) => handleChange('stock', event.target.value)}
+              className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none focus:border-[#465fff] focus:bg-white"
+              required
+            />
+          </label>
+          <label className="space-y-2 text-sm text-gray-700">
+            <span>Spicy Level</span>
+            <input
+              type="number"
+              min={0}
+              value={values.spicyLevel ?? ''}
+              onChange={(event) => handleChange('spicyLevel', event.target.value)}
+              className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none focus:border-[#465fff] focus:bg-white"
+            />
+          </label>
+          <label className="space-y-2 text-sm text-gray-700">
+            <span>Category</span>
+            <select
+              value={values.categoryId}
+              onChange={(event) => handleChange('categoryId', event.target.value)}
+              className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none focus:border-[#465fff]"
+              required
+            >
+              {categoryOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="space-y-2 text-sm text-gray-700">
+            <span>Image URL</span>
+            <input
+              value={values.imageUrl}
+              onChange={(event) => handleChange('imageUrl', event.target.value)}
+              className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none focus:border-[#465fff] focus:bg-white"
+              required
+            />
+          </label>
+          <label className="space-y-2 text-sm text-gray-700">
+            <span>Status</span>
+            <select
+              value={values.status}
+              onChange={(event) => handleChange('status', event.target.value as ProductFormValues['status'])}
+              className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none focus:border-[#465fff]"
+            >
+              {statusOptions.map((status) => (
+                <option key={status} value={status}>
+                  {status}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="space-y-2 text-sm text-gray-700">
+            <span>Flags</span>
+            <div className="flex flex-wrap gap-4">
+              <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={values.isBestSeller}
+                  onChange={(event) => handleChange('isBestSeller', event.target.checked)}
+                  className="h-4 w-4 rounded border-gray-300 text-[#465fff] focus:ring-[#465fff]"
+                />
+                Best seller
+              </label>
+              <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={values.isNew}
+                  onChange={(event) => handleChange('isNew', event.target.checked)}
+                  className="h-4 w-4 rounded border-gray-300 text-[#465fff] focus:ring-[#465fff]"
+                />
+                New
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-3">
+          <Button type="submit" disabled={isSubmitting}>{submitLabel}</Button>
+          {onDelete ? (
+            <Button type="button" className="bg-white text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50" disabled={isDeleting} onClick={onDelete}>
+              Delete
+            </Button>
+          ) : null}
+        </div>
+      </form>
+    </Card>
+  );
+}

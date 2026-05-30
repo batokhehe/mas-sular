@@ -1,6 +1,16 @@
-import { Bell, Search, SlidersHorizontal } from 'lucide-react';
+'use client';
+
+import { Bell, LogOut, Search, SlidersHorizontal } from 'lucide-react';
+import { useAdminLogout, useAdminProfile } from '@/lib/auth';
 
 export function Topbar() {
+  const profileQuery = useAdminProfile();
+  const logoutMutation = useAdminLogout();
+
+  const handleLogout = () => {
+    logoutMutation.mutate();
+  };
+
   return (
     <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-gray-200 bg-white px-4 md:px-8">
       <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -23,15 +33,26 @@ export function Topbar() {
           <Bell className="h-4 w-4" />
           <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-red-500" />
         </button>
+
         <div className="flex items-center gap-3 rounded-full border border-gray-200 py-1 pl-1 pr-3">
           <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#465fff] text-xs font-semibold text-white">
-            BN
+            {profileQuery.data?.name?.slice(0, 2).toUpperCase() || 'AD'}
           </div>
           <div className="hidden text-sm md:block">
-            <p className="font-medium text-gray-800">Admin Baso</p>
-            <p className="text-xs text-gray-500">Operations</p>
+            <p className="font-medium text-gray-800">{profileQuery.data?.name || 'Admin'}</p>
+            <p className="text-xs text-gray-500">{profileQuery.data?.email || 'admin@mas-sular.com'}</p>
           </div>
         </div>
+
+        <button
+          type="button"
+          onClick={handleLogout}
+          className="flex h-10 items-center gap-2 rounded-full border border-gray-200 bg-white px-3 text-sm text-gray-600 transition hover:bg-gray-50"
+          disabled={logoutMutation.isPending}
+        >
+          <LogOut className="h-4 w-4" />
+          Logout
+        </button>
       </div>
     </header>
   );

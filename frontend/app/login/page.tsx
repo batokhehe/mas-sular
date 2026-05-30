@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
@@ -17,26 +17,102 @@ export default function LoginPage() {
 
   const handleGoogleLogin = async () => {
     setIsLoading(true)
-    
-    // Simulate OAuth login
-    await new Promise((resolve) => setTimeout(resolve, 1500))
-    
-    login({
-      id: '1',
-      name: 'John Doe',
-      email: 'john.doe@gmail.com',
-      avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=john',
-    })
-    
-    setIsLoading(false)
-    
-    // Redirect based on onboarding status
-    if (!isOnboarded || addresses.length === 0) {
-      router.push('/onboarding')
-    } else {
-      router.push('/')
+
+    const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID
+
+    // If a Google client id isn't configured, fall back to the simulated flow
+    if (!clientId || typeof window === 'undefined' || !(window as any).google) {
+      // Simulate OAuth login
+      await new Promise((resolve) => setTimeout(resolve, 1500))
+      login({
+        id: '1',
+        name: 'John Doe',
+        email: 'john.doe@gmail.com',
+        avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=john',
+      })
+      setIsLoading(false)
+      if (!isOnboarded || addresses.length === 0) router.push('/onboarding')
+      else router.push('/')
+      return
+    }
+
+    try {
+      // Trigger Google ID token prompt (One Tap / popup)
+      ;(window as any).google.accounts.id.prompt()
+      // The callback installed during initialize will handle the response
+    } catch (err) {
+      console.error('Google login error', err)
+      setIsLoading(false)
     }
   }
+
+  // Initialize Google ID token flow and handle credential response
+  useEffect(() => {
+    const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID
+    if (!clientId) return
+
+    const handleCredentialResponse = async (response: any) => {
+      try {
+        const idToken = response?.credential
+        if (!idToken) throw new Error('No ID token from Google')
+
+        // Send ID token to backend for verification and token minting
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE ?? '/api'}/v1/auth/google`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ idToken }),
+        })
+        if (!res.ok) throw new Error('Auth endpoint returned error')
+        const tokens = await res.json()
+
+        // Store tokens locally (consider secure cookie/httpOnly in production)
+        try { localStorage.setItem('accessToken', tokens.accessToken) } catch {}
+        try { localStorage.setItem('refreshToken', tokens.refreshToken) } catch {}
+
+        // Fetch user profile from backend using the new access token
+        const me = await fetch(`${process.env.NEXT_PUBLIC_API_BASE ?? '/api'}/v1/users/me`, {
+          headers: { Authorization: `Bearer ${tokens.accessToken}` },
+        })
+        if (!me.ok) throw new Error('Failed to fetch user profile')
+        const user = await me.json()
+
+        // Map user to local store and redirect
+        login({ id: user.id, name: user.name, email: user.email, avatar: user.avatarUrl })
+        setIsLoading(false)
+        if (!user.isOnboarded || (user.addresses || []).length === 0) router.push('/onboarding')
+        else router.push('/')
+      } catch (e) {
+        console.error('Google credential handling failed', e)
+        setIsLoading(false)
+      }
+    }
+
+    // Load GIS script if not present
+    if (!(window as any).google) {
+      const s = document.createElement('script')
+      s.src = 'https://accounts.google.com/gsi/client'
+      s.async = true
+      s.defer = true
+      document.head.appendChild(s)
+      s.onload = () => {
+        (window as any).google.accounts.id.initialize({
+          client_id: clientId,
+          callback: handleCredentialResponse,
+          ux_mode: 'popup',
+        })
+      }
+    } else {
+      (window as any).google.accounts.id.initialize({
+        client_id: clientId,
+        callback: handleCredentialResponse,
+        ux_mode: 'popup',
+      })
+    }
+
+    return () => {
+      // no-op cleanup
+    }
+  }, [login, router])
 
   return (
     <div className="min-h-screen flex">

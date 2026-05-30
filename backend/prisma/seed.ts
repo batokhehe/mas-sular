@@ -1,4 +1,5 @@
-import { PrismaClient, ProductStatus, RoleName } from '@prisma/client';
+import * as bcrypt from 'bcryptjs';
+import { PrismaClient, ProductStatus } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
@@ -19,8 +20,20 @@ const products = [
 ] as const;
 
 async function main(): Promise<void> {
-  for (const role of Object.values(RoleName)) {
-    await prisma.role.upsert({ where: { name: role }, update: {}, create: { name: role } });
+  const roles = [
+    'SUPER_ADMIN',
+    'ADMIN',
+    'MANAGER',
+    'STAFF',
+    'CUSTOMER',
+  ];
+
+  for (const role of roles) {
+    await prisma.role.upsert({
+      where: { name: role },
+      update: {},
+      create: { name: role },
+    });
   }
 
   for (const [index, category] of categories.entries()) {
@@ -83,6 +96,22 @@ async function main(): Promise<void> {
       title: 'Diskon 20% Pembelian Pertama',
       description: 'Khusus pengguna baru.',
       discountPct: 20,
+      isActive: true,
+    },
+  });
+
+  const adminPasswordHash = await bcrypt.hash('admin', 12);
+  await prisma.admin.upsert({
+    where: { email: 'admin@test.com' },
+    update: {
+      name: 'Super Admin',
+      passwordHash: adminPasswordHash,
+      isActive: true,
+    },
+    create: {
+      email: 'admin@test.com',
+      passwordHash: adminPasswordHash,
+      name: 'Super Admin',
       isActive: true,
     },
   });

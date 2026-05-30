@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { useForm } from 'react-hook-form'
@@ -32,6 +33,12 @@ export default function OnboardingPage() {
   const addAddress = useAddressStore((state) => state.addAddress)
   const completeOnboarding = useAuthStore((state) => state.completeOnboarding)
   const { isAuthenticated, user } = useAuthStore()
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      router.push('/login')
+    }
+  }, [isAuthenticated, router])
 
   const {
     register,
@@ -94,9 +101,8 @@ export default function OnboardingPage() {
     router.push('/')
   }
 
-  // Redirect if not authenticated
+  // Prevent server-side router actions by redirecting on the client
   if (!isAuthenticated) {
-    router.push('/login')
     return null
   }
 

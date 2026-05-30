@@ -9,6 +9,8 @@ import { CacheInfrastructureModule } from './infrastructure/cache/cache.module';
 import { EventsModule } from './infrastructure/events/events.module';
 import { QueueModule } from './infrastructure/queue/queue.module';
 import { AuditModule } from './modules/audit/audit.module';
+import { AdminAuthModule } from './modules/admin-auth/admin-auth.module';
+import { AdminModule } from './modules/admin/admin.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CartModule } from './modules/cart/cart.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
@@ -34,6 +36,8 @@ import { HealthController } from './health.controller';
     QueueModule,
     EventsModule,
     AuthModule,
+    AdminAuthModule,
+    AdminModule,
     UsersModule,
     CatalogModule,
     CartModule,
