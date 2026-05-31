@@ -33,8 +33,9 @@ export class AdminService {
   async getDashboard() {
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
+    const now = new Date();
 
-    const [ordersToday, revenueToday, pendingPayments, activeProducts, lowStockProducts, totalOrders, totalUsers, pendingOrders, verifiedOrders, ordersByStatus] = await Promise.all([
+    const [ordersToday, revenueToday, pendingPayments, activeProducts, lowStockProducts, totalOrders, totalUsers, pendingOrders, verifiedOrders, ordersByStatus, allPromos, totalRedemptions, voucherUsageByVoucher] = await Promise.all([
       this.prisma.order.count({ where: { deletedAt: null, createdAt: { gte: startOfToday } } }),
       this.prisma.order.aggregate({
         where: { deletedAt: null, payment: { status: PaymentStatus.PAID } },
@@ -52,7 +53,35 @@ export class AdminService {
         where: { deletedAt: null },
         _count: { status: true },
       }),
+      this.prisma.promo.findMany({ where: { deletedAt: null } }),
+      this.prisma.voucherUsage.count(),
+      this.prisma.voucherUsage.groupBy({
+        by: ['voucherId'],
+        _count: { voucherId: true },
+        orderBy: { _count: { voucherId: 'desc' } },
+        take: 5,
+      }),
     ]);
+
+    const validVouchers = allPromos.filter((promo) => {
+      if (!promo.isActive) return false;
+      if (promo.startDate && promo.startDate > now) return false;
+      if (promo.endDate && promo.endDate < now) return false;
+      if (promo.maxUsageCount !== null && promo.currentUsageCount >= promo.maxUsageCount) return false;
+      return true;
+    });
+
+    const topUsedVouchers = await Promise.all(
+      voucherUsageByVoucher.map(async (group) => {
+        const promo = await this.prisma.promo.findUnique({ where: { id: group.voucherId } });
+        return {
+          voucherId: group.voucherId,
+          code: promo?.code ?? 'unknown',
+          title: promo?.title ?? 'Unknown voucher',
+          redemptions: group._count.voucherId,
+        };
+      }),
+    );
 
     return {
       ordersToday,
@@ -64,6 +93,11 @@ export class AdminService {
       pendingPayments,
       activeProducts,
       lowStockProducts,
+      activeVouchers: validVouchers.length,
+      expiredVouchers: allPromos.length - validVouchers.length,
+      totalVouchers: allPromos.length,
+      totalRedemptions,
+      topUsedVouchers,
       ordersByStatus: Object.fromEntries(ordersByStatus.map((item) => [item.status, item._count.status])),
     };
   }

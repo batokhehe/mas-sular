@@ -78,8 +78,10 @@ export default function PromosPage() {
                 <tr className="border-b border-gray-100 text-xs uppercase text-gray-400">
                   <th className="py-3 font-medium">Code</th>
                   <th className="py-3 font-medium">Title</th>
-                  <th className="py-3 font-medium">Discount</th>
-                  <th className="py-3 font-medium">Min. Subtotal</th>
+                  <th className="py-3 font-medium">Type</th>
+                  <th className="py-3 font-medium">Value</th>
+                  <th className="py-3 font-medium">Min. Order</th>
+                  <th className="py-3 font-medium">Usage</th>
                   <th className="py-3 font-medium">Status</th>
                   <th className="py-3 font-medium">Actions</th>
                 </tr>
@@ -89,10 +91,16 @@ export default function PromosPage() {
                   <tr key={promo.id} className="border-b border-gray-50 last:border-0">
                     <td className="py-4 font-medium text-gray-800">{promo.code}</td>
                     <td className="py-4 text-gray-600">{promo.title}</td>
+                    <td className="py-4 text-gray-500">{promo.voucherType.replaceAll('_', ' ')}</td>
                     <td className="py-4 text-gray-500">
-                      {promo.discountPct > 0 ? `${promo.discountPct}%` : `Rp ${promo.discountAmount}`}
+                      {promo.voucherType === 'PERCENTAGE_DISCOUNT' && promo.discountPercentage !== undefined
+                        ? `${promo.discountPercentage}%${promo.maxDiscountAmount ? `, max Rp ${promo.maxDiscountAmount.toLocaleString('id-ID')}` : ''}`
+                        : promo.voucherType === 'FIXED_DISCOUNT'
+                        ? `Rp ${promo.discountAmount?.toLocaleString('id-ID') ?? 0}`
+                        : `Free Shipping${promo.freeShippingMaxAmount ? `, max Rp ${promo.freeShippingMaxAmount.toLocaleString('id-ID')}` : ''}`}
                     </td>
-                    <td className="py-4 text-gray-500">{promo.minSubtotal}</td>
+                    <td className="py-4 text-gray-500">Rp {promo.minimumOrderAmount.toLocaleString('id-ID')}</td>
+                    <td className="py-4 text-gray-500">{promo.currentUsageCount}{promo.maxUsageCount ? ` / ${promo.maxUsageCount}` : ' / ∞'}</td>
                     <td className="py-4">
                       <Badge tone={promo.isActive ? 'success' : 'neutral'}>{promo.isActive ? 'Active' : 'Inactive'}</Badge>
                     </td>

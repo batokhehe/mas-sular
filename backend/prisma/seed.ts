@@ -95,13 +95,16 @@ async function main(): Promise<void> {
       code: 'NEWUSER20',
       title: 'Diskon 20% Pembelian Pertama',
       description: 'Khusus pengguna baru.',
-      discountPct: 20,
+      voucherType: 'PERCENTAGE_DISCOUNT',
+      discountPercentage: 20,
+      minimumOrderAmount: 0,
+      isNewUserOnly: true,
       isActive: true,
     },
   });
 
   const adminPasswordHash = await bcrypt.hash('admin', 12);
-  await prisma.admin.upsert({
+  const adminUser = await prisma.admin.upsert({
     where: { email: 'admin@test.com' },
     update: {
       name: 'Super Admin',
@@ -115,6 +118,88 @@ async function main(): Promise<void> {
       isActive: true,
     },
   });
+
+  const permissionsList = [
+    { subject: 'dashboard', action: 'view' },
+    { subject: 'products', action: 'view' },
+    { subject: 'products', action: 'create' },
+    { subject: 'products', action: 'update' },
+    { subject: 'products', action: 'delete' },
+    { subject: 'categories', action: 'view' },
+    { subject: 'categories', action: 'create' },
+    { subject: 'categories', action: 'update' },
+    { subject: 'categories', action: 'delete' },
+    { subject: 'orders', action: 'view' },
+    { subject: 'orders', action: 'update' },
+    { subject: 'customers', action: 'view' },
+    { subject: 'admins', action: 'view' },
+    { subject: 'admins', action: 'create' },
+    { subject: 'admins', action: 'update' },
+    { subject: 'admins', action: 'delete' },
+    { subject: 'roles', action: 'view' },
+    { subject: 'roles', action: 'create' },
+    { subject: 'roles', action: 'update' },
+    { subject: 'roles', action: 'delete' },
+    { subject: 'settings', action: 'view' },
+    { subject: 'settings', action: 'update' },
+  ];
+
+  const dbPermissions = [];
+  for (const perm of permissionsList) {
+    const dbPerm = await prisma.permission.upsert({
+      where: {
+        action_subject: {
+          action: perm.action,
+          subject: perm.subject,
+        },
+      },
+      update: {},
+      create: {
+        action: perm.action,
+        subject: perm.subject,
+        description: `Permission for ${perm.subject} ${perm.action}`,
+      },
+    });
+    dbPermissions.push(dbPerm);
+  }
+
+  const superAdminRole = await prisma.role.findUnique({
+    where: { name: 'SUPER_ADMIN' },
+  });
+
+  if (superAdminRole) {
+    // Link permissions to SUPER_ADMIN role
+    for (const perm of dbPermissions) {
+      await prisma.rolePermission.upsert({
+        where: {
+          roleId_permissionId: {
+            roleId: superAdminRole.id,
+            permissionId: perm.id,
+          },
+        },
+        update: {},
+        create: {
+          roleId: superAdminRole.id,
+          permissionId: perm.id,
+        },
+      });
+    }
+
+    // Link admin user to SUPER_ADMIN role
+    await prisma.adminRole.upsert({
+      where: {
+        adminId_roleId: {
+          adminId: adminUser.id,
+          roleId: superAdminRole.id,
+        },
+      },
+      update: {},
+      create: {
+        adminId: adminUser.id,
+        roleId: superAdminRole.id,
+      },
+    });
+  }
 }
 
 main().finally(async () => prisma.$disconnect());

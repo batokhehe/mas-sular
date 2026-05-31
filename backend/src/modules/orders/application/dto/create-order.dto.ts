@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import { IsArray, IsEnum, IsInt, IsOptional, IsString, Max, Min, ValidateNested } from 'class-validator';
+import { VoucherType } from '@prisma/client';
 
 export enum CheckoutPaymentMethod {
   QRIS = 'QRIS',
@@ -49,4 +50,16 @@ export class CreateOrderDto {
   @ValidateNested({ each: true })
   @Type(() => CheckoutItemDto)
   items!: CheckoutItemDto[];
+}
+
+export class ValidateVoucherDto {
+  @IsString()
+  userId!: string;
+
+  @IsString()
+  code!: string;
+
+  @IsInt()
+  @Min(0)
+  subtotal!: number;
 }

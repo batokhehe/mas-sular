@@ -10,11 +10,16 @@ export type PromoFormValues = {
   title: string;
   description: string;
   imageUrl?: string;
-  discountPct?: number;
+  voucherType: 'FREE_SHIPPING' | 'PERCENTAGE_DISCOUNT' | 'FIXED_DISCOUNT';
+  discountPercentage?: number;
   discountAmount?: number;
-  minSubtotal?: number;
-  startsAt?: string;
-  endsAt?: string;
+  maxDiscountAmount?: number;
+  freeShippingMaxAmount?: number;
+  minimumOrderAmount?: number;
+  maxUsageCount?: number;
+  isNewUserOnly: boolean;
+  startDate?: string;
+  endDate?: string;
   isActive: boolean;
 };
 
@@ -40,26 +45,44 @@ export function PromoForm({
     title: initialValues?.title ?? '',
     description: initialValues?.description ?? '',
     imageUrl: initialValues?.imageUrl ?? '',
-    discountPct: initialValues?.discountPct ?? undefined,
+    voucherType: initialValues?.voucherType ?? 'PERCENTAGE_DISCOUNT',
+    discountPercentage: initialValues?.discountPercentage ?? undefined,
     discountAmount: initialValues?.discountAmount ?? undefined,
-    minSubtotal: initialValues?.minSubtotal ?? undefined,
-    startsAt: initialValues?.startsAt ?? '',
-    endsAt: initialValues?.endsAt ?? '',
+    maxDiscountAmount: initialValues?.maxDiscountAmount ?? undefined,
+    freeShippingMaxAmount: initialValues?.freeShippingMaxAmount ?? undefined,
+    minimumOrderAmount: initialValues?.minimumOrderAmount ?? undefined,
+    maxUsageCount: initialValues?.maxUsageCount ?? undefined,
+    isNewUserOnly: initialValues?.isNewUserOnly ?? false,
+    startDate: initialValues?.startDate ?? '',
+    endDate: initialValues?.endDate ?? '',
     isActive: initialValues?.isActive ?? true,
   });
+
+  const handleNumericChange = (field: keyof PromoFormValues, value: string) => {
+    setValues((current) => ({
+      ...current,
+      [field]: value === '' ? undefined : Number(value),
+    }));
+  };
 
   const handleChange = (field: keyof PromoFormValues, value: string | boolean) => {
     setValues((current) => ({
       ...current,
-      [field]: typeof value === 'string' && ['discountPct', 'discountAmount', 'minSubtotal'].includes(field)
-        ? (value === '' ? undefined : Number(value))
-        : value,
+      [field]: value,
     }));
   };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    await onSubmit(values);
+
+    const sanitizedValues: PromoFormValues = {
+      ...values,
+      imageUrl: values.imageUrl?.trim() || undefined,
+      startDate: values.startDate?.trim() || undefined,
+      endDate: values.endDate?.trim() || undefined,
+    };
+
+    await onSubmit(sanitizedValues);
   };
 
   return (
@@ -104,41 +127,101 @@ export function PromoForm({
             />
           </label>
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Discount pct</span>
+            <span>Voucher type</span>
+            <select
+              value={values.voucherType}
+              onChange={(event) => handleChange('voucherType', event.target.value)}
+              className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none focus:border-[#465fff] focus:bg-white"
+            >
+              <option value="PERCENTAGE_DISCOUNT">Percentage discount</option>
+              <option value="FIXED_DISCOUNT">Fixed discount</option>
+              <option value="FREE_SHIPPING">Free shipping</option>
+            </select>
+          </label>
+
+          {values.voucherType === 'PERCENTAGE_DISCOUNT' ? (
+            <>
+              <label className="space-y-2 text-sm text-gray-700">
+                <span>Discount percentage</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={values.discountPercentage ?? ''}
+                  onChange={(event) => handleNumericChange('discountPercentage', event.target.value)}
+                  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none focus:border-[#465fff] focus:bg-white"
+                />
+              </label>
+              <label className="space-y-2 text-sm text-gray-700">
+                <span>Max discount amount</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={values.maxDiscountAmount ?? ''}
+                  onChange={(event) => handleNumericChange('maxDiscountAmount', event.target.value)}
+                  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none focus:border-[#465fff] focus:bg-white"
+                />
+              </label>
+            </>
+          ) : values.voucherType === 'FIXED_DISCOUNT' ? (
+            <label className="space-y-2 text-sm text-gray-700">
+              <span>Discount amount</span>
+              <input
+                type="number"
+                min={0}
+                value={values.discountAmount ?? ''}
+                onChange={(event) => handleNumericChange('discountAmount', event.target.value)}
+                className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none focus:border-[#465fff] focus:bg-white"
+              />
+            </label>
+          ) : (
+            <label className="space-y-2 text-sm text-gray-700">
+              <span>Free shipping max amount</span>
+              <input
+                type="number"
+                min={0}
+                value={values.freeShippingMaxAmount ?? ''}
+                onChange={(event) => handleNumericChange('freeShippingMaxAmount', event.target.value)}
+                className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none focus:border-[#465fff] focus:bg-white"
+              />
+            </label>
+          )}
+
+          <label className="space-y-2 text-sm text-gray-700">
+            <span>Minimum order amount</span>
             <input
               type="number"
               min={0}
-              value={values.discountPct ?? ''}
-              onChange={(event) => handleChange('discountPct', event.target.value)}
+              value={values.minimumOrderAmount ?? ''}
+              onChange={(event) => handleNumericChange('minimumOrderAmount', event.target.value)}
               className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none focus:border-[#465fff] focus:bg-white"
             />
           </label>
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Discount amount</span>
+            <span>Max usage count</span>
             <input
               type="number"
               min={0}
-              value={values.discountAmount ?? ''}
-              onChange={(event) => handleChange('discountAmount', event.target.value)}
+              value={values.maxUsageCount ?? ''}
+              onChange={(event) => handleNumericChange('maxUsageCount', event.target.value)}
               className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none focus:border-[#465fff] focus:bg-white"
             />
           </label>
-          <label className="space-y-2 text-sm text-gray-700">
-            <span>Minimum subtotal</span>
+          <label className="inline-flex items-center gap-2 text-sm text-gray-700">
             <input
-              type="number"
-              min={0}
-              value={values.minSubtotal ?? ''}
-              onChange={(event) => handleChange('minSubtotal', event.target.value)}
-              className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none focus:border-[#465fff] focus:bg-white"
+              type="checkbox"
+              checked={values.isNewUserOnly}
+              onChange={(event) => handleChange('isNewUserOnly', event.target.checked)}
+              className="h-4 w-4 rounded border-gray-300 text-[#465fff] focus:ring-[#465fff]"
             />
+            <span>New users only</span>
           </label>
           <label className="space-y-2 text-sm text-gray-700">
             <span>Starts at</span>
             <input
               type="datetime-local"
-              value={values.startsAt ?? ''}
-              onChange={(event) => handleChange('startsAt', event.target.value)}
+              value={values.startDate ?? ''}
+              onChange={(event) => handleChange('startDate', event.target.value)}
               className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none focus:border-[#465fff] focus:bg-white"
             />
           </label>
@@ -146,8 +229,8 @@ export function PromoForm({
             <span>Ends at</span>
             <input
               type="datetime-local"
-              value={values.endsAt ?? ''}
-              onChange={(event) => handleChange('endsAt', event.target.value)}
+              value={values.endDate ?? ''}
+              onChange={(event) => handleChange('endDate', event.target.value)}
               className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none focus:border-[#465fff] focus:bg-white"
             />
           </label>

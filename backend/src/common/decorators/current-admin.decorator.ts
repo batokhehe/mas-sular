@@ -5,6 +5,8 @@ export interface AdminUser {
   email: string;
   name: string;
   isActive: boolean;
+  role?: string | null;
+  permissions: string[];
 }
 
 export const CurrentAdmin = createParamDecorator(

@@ -1,4 +1,5 @@
-import { IsBoolean, IsDateString, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { IsBoolean, IsDateString, IsEnum, IsInt, IsOptional, IsString, Max, Min, ValidateIf } from 'class-validator';
+import { VoucherType } from '@prisma/client';
 
 export class UpdatePromoDto {
   @IsOptional()
@@ -18,27 +19,54 @@ export class UpdatePromoDto {
   imageUrl?: string;
 
   @IsOptional()
-  @IsInt()
-  @Min(0)
-  discountPct?: number;
+  @IsEnum(VoucherType)
+  voucherType?: VoucherType;
 
+  @ValidateIf((dto) => dto.voucherType === VoucherType.PERCENTAGE_DISCOUNT)
   @IsOptional()
   @IsInt()
-  @Min(0)
+  @Min(1)
+  @Max(100)
+  discountPercentage?: number;
+
+  @ValidateIf((dto) => dto.voucherType === VoucherType.FIXED_DISCOUNT)
+  @IsOptional()
+  @IsInt()
+  @Min(1)
   discountAmount?: number;
 
   @IsOptional()
   @IsInt()
   @Min(0)
-  minSubtotal?: number;
+  maxDiscountAmount?: number;
+
+  @ValidateIf((dto) => dto.voucherType === VoucherType.FREE_SHIPPING)
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  freeShippingMaxAmount?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  minimumOrderAmount?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  maxUsageCount?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  isNewUserOnly?: boolean;
 
   @IsOptional()
   @IsDateString()
-  startsAt?: string;
+  startDate?: string;
 
   @IsOptional()
   @IsDateString()
-  endsAt?: string;
+  endDate?: string;
 
   @IsOptional()
   @IsBoolean()

@@ -46,6 +46,12 @@ enum ShipmentStatus {
   FAILED
 }
 
+enum VoucherType {
+  FREE_SHIPPING
+  PERCENTAGE_DISCOUNT
+  FIXED_DISCOUNT
+}
+
 model User {
   id                 String         @id @default(uuid())
   googleId           String?        @unique
@@ -61,6 +67,7 @@ model User {
   refreshTokens      RefreshToken[]
   favorites          Favorite[]
   auditLogs          AuditLog[]     @relation("AuditActor")
+  voucherUsages      VoucherUsage[]
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt
   deletedAt          DateTime?
@@ -70,13 +77,14 @@ model User {
 }
 
 model Admin {
-  id           String   @id @default(uuid())
-  email        String   @unique
+  id           String      @id @default(uuid())
+  email        String      @unique
   passwordHash String
   name         String
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  isActive     Boolean     @default(true)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  roles        AdminRole[]
 }
 
 model Role {
@@ -84,9 +92,19 @@ model Role {
   name        String         @unique
   description String?
   users       UserRole[]
+  admins      AdminRole[]
   permissions RolePermission[]
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
+}
+
+model AdminRole {
+  adminId String
+  roleId  String
+  admin   Admin  @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  role    Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([adminId, roleId])
 }
 
 model Permission {
@@ -215,20 +233,47 @@ model Favorite {
 }
 
 model Promo {
-  id             String    @id @default(uuid())
-  code           String    @unique
-  title          String
-  description    String
-  imageUrl       String?
-  discountPct    Int       @default(0)
-  discountAmount Int       @default(0)
-  minSubtotal    Int       @default(0)
-  startsAt       DateTime?
-  endsAt         DateTime?
-  isActive       Boolean   @default(true)
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  deletedAt      DateTime?
+  id                    String       @id @default(uuid())
+  code                  String       @unique
+  title                 String
+  description           String       @db.Text
+  imageUrl              String?
+  voucherType           VoucherType  @default(PERCENTAGE_DISCOUNT)
+  discountPercentage    Int?         @db.UnsignedInt
+  discountAmount        Int?         @db.UnsignedInt
+  maxDiscountAmount     Int?         @db.UnsignedInt
+  freeShippingMaxAmount Int?         @db.UnsignedInt
+  minimumOrderAmount    Int          @default(0)
+  maxUsageCount         Int?         @db.UnsignedInt
+  currentUsageCount     Int          @default(0)
+  isNewUserOnly         Boolean      @default(false)
+  isActive              Boolean      @default(true)
+  startDate             DateTime?
+  endDate               DateTime?
+  usages                VoucherUsage[]
+  orders                Order[]
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+  deletedAt             DateTime?
+
+  @@index([code])
+  @@index([isActive])
+  @@index([deletedAt])
+}
+
+model VoucherUsage {
+  id        String   @id @default(uuid())
+  voucherId String
+  userId    String
+  orderId   String   @unique
+  voucher   Promo    @relation(fields: [voucherId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([voucherId, userId])
+  @@index([userId, voucherId])
+  @@index([createdAt])
 }
 
 model CartSession {
@@ -245,27 +290,32 @@ model CartSession {
 }
 
 model Order {
-  id                String         @id @default(uuid())
-  orderNumber       String         @unique
-  userId            String
-  addressId         String
-  status            OrderStatus    @default(PENDING)
-  subtotal          Int
-  discountTotal     Int            @default(0)
-  deliveryFee       Int
-  totalPrice        Int
-  paymentMethod     PaymentMethod
-  notes             String?
-  estimatedDelivery DateTime?
-  user              User           @relation(fields: [userId], references: [id])
-  address           Address        @relation(fields: [addressId], references: [id])
-  items             OrderItem[]
-  payment           Payment?
-  shipment          Shipment?
-  events            OrderEvent[]
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
-  deletedAt         DateTime?
+  id                   String         @id @default(uuid())
+  orderNumber          String         @unique
+  userId               String
+  addressId            String
+  voucherId            String?
+  voucherCode          String?
+  voucherType          VoucherType?
+  status               OrderStatus    @default(PENDING)
+  subtotal             Int
+  voucherDiscountAmount Int           @default(0)
+  deliveryFee          Int
+  totalPrice           Int
+  paymentMethod        PaymentMethod
+  notes                String?
+  estimatedDelivery    DateTime?
+  user                 User           @relation(fields: [userId], references: [id])
+  address              Address        @relation(fields: [addressId], references: [id])
+  voucher              Promo?         @relation(fields: [voucherId], references: [id])
+  items                OrderItem[]
+  payment              Payment?
+  shipment             Shipment?
+  events               OrderEvent[]
+  voucherUsage         VoucherUsage?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+  deletedAt            DateTime?
 
   @@index([userId, status])
   @@index([createdAt])

@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { CreateOrderDto } from '../application/dto/create-order.dto';
+import { CreateOrderDto, ValidateVoucherDto } from '../application/dto/create-order.dto';
 import { OrdersService } from '../orders.service';
 
 @ApiTags('orders')
@@ -11,6 +11,11 @@ export class OrdersController {
   @Post('checkout')
   checkout(@Body() dto: CreateOrderDto) {
     return this.orders.checkout(dto);
+  }
+
+  @Post('voucher/preview')
+  previewVoucher(@Body() dto: ValidateVoucherDto) {
+    return this.orders.previewVoucher(dto);
   }
 
   @Get('users/:userId')

@@ -56,6 +56,15 @@ export class PrismaCatalogRepository implements CatalogRepository {
   }
 
   listPromos() {
-    return this.prisma.promo.findMany({ where: { deletedAt: null, isActive: true }, orderBy: { createdAt: 'desc' } });
+    return this.prisma.promo.findMany({ where: { deletedAt: null, isActive: true }, orderBy: { createdAt: 'desc' } })
+      .then((promos) => {
+        const now = new Date();
+        return promos.filter((promo) => {
+          if (promo.startDate && promo.startDate > now) return false;
+          if (promo.endDate && promo.endDate < now) return false;
+          if (promo.maxUsageCount !== null && promo.currentUsageCount >= promo.maxUsageCount) return false;
+          return true;
+        });
+      });
   }
 }

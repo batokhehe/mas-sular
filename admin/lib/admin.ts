@@ -33,11 +33,17 @@ export type AdminPromo = {
   title: string;
   description: string;
   imageUrl?: string | null;
-  discountPct: number;
-  discountAmount: number;
-  minSubtotal: number;
-  startsAt: string | null;
-  endsAt: string | null;
+  voucherType: 'FREE_SHIPPING' | 'PERCENTAGE_DISCOUNT' | 'FIXED_DISCOUNT';
+  discountPercentage?: number | null;
+  discountAmount?: number | null;
+  maxDiscountAmount?: number | null;
+  freeShippingMaxAmount?: number | null;
+  minimumOrderAmount: number;
+  maxUsageCount?: number | null;
+  currentUsageCount: number;
+  isNewUserOnly: boolean;
+  startDate: string | null;
+  endDate: string | null;
   isActive: boolean;
 };
 
@@ -64,6 +70,11 @@ export type AdminDashboard = {
   pendingPayments: number;
   activeProducts: number;
   lowStockProducts: number;
+  totalVouchers: number;
+  activeVouchers: number;
+  expiredVouchers: number;
+  totalRedemptions: number;
+  topUsedVouchers: Array<{ voucherId: string; code: string; title: string; redemptions: number }>;
   ordersByStatus: Record<string, number>;
 };
 
