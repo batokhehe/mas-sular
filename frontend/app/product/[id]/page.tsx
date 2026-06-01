@@ -22,10 +22,12 @@ import { Textarea } from '@/components/ui/textarea'
 import { Navbar } from '@/components/navbar'
 import { BottomNav } from '@/components/bottom-nav'
 import { ProductCard } from '@/components/product-card'
-import { products, toppings, formatPrice, type Topping } from '@/lib/data'
+import { formatPrice } from '@/lib/data'
+import { useProduct, useProducts, useToppings } from '@/hooks/api'
 import { useCartStore, useFavoritesStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
+import type { Topping } from '@/lib/types'
 
 interface ProductPageProps {
   params: Promise<{ id: string }>
@@ -34,7 +36,14 @@ interface ProductPageProps {
 export default function ProductPage({ params }: ProductPageProps) {
   const { id } = use(params)
   const router = useRouter()
-  const product = products.find((p) => p.id === id)
+  
+  // Fetch product from API
+  const { data: product, isLoading, error } = useProduct(id)
+  const { data: toppings = [] } = useToppings()
+  
+  // Fetch related products (same category)
+  const { data: allProducts = [] } = useProducts()
+  
   const [quantity, setQuantity] = useState(1)
   const [selectedToppings, setSelectedToppings] = useState<Topping[]>([])
   const [spicyLevel, setSpicyLevel] = useState(0)
@@ -44,7 +53,7 @@ export default function ProductPage({ params }: ProductPageProps) {
   const { toggleFavorite, isFavorite } = useFavoritesStore()
   const favorite = product ? isFavorite(product.id) : false
 
-  if (!product) {
+  if (error) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
@@ -57,8 +66,28 @@ export default function ProductPage({ params }: ProductPageProps) {
     )
   }
 
-  const relatedProducts = products
-    .filter((p) => p.category === product.category && p.id !== product.id)
+  if (isLoading || !product) {
+    return (
+      <div className="min-h-screen pb-32 md:pb-0">
+        <div className="hidden md:block">
+          <Navbar />
+        </div>
+        <main className="container max-w-5xl py-4 md:py-8">
+          <div className="grid gap-8 lg:grid-cols-2">
+            <div className="aspect-square rounded-2xl bg-secondary/50 animate-pulse" />
+            <div className="space-y-4">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="h-4 bg-secondary/50 rounded animate-pulse" />
+              ))}
+            </div>
+          </div>
+        </main>
+      </div>
+    )
+  }
+
+  const relatedProducts = allProducts
+    .filter((p) => p.categoryId === product.categoryId && p.id !== product.id)
     .slice(0, 4)
 
   const toppingsTotal = selectedToppings.reduce((sum, t) => sum + t.price, 0)
@@ -73,8 +102,27 @@ export default function ProductPage({ params }: ProductPageProps) {
   }
 
   const handleAddToCart = () => {
+    // Convert API product to cart item format
+    const cartProduct = {
+      id: product.id,
+      slug: product.slug,
+      sku: product.sku,
+      name: product.name,
+      description: product.description,
+      price: product.price,
+      originalPrice: product.originalPrice,
+      image: product.imageUrl,
+      rating: product.rating,
+      reviewCount: product.reviewCount,
+      spicyLevel: product.spicyLevel,
+      isBestSeller: product.isBestSeller,
+      isNew: product.isNew,
+      stock: product.stock,
+      category: '', // backwards compat
+    }
+    
     addItem({
-      product,
+      product: cartProduct,
       quantity,
       toppings: selectedToppings,
       spicyLevel,
@@ -84,6 +132,7 @@ export default function ProductPage({ params }: ProductPageProps) {
   }
 
   const spicyLevels = [0, 1, 2, 3, 4, 5]
+  const isMercon = product.name.toLowerCase().includes('mercon') || product.spicyLevel && product.spicyLevel > 0
 
   return (
     <div className="min-h-screen pb-32 md:pb-0">
@@ -129,7 +178,7 @@ export default function ProductPage({ params }: ProductPageProps) {
               className="relative aspect-square rounded-2xl overflow-hidden bg-secondary/50"
             >
               <Image
-                src={product.image}
+                src={product.imageUrl || '/products/placeholder.jpg'}
                 alt={product.name}
                 fill
                 className="object-cover"
@@ -212,7 +261,7 @@ export default function ProductPage({ params }: ProductPageProps) {
             </div>
 
             {/* Spicy Level Selection */}
-            {product.category === 'baso-mercon' && (
+            {isMercon && (
               <div>
                 <h3 className="font-semibold mb-3">Level Kepedasan</h3>
                 <div className="flex flex-wrap gap-2">
@@ -243,34 +292,36 @@ export default function ProductPage({ params }: ProductPageProps) {
             )}
 
             {/* Toppings */}
-            <div>
-              <h3 className="font-semibold mb-3">Tambahan (Opsional)</h3>
-              <div className="grid grid-cols-2 gap-2">
-                {toppings.map((topping) => {
-                  const isSelected = selectedToppings.some((t) => t.id === topping.id)
-                  return (
-                    <button
-                      key={topping.id}
-                      onClick={() => handleToggleTopping(topping)}
-                      className={cn(
-                        'flex items-center justify-between p-3 rounded-xl border transition-colors text-left',
-                        isSelected
-                          ? 'border-primary bg-primary/5'
-                          : 'hover:border-primary/50'
-                      )}
-                    >
-                      <div className="flex items-center gap-3">
-                        <Checkbox checked={isSelected} />
-                        <span className="text-sm font-medium">{topping.name}</span>
-                      </div>
-                      <span className="text-sm text-muted-foreground">
-                        +{formatPrice(topping.price)}
-                      </span>
-                    </button>
-                  )
-                })}
+            {toppings.length > 0 && (
+              <div>
+                <h3 className="font-semibold mb-3">Tambahan (Opsional)</h3>
+                <div className="grid grid-cols-2 gap-2">
+                  {toppings.map((topping) => {
+                    const isSelected = selectedToppings.some((t) => t.id === topping.id)
+                    return (
+                      <button
+                        key={topping.id}
+                        onClick={() => handleToggleTopping(topping)}
+                        className={cn(
+                          'flex items-center justify-between p-3 rounded-xl border transition-colors text-left',
+                          isSelected
+                            ? 'border-primary bg-primary/5'
+                            : 'hover:border-primary/50'
+                        )}
+                      >
+                        <div className="flex items-center gap-3">
+                          <Checkbox checked={isSelected} />
+                          <span className="text-sm font-medium">{topping.name}</span>
+                        </div>
+                        <span className="text-sm text-muted-foreground">
+                          +{formatPrice(topping.price)}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Notes */}
             <div>

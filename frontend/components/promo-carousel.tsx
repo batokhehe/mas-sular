@@ -4,12 +4,14 @@ import { motion } from 'framer-motion'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { promos } from '@/lib/data'
+import { usePromos } from '@/hooks/api'
 
 export function PromoCarousel() {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [canScrollLeft, setCanScrollLeft] = useState(false)
   const [canScrollRight, setCanScrollRight] = useState(true)
+
+  const { data: promos = [] } = usePromos()
 
   const checkScroll = () => {
     if (scrollRef.current) {
@@ -25,6 +27,10 @@ export function PromoCarousel() {
       scrollRef.current.scrollBy({ left: scrollAmount, behavior: 'smooth' })
       setTimeout(checkScroll, 300)
     }
+  }
+
+  if (promos.length === 0) {
+    return null
   }
 
   return (
@@ -67,8 +73,16 @@ export function PromoCarousel() {
               transition={{ delay: index * 0.1 }}
               className="relative min-w-[280px] sm:min-w-[320px] lg:min-w-[380px] aspect-[16/9] rounded-2xl overflow-hidden shrink-0 snap-center"
             >
-              {/* Background gradient */}
-              <div className="absolute inset-0 bg-gradient-to-br from-primary via-primary/90 to-primary/80" />
+              {/* Background image or gradient */}
+              {promo.imageUrl ? (
+                <img
+                  src={promo.imageUrl}
+                  alt={promo.title}
+                  className="absolute inset-0 w-full h-full object-cover"
+                />
+              ) : (
+                <div className="absolute inset-0 bg-gradient-to-br from-primary via-primary/90 to-primary/80" />
+              )}
               
               {/* Pattern overlay */}
               <div 

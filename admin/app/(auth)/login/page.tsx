@@ -1,16 +1,27 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { loginAdmin } from '@/lib/auth';
+import { loginAdmin } from '@/lib/auth-actions';
+import { getAuthToken } from '@/lib/api';
 
 export default function LoginPage() {
+  console.log('[LOGIN PAGE] render');
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const hasToken = Boolean(getAuthToken());
+
+  useEffect(() => {
+    console.log('[LOGIN PAGE] mounted');
+  }, []);
+
+  useEffect(() => {
+    console.log('[LOGIN PAGE] auth state', { hasToken });
+  }, [hasToken]);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();

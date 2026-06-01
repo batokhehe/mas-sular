@@ -18,7 +18,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet'
-import { products, categories } from '@/lib/data'
+import { useProducts, useCategories } from '@/hooks/api'
 
 type SortOption = 'popular' | 'price-low' | 'price-high' | 'rating'
 
@@ -35,42 +35,20 @@ export default function MenuPage() {
   const [sortBy, setSortBy] = useState<SortOption>('popular')
   const [showFilters, setShowFilters] = useState(false)
 
+  // Fetch products from API
+  const { data: products = [], isLoading, error } = useProducts({
+    search: search || undefined,
+    category: selectedCategory || undefined,
+    sort: sortBy,
+  })
+
+  // Fetch categories from API
+  const { data: categories = [] } = useCategories()
+
+  // Client-side filtering/sorting (API already handles sorting and search)
   const filteredProducts = useMemo(() => {
-    let result = [...products]
-
-    // Filter by search
-    if (search) {
-      result = result.filter(
-        (p) =>
-          p.name.toLowerCase().includes(search.toLowerCase()) ||
-          p.description.toLowerCase().includes(search.toLowerCase())
-      )
-    }
-
-    // Filter by category
-    if (selectedCategory) {
-      result = result.filter((p) => p.category === selectedCategory)
-    }
-
-    // Sort
-    switch (sortBy) {
-      case 'price-low':
-        result.sort((a, b) => a.price - b.price)
-        break
-      case 'price-high':
-        result.sort((a, b) => b.price - a.price)
-        break
-      case 'rating':
-        result.sort((a, b) => b.rating - a.rating)
-        break
-      case 'popular':
-      default:
-        result.sort((a, b) => b.reviewCount - a.reviewCount)
-        break
-    }
-
-    return result
-  }, [search, selectedCategory, sortBy])
+    return products
+  }, [products])
 
   const activeFiltersCount = [selectedCategory, search].filter(Boolean).length
 
@@ -131,7 +109,10 @@ export default function MenuPage() {
                         variant={sortBy === option.value ? 'default' : 'outline'}
                         size="sm"
                         className="rounded-full"
-                        onClick={() => setSortBy(option.value)}
+                        onClick={() => {
+                          setSortBy(option.value)
+                          setShowFilters(false)
+                        }}
                       >
                         {option.label}
                       </Button>
@@ -149,94 +130,67 @@ export default function MenuPage() {
                         variant={selectedCategory === category.slug ? 'default' : 'outline'}
                         size="sm"
                         className="rounded-full"
-                        onClick={() =>
+                        onClick={() => {
                           setSelectedCategory(
                             selectedCategory === category.slug ? null : category.slug
                           )
-                        }
+                          setShowFilters(false)
+                        }}
                       >
-                        {category.icon} {category.name}
+                        {category.name}
                       </Button>
                     ))}
                   </div>
                 </div>
 
-                {/* Actions */}
-                <div className="flex gap-2 pt-4">
-                  <Button
-                    variant="outline"
-                    className="flex-1"
-                    onClick={() => {
-                      setSelectedCategory(null)
-                      setSearch('')
-                      setSortBy('popular')
-                    }}
-                  >
-                    Reset
-                  </Button>
-                  <Button className="flex-1" onClick={() => setShowFilters(false)}>
-                    Terapkan
-                  </Button>
-                </div>
+                {/* Clear All */}
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => {
+                    setSearch('')
+                    setSelectedCategory(null)
+                    setSortBy('popular')
+                    setShowFilters(false)
+                  }}
+                >
+                  Hapus Semua Filter
+                </Button>
               </div>
             </SheetContent>
           </Sheet>
         </div>
 
-        {/* Quick Category Filter - Mobile */}
-        <CategorySection
-          selectedCategory={selectedCategory || undefined}
-          onSelectCategory={setSelectedCategory}
-        />
-
-        {/* Active Filters */}
-        {(selectedCategory || search) && (
-          <div className="flex flex-wrap gap-2 mb-4">
-            {selectedCategory && (
-              <Badge variant="secondary" className="gap-1">
-                {categories.find((c) => c.slug === selectedCategory)?.name}
-                <button onClick={() => setSelectedCategory(null)}>
-                  <X className="h-3 w-3" />
-                </button>
-              </Badge>
-            )}
-            {search && (
-              <Badge variant="secondary" className="gap-1">
-                &quot;{search}&quot;
-                <button onClick={() => setSearch('')}>
-                  <X className="h-3 w-3" />
-                </button>
-              </Badge>
-            )}
+        {/* Error State */}
+        {error && (
+          <div className="mb-4 p-4 bg-destructive/10 text-destructive rounded-lg text-sm">
+            Gagal memuat produk. Silakan coba lagi.
           </div>
         )}
 
-        {/* Results count */}
-        <p className="text-sm text-muted-foreground mb-4">
-          {filteredProducts.length} produk ditemukan
-        </p>
+        {/* Loading State */}
+        {isLoading && (
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 md:gap-4">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <div key={i} className="rounded-2xl bg-secondary/50 aspect-square animate-pulse" />
+            ))}
+          </div>
+        )}
 
         {/* Products Grid */}
-        {filteredProducts.length > 0 ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
+        {!isLoading && filteredProducts.length > 0 && (
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 md:gap-4">
             {filteredProducts.map((product, index) => (
               <ProductCard key={product.id} product={product} index={index} />
             ))}
           </div>
-        ) : (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="text-center py-12"
-          >
-            <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-secondary flex items-center justify-center">
-              <Search className="h-8 w-8 text-muted-foreground" />
-            </div>
-            <h3 className="font-semibold mb-1">Tidak ada hasil</h3>
-            <p className="text-sm text-muted-foreground">
-              Coba kata kunci lain atau hapus filter
-            </p>
-          </motion.div>
+        )}
+
+        {/* Empty State */}
+        {!isLoading && filteredProducts.length === 0 && (
+          <div className="text-center py-12">
+            <p className="text-muted-foreground">Tidak ada produk yang sesuai dengan filter Anda</p>
+          </div>
         )}
       </main>
       <FloatingCart />

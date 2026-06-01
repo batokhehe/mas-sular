@@ -5,27 +5,65 @@ import Link from 'next/link'
 import { ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ProductCard } from './product-card'
-import { products, type Product } from '@/lib/data'
+import { type Product } from '@/lib/types'
 
 interface ProductGridProps {
   title?: string
-  products?: Product[]
+  products: Product[]
   showViewAll?: boolean
   viewAllHref?: string
   columns?: 2 | 3 | 4
+  isLoading?: boolean
 }
 
 export function ProductGrid({
   title,
-  products: productList = products,
+  products: productList,
   showViewAll = false,
   viewAllHref = '/menu',
   columns = 2,
+  isLoading = false,
 }: ProductGridProps) {
   const gridCols = {
     2: 'grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4',
     3: 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4',
     4: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5',
+  }
+
+  if (isLoading) {
+    return (
+      <section className="py-6">
+        <div className="container">
+          {title && (
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg sm:text-xl font-bold">{title}</h2>
+            </div>
+          )}
+          <div className={`grid ${gridCols[columns]} gap-3 sm:gap-4`}>
+            {Array.from({ length: 8 }).map((_, i) => (
+              <div key={i} className="rounded-2xl bg-secondary/50 aspect-square animate-pulse" />
+            ))}
+          </div>
+        </div>
+      </section>
+    )
+  }
+
+  if (!productList || productList.length === 0) {
+    return (
+      <section className="py-6">
+        <div className="container">
+          {title && (
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg sm:text-xl font-bold">{title}</h2>
+            </div>
+          )}
+          <div className="text-center py-12">
+            <p className="text-muted-foreground">Tidak ada produk</p>
+          </div>
+        </div>
+      </section>
+    )
   }
 
   return (

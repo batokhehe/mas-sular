@@ -2,7 +2,7 @@
 
 import { motion } from 'framer-motion'
 import Link from 'next/link'
-import { categories } from '@/lib/data'
+import { useCategories } from '@/hooks/api'
 import { cn } from '@/lib/utils'
 
 interface CategorySectionProps {
@@ -11,6 +11,8 @@ interface CategorySectionProps {
 }
 
 export function CategorySection({ selectedCategory, onSelectCategory }: CategorySectionProps) {
+  const { data: categories = [] } = useCategories()
+
   const handleClick = (slug: string) => {
     if (onSelectCategory) {
       onSelectCategory(selectedCategory === slug ? null : slug)
@@ -40,7 +42,7 @@ export function CategorySection({ selectedCategory, onSelectCategory }: Category
                       : 'bg-card border hover:border-primary/50 hover:shadow-md'
                   )}
                 >
-                  <span className="text-2xl">{category.icon}</span>
+                  <span className="text-2xl">{category.icon || '📦'}</span>
                   <span className="text-xs font-medium whitespace-nowrap">{category.name}</span>
                 </motion.button>
               )
@@ -55,7 +57,7 @@ export function CategorySection({ selectedCategory, onSelectCategory }: Category
                   whileHover={{ y: -2 }}
                   className="flex flex-col items-center gap-2 min-w-[80px] p-3 rounded-2xl bg-card border hover:border-primary/50 hover:shadow-md transition-all shrink-0"
                 >
-                  <span className="text-2xl">{category.icon}</span>
+                  <span className="text-2xl">{category.icon || '📦'}</span>
                   <span className="text-xs font-medium whitespace-nowrap">{category.name}</span>
                 </motion.div>
               </Link>

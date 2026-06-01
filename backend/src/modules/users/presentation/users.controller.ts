@@ -16,17 +16,44 @@ export class UsersController {
   me(@CurrentUser() user: AuthUser) {
     return this.prisma.user.findUnique({
       where: { id: user.sub },
-      include: { roles: { include: { role: true } }, addresses: true },
+      include: {
+        roles: { include: { role: true } },
+        addresses: { where: { deletedAt: null }, orderBy: { isDefault: 'desc' } },
+      },
+    });
+  }
+
+  @Get('me/addresses')
+  getAddresses(@CurrentUser() user: AuthUser) {
+    return this.prisma.address.findMany({
+      where: { userId: user.sub, deletedAt: null },
+      orderBy: { isDefault: 'desc' },
     });
   }
 
   @Post('me/addresses')
-  createAddress(@CurrentUser() user: AuthUser, @Body() dto: CreateAddressDto) {
-    return this.prisma.address.create({
-      data: {
-        ...dto,
-        userId: user.sub,
-      },
+  async createAddress(@CurrentUser() user: AuthUser, @Body() dto: CreateAddressDto) {
+    return this.prisma.$transaction(async (prisma) => {
+      if (dto.isDefault) {
+        await prisma.address.updateMany({
+          where: { userId: user.sub, isDefault: true },
+          data: { isDefault: false },
+        });
+      }
+
+      const address = await prisma.address.create({
+        data: {
+          ...dto,
+          userId: user.sub,
+        },
+      });
+
+      await prisma.user.update({
+        where: { id: user.sub },
+        data: { isOnboarded: true },
+      });
+
+      return address;
     });
   }
 }

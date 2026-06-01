@@ -7,12 +7,13 @@ import { Star, Heart, Plus, Flame } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { useFavoritesStore, useCartStore } from '@/lib/store'
-import { formatPrice, type Product } from '@/lib/data'
+import { formatPrice } from '@/lib/data'
+import { type Product } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 
 interface ProductCardProps {
-  product: Product
+  product: Product | (typeof import('@/lib/data').products)[0]
   index?: number
 }
 
@@ -54,7 +55,7 @@ export function ProductCard({ product, index = 0 }: ProductCardProps) {
           {/* Image Container */}
           <div className="relative aspect-square overflow-hidden bg-secondary/50">
             <Image
-              src={product.image}
+              src={('image' in product ? product.image : product.imageUrl) || '/products/placeholder.jpg'}
               alt={product.name}
               fill
               className="object-cover transition-transform duration-300 group-hover:scale-105"

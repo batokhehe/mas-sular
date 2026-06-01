@@ -9,8 +9,7 @@ ALTER TABLE `Promo`
   ADD COLUMN `freeShippingMaxAmount` INTEGER UNSIGNED NULL,
   ADD COLUMN `maxUsageCount` INTEGER UNSIGNED NULL,
   ADD COLUMN `currentUsageCount` INTEGER NOT NULL DEFAULT 0,
-  ADD COLUMN `isNewUserOnly` BOOLEAN NOT NULL DEFAULT false,
-  ADD COLUMN `deletedAt` DATETIME(3) NULL;
+  ADD COLUMN `isNewUserOnly` BOOLEAN NOT NULL DEFAULT false;
 
 -- Add voucher metadata to Order
 ALTER TABLE `Order`

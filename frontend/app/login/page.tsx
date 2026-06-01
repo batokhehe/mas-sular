@@ -6,14 +6,17 @@ import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { authApi } from '@/lib/api'
 import { useAuthStore, useAddressStore } from '@/lib/store'
 
 export default function LoginPage() {
   const router = useRouter()
   const [isLoading, setIsLoading] = useState(false)
   const login = useAuthStore((state) => state.login)
+  const completeOnboarding = useAuthStore((state) => state.completeOnboarding)
   const { isOnboarded } = useAuthStore()
   const addresses = useAddressStore((state) => state.addresses)
+  const addAddress = useAddressStore((state) => state.addAddress)
 
   const handleGoogleLogin = async () => {
     setIsLoading(true)
@@ -56,31 +59,43 @@ export default function LoginPage() {
         const idToken = response?.credential
         if (!idToken) throw new Error('No ID token from Google')
 
-        // Send ID token to backend for verification and token minting
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE ?? '/api'}/v1/auth/google`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ idToken }),
+        const authResponse = await authApi.loginWithGoogle(idToken)
+        authApi.setTokens(authResponse.tokens.accessToken, authResponse.tokens.refreshToken)
+
+        const user = authResponse.user
+        login({
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          avatar: user.avatarUrl,
         })
-        if (!res.ok) throw new Error('Auth endpoint returned error')
-        const tokens = await res.json()
 
-        // Store tokens locally (consider secure cookie/httpOnly in production)
-        try { localStorage.setItem('accessToken', tokens.accessToken) } catch {}
-        try { localStorage.setItem('refreshToken', tokens.refreshToken) } catch {}
+        if (user.addresses?.length) {
+          user.addresses.forEach((address) => {
+            addAddress({
+              id: address.id,
+              label: address.label,
+              recipientName: address.recipientName,
+              phone: address.phone,
+              fullAddress: address.fullAddress,
+              notes: address.notes,
+              latitude: Number(address.latitude),
+              longitude: Number(address.longitude),
+              isDefault: address.isDefault,
+            })
+          })
+        }
 
-        // Fetch user profile from backend using the new access token
-        const me = await fetch(`${process.env.NEXT_PUBLIC_API_BASE ?? '/api'}/v1/users/me`, {
-          headers: { Authorization: `Bearer ${tokens.accessToken}` },
-        })
-        if (!me.ok) throw new Error('Failed to fetch user profile')
-        const user = await me.json()
+        const hasAddresses = Array.isArray(user.addresses) && user.addresses.length > 0
 
-        // Map user to local store and redirect
-        login({ id: user.id, name: user.name, email: user.email, avatar: user.avatarUrl })
-        setIsLoading(false)
-        if (!user.isOnboarded || (user.addresses || []).length === 0) router.push('/onboarding')
-        else router.push('/')
+        if (user.isOnboarded && hasAddresses) {
+          completeOnboarding()
+          setIsLoading(false)
+          router.push('/')
+        } else {
+          setIsLoading(false)
+          router.push('/onboarding')
+        }
       } catch (e) {
         console.error('Google credential handling failed', e)
         setIsLoading(false)
@@ -112,7 +127,7 @@ export default function LoginPage() {
     return () => {
       // no-op cleanup
     }
-  }, [login, router])
+  }, [login, router, addAddress, completeOnboarding])
 
   return (
     <div className="min-h-screen flex">

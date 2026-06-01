@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
+import { userApi } from '@/lib/api'
 import { useAddressStore, useAuthStore } from '@/lib/store'
 import { toast } from 'sonner'
 
@@ -79,26 +80,40 @@ export default function OnboardingPage() {
 
   const onSubmit = async (data: AddressFormData) => {
     setIsSubmitting(true)
-    
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-    
-    addAddress({
-      id: Date.now().toString(),
-      label: 'Rumah',
-      recipientName: data.recipientName,
-      phone: data.phone,
-      fullAddress: data.fullAddress,
-      notes: data.notes,
-      latitude: mapLocation?.lat || -6.2088,
-      longitude: mapLocation?.lng || 106.8456,
-      isDefault: true,
-    })
-    
-    completeOnboarding()
-    setIsSubmitting(false)
-    toast.success('Alamat berhasil disimpan!')
-    router.push('/')
+
+    try {
+      const address = await userApi.createAddress({
+        label: 'Rumah',
+        recipientName: data.recipientName,
+        phone: data.phone,
+        fullAddress: data.fullAddress,
+        notes: data.notes,
+        latitude: mapLocation?.lat || -6.2088,
+        longitude: mapLocation?.lng || 106.8456,
+        isDefault: true,
+      })
+
+      addAddress({
+        id: address.id,
+        label: address.label,
+        recipientName: address.recipientName,
+        phone: address.phone,
+        fullAddress: address.fullAddress,
+        notes: address.notes,
+        latitude: Number(address.latitude),
+        longitude: Number(address.longitude),
+        isDefault: address.isDefault,
+      })
+
+      completeOnboarding()
+      toast.success('Alamat berhasil disimpan!')
+      router.push('/')
+    } catch (error) {
+      console.error('Failed to save address', error)
+      toast.error('Gagal menyimpan alamat. Silakan coba lagi.')
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   // Prevent server-side router actions by redirecting on the client

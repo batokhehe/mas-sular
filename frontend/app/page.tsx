@@ -4,8 +4,7 @@ import { FloatingCart } from '@/components/floating-cart'
 import { HeroBanner } from '@/components/hero-banner'
 import { CategorySection } from '@/components/category-section'
 import { PromoCarousel } from '@/components/promo-carousel'
-import { BestSellerSection, NewArrivalsSection, ProductGrid } from '@/components/product-grid'
-import { products } from '@/lib/data'
+import { HomeContent } from '@/components/home-content'
 
 export default function HomePage() {
   return (
@@ -15,9 +14,7 @@ export default function HomePage() {
         <HeroBanner />
         <CategorySection />
         <PromoCarousel />
-        <BestSellerSection />
-        <NewArrivalsSection />
-        <ProductGrid title="Semua Menu" products={products} showViewAll viewAllHref="/menu" />
+        <HomeContent />
       </main>
       <FloatingCart />
       <BottomNav />
