@@ -6,7 +6,6 @@ export type AdminCategory = {
   slug: string;
   sortOrder: number;
   icon?: string | null;
-  isActive: boolean;
 };
 
 export type AdminProduct = {
@@ -207,6 +206,30 @@ export function fetchAdminCategories() {
   return api<AdminCategory[]>('/admin/catalog/categories');
 }
 
+export function fetchAdminCategory(id: string) {
+  return api<AdminCategory>(`/admin/catalog/categories/${id}`);
+}
+
+export function createAdminCategory(input: Partial<AdminCategory>) {
+  return api<AdminCategory>('/admin/catalog/categories', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateAdminCategory(id: string, input: Partial<AdminCategory>) {
+  return api<AdminCategory>(`/admin/catalog/categories/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+}
+
+export function deleteAdminCategory(id: string) {
+  return api<void>(`/admin/catalog/categories/${id}`, {
+    method: 'DELETE',
+  });
+}
+
 export function fetchAdminProducts() {
   return api<AdminProduct[]>('/admin/catalog/products');
 }
@@ -379,5 +402,3 @@ export function deleteAdminShipment(id: string) {
     method: 'DELETE',
   });
 }
-
-

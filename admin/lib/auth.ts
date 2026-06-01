@@ -1,9 +1,15 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { api, ApiError, setAuthToken } from './api';
+import {
+  ADMIN_PERMISSIONS_EVENT,
+  clearStoredPermissions,
+  readStoredPermissions,
+  writeStoredPermissions,
+} from './permissions';
 
 export type AdminProfile = {
   id: string;
@@ -12,13 +18,26 @@ export type AdminProfile = {
   isActive: boolean;
 };
 
+export type AdminLoginResponse = {
+  accessToken: string;
+  refreshToken?: string;
+  user: AdminProfile & {
+    role?: {
+      id: string;
+      name: string;
+    } | null;
+  };
+  permissions?: string[];
+};
+
 export async function loginAdmin(email: string, password: string) {
-  const data = await api<{ accessToken: string }>('/admin/auth/login', {
+  const data = await api<AdminLoginResponse>('/admin/auth/login', {
     method: 'POST',
     body: JSON.stringify({ email, password }),
   });
 
   setAuthToken(data.accessToken);
+  writeStoredPermissions(data.permissions ?? []);
   return data;
 }
 
@@ -31,6 +50,7 @@ export async function logoutAdmin() {
     method: 'POST',
   });
   setAuthToken(null);
+  clearStoredPermissions();
 }
 
 export function useAdminProfile() {
@@ -45,11 +65,31 @@ export function useAdminProfile() {
   useEffect(() => {
     if (profileQuery.error?.status === 401) {
       setAuthToken(null);
+      clearStoredPermissions();
       router.replace('/login');
     }
   }, [profileQuery.error, router]);
 
   return profileQuery;
+}
+
+export function useAdminPermissions() {
+  const [permissions, setPermissions] = useState<string[]>(() => readStoredPermissions());
+
+  useEffect(() => {
+    const syncPermissions = () => {
+      setPermissions(readStoredPermissions());
+    };
+
+    window.addEventListener(ADMIN_PERMISSIONS_EVENT, syncPermissions);
+    syncPermissions();
+
+    return () => {
+      window.removeEventListener(ADMIN_PERMISSIONS_EVENT, syncPermissions);
+    };
+  }, []);
+
+  return permissions;
 }
 
 export function useAdminLogout() {
@@ -60,6 +100,7 @@ export function useAdminLogout() {
     mutationFn: logoutAdmin,
     onSuccess() {
       setAuthToken(null);
+      clearStoredPermissions();
       queryClient.clear();
       router.replace('/login');
     },
