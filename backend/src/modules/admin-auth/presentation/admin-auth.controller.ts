@@ -23,6 +23,7 @@ export class AdminAuthController {
       email: admin.email,
       name: admin.name,
       isActive: admin.isActive,
+      permissions: admin.permissions,
     };
   }
 

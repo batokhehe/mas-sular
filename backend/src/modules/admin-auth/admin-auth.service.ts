@@ -106,7 +106,7 @@ export class AdminAuthService {
     role?: string | null,
     permissions?: string[],
   ) {
-    const expiresIn = (process.env.JWT_ADMIN_ACCESS_TTL ?? '15m') as StringValue;
+    const expiresIn = (process.env.JWT_ADMIN_ACCESS_TTL ?? '1d') as StringValue;
     return this.jwt.signAsync(
       { sub: id, email, name, isActive, role, permissions },
       { expiresIn },

@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AdminShell } from '@/components/layout/admin-shell';
 import { ProductForm, ProductFormValues } from '@/app/products/components/product-form';
+import { ROUTE_PERMISSIONS } from '@/lib/access';
 import { fetchAdminCategories, createAdminProduct } from '@/lib/admin';
 
 export default function NewProductPage() {
@@ -25,7 +26,7 @@ export default function NewProductPage() {
 
   if (isLoading) {
     return (
-      <AdminShell>
+      <AdminShell requiredPermissions={ROUTE_PERMISSIONS.productCreate}>
         <p className="p-6 text-sm text-gray-500">Loading categories...</p>
       </AdminShell>
     );
@@ -33,14 +34,14 @@ export default function NewProductPage() {
 
   if (isError || !categories) {
     return (
-      <AdminShell>
+      <AdminShell requiredPermissions={ROUTE_PERMISSIONS.productCreate}>
         <p className="p-6 text-sm text-red-600">Unable to load categories. Please reauthenticate.</p>
       </AdminShell>
     );
   }
 
   return (
-    <AdminShell>
+    <AdminShell requiredPermissions={ROUTE_PERMISSIONS.productCreate}>
       <div className="mb-6">
         <h2 className="text-xl font-semibold text-gray-900">Add Product</h2>
         <p className="mt-1 text-sm text-gray-500">Create a new product for the catalog.</p>

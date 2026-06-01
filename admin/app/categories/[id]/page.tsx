@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AdminShell } from '@/components/layout/admin-shell';
 import { CategoryForm, CategoryFormValues } from '@/app/categories/components/category-form';
+import { ROUTE_PERMISSIONS } from '@/lib/access';
 import { deleteAdminCategory, fetchAdminCategory, updateAdminCategory } from '@/lib/admin';
 
 export default function CategoryDetailPage() {
@@ -43,7 +44,7 @@ export default function CategoryDetailPage() {
 
   if (categoryQuery.isLoading) {
     return (
-      <AdminShell>
+      <AdminShell requiredPermissions={ROUTE_PERMISSIONS.categoryUpdate}>
         <p className="p-6 text-sm text-gray-500">Loading category details...</p>
       </AdminShell>
     );
@@ -51,7 +52,7 @@ export default function CategoryDetailPage() {
 
   if (categoryQuery.isError || !categoryQuery.data) {
     return (
-      <AdminShell>
+      <AdminShell requiredPermissions={ROUTE_PERMISSIONS.categoryUpdate}>
         <div className="space-y-3 rounded-2xl border border-red-100 bg-red-50 p-6 text-sm text-red-700">
           <p>Unable to load category details. Please try again later.</p>
           <Link href="/categories" className="font-medium text-[#465fff] underline">
@@ -63,7 +64,7 @@ export default function CategoryDetailPage() {
   }
 
   return (
-    <AdminShell>
+    <AdminShell requiredPermissions={ROUTE_PERMISSIONS.categoryUpdate}>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-semibold text-gray-900">Edit Category</h2>

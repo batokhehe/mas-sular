@@ -7,6 +7,7 @@ import { AdminShell } from '@/components/layout/admin-shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardTitle } from '@/components/ui/card';
+import { ROUTE_PERMISSIONS } from '@/lib/access';
 import { fetchAdminRoles, fetchAdminUser, updateAdminUser, AdminRole, AdminUserDetail } from '@/lib/admin';
 
 export default function UserDetailPage() {
@@ -60,7 +61,7 @@ export default function UserDetailPage() {
 
   if (isLoading || rolesQuery.isLoading) {
     return (
-      <AdminShell>
+      <AdminShell requiredPermissions={ROUTE_PERMISSIONS.userUpdate}>
         <p className="text-sm text-gray-500">Loading user details…</p>
       </AdminShell>
     );
@@ -68,7 +69,7 @@ export default function UserDetailPage() {
 
   if (isError || !data || rolesQuery.isError || !rolesQuery.data) {
     return (
-      <AdminShell>
+      <AdminShell requiredPermissions={ROUTE_PERMISSIONS.userUpdate}>
         <div className="space-y-3 rounded-2xl border border-red-100 bg-red-50 p-6 text-sm text-red-700">
           <p>Unable to load user details. Please try again later.</p>
         </div>
@@ -77,7 +78,7 @@ export default function UserDetailPage() {
   }
 
   return (
-    <AdminShell>
+    <AdminShell requiredPermissions={ROUTE_PERMISSIONS.userUpdate}>
       <div className="mb-6">
         <h2 className="text-xl font-semibold text-gray-900">User Details</h2>
         <p className="mt-1 text-sm text-gray-500">Inspect customer profile, order history, and role membership.</p>

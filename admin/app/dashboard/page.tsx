@@ -5,12 +5,27 @@ import { AdminShell } from '@/components/layout/admin-shell';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
+import { ROUTE_PERMISSIONS } from '@/lib/access';
 import { fetchAdminDashboard, fetchAdminOrders } from '@/lib/admin';
+import { useAdminAuthStatus, useAdminProfile } from '@/lib/auth';
 import { ArrowDown, ArrowUp, CreditCard, PackageCheck, ShoppingBag, CheckCircle2, Users as UsersIcon } from 'lucide-react';
 
 export default function DashboardPage() {
-  const dashboard = useQuery({ queryKey: ['admin-dashboard'], queryFn: fetchAdminDashboard, retry: false });
-  const orders = useQuery({ queryKey: ['admin-orders', 'dashboard'], queryFn: fetchAdminOrders, retry: false });
+  const authStatus = useAdminAuthStatus();
+  const profile = useAdminProfile({ enabled: authStatus.isInitialized && authStatus.hasToken });
+  const canFetchProtectedApis = profile.isSuccess;
+  const dashboard = useQuery({
+    queryKey: ['admin-dashboard'],
+    queryFn: fetchAdminDashboard,
+    retry: false,
+    enabled: canFetchProtectedApis,
+  });
+  const orders = useQuery({
+    queryKey: ['admin-orders', 'dashboard'],
+    queryFn: fetchAdminOrders,
+    retry: false,
+    enabled: canFetchProtectedApis,
+  });
   const data = dashboard.data;
   const stats = [
     { label: 'Total Products', value: data?.activeProducts ?? 0, change: `${data?.lowStockProducts ?? 0} low stock`, tone: 'success' as const, icon: ShoppingBag },
@@ -22,7 +37,7 @@ export default function DashboardPage() {
   ];
 
   return (
-    <AdminShell>
+    <AdminShell requiredPermissions={ROUTE_PERMISSIONS.dashboard}>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {dashboard.isLoading
           ? Array.from({ length: 6 }).map((_, index) => (

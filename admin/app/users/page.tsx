@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { AdminShell } from '@/components/layout/admin-shell';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardTitle } from '@/components/ui/card';
+import { ROUTE_PERMISSIONS } from '@/lib/access';
 import { fetchAdminUsers, AdminUser } from '@/lib/admin';
 
 export default function UsersPage() {
@@ -15,7 +16,7 @@ export default function UsersPage() {
   });
 
   return (
-    <AdminShell>
+    <AdminShell requiredPermissions={ROUTE_PERMISSIONS.users}>
       <div className="mb-6">
         <h2 className="text-xl font-semibold text-gray-900">User Management</h2>
         <p className="mt-1 text-sm text-gray-500">Customers, admins, and role assignments.</p>

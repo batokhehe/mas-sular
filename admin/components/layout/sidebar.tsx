@@ -3,42 +3,47 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
-  BarChart3,
   Boxes,
   ClipboardList,
   CreditCard,
   Gift,
+  Image,
   LayoutDashboard,
   Layers,
   Shield,
   Truck,
   Users,
 } from 'lucide-react';
+import { useAdminPermissions } from '@/lib/auth';
+import { hasAnyPermission } from '@/lib/permissions';
+import { ROUTE_PERMISSIONS } from '@/lib/access';
 
 const sections = [
   {
     label: 'Menu',
     items: [
-      { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-      { href: '/products', label: 'Products', icon: Boxes },
-      { href: '/categories', label: 'Categories', icon: Layers },
-      { href: '/orders', label: 'Orders', icon: ClipboardList },
-      { href: '/payments', label: 'Order Verification', icon: CreditCard },
-      { href: '/shipping', label: 'Shipping', icon: Truck },
-      { href: '/promos', label: 'Voucher', icon: Gift },
+      { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, permissions: ROUTE_PERMISSIONS.dashboard },
+      { href: '/products', label: 'Products', icon: Boxes, permissions: ROUTE_PERMISSIONS.products },
+      { href: '/categories', label: 'Categories', icon: Layers, permissions: ROUTE_PERMISSIONS.categories },
+      { href: '/banners', label: 'Banners', icon: Image, permissions: ROUTE_PERMISSIONS.banners },
+      { href: '/orders', label: 'Orders', icon: ClipboardList, permissions: ROUTE_PERMISSIONS.orders },
+      { href: '/payments', label: 'Order Verification', icon: CreditCard, permissions: ROUTE_PERMISSIONS.payments },
+      { href: '/shipping', label: 'Shipping', icon: Truck, permissions: ROUTE_PERMISSIONS.shipments },
+      { href: '/promos', label: 'Voucher', icon: Gift, permissions: ROUTE_PERMISSIONS.promos },
     ],
   },
   {
     label: 'Administration',
     items: [
-      { href: '/users', label: 'Users', icon: Users },
-      { href: '/roles', label: 'Roles & Permissions', icon: Shield },
+      { href: '/users', label: 'Users', icon: Users, permissions: ROUTE_PERMISSIONS.users },
+      { href: '/roles', label: 'Roles & Permissions', icon: Shield, permissions: ROUTE_PERMISSIONS.roles },
     ],
   },
 ];
 
 export function Sidebar() {
   const pathname = usePathname();
+  const permissions = useAdminPermissions();
 
   const isActive = (href: string) => {
     if (href === '/dashboard') {
@@ -61,7 +66,7 @@ export function Sidebar() {
           <div key={section.label}>
             <p className="mb-3 px-3 text-xs font-semibold uppercase tracking-wide text-gray-400">{section.label}</p>
             <div className="space-y-1">
-              {section.items.map((item) => {
+              {section.items.filter((item) => hasAnyPermission(permissions, item.permissions)).map((item) => {
                 const Icon = item.icon;
                 const active = isActive(item.href);
                 return (

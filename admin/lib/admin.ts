@@ -56,6 +56,7 @@ export type AdminBanner = {
   isActive: boolean;
   startsAt: string | null;
   endsAt: string | null;
+  sortOrder: number;
   createdAt: string;
 };
 
@@ -240,6 +241,30 @@ export function fetchAdminPromos() {
 
 export function fetchAdminBanners() {
   return api<AdminBanner[]>('/admin/cms/banners');
+}
+
+export function fetchAdminBanner(id: string) {
+  return api<AdminBanner>(`/admin/cms/banners/${id}`);
+}
+
+export function createAdminBanner(input: Partial<AdminBanner>) {
+  return api<AdminBanner>('/admin/cms/banners', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateAdminBanner(id: string, input: Partial<AdminBanner>) {
+  return api<AdminBanner>(`/admin/cms/banners/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+}
+
+export function deleteAdminBanner(id: string) {
+  return api<void>(`/admin/cms/banners/${id}`, {
+    method: 'DELETE',
+  });
 }
 
 export function fetchAdminDashboard() {

@@ -1,4 +1,10 @@
+import { clearStoredPermissions } from './permissions';
+
 const AUTH_TOKEN_KEY = 'mas-sular-admin-token';
+export const ADMIN_AUTH_TOKEN_EVENT = 'mas-sular-admin-token-change';
+export const ADMIN_UNAUTHORIZED_EVENT = 'mas-sular-admin-unauthorized';
+let isHandlingUnauthorized = false;
+
 const defaultApiUrl =
   typeof window !== 'undefined'
     ? `${window.location.protocol}//${window.location.hostname}:3001/api/v1`
@@ -19,10 +25,13 @@ export function setAuthToken(token: string | null) {
   }
 
   if (token) {
+    isHandlingUnauthorized = false;
     window.localStorage.setItem(AUTH_TOKEN_KEY, token);
   } else {
     window.localStorage.removeItem(AUTH_TOKEN_KEY);
   }
+
+  window.dispatchEvent(new Event(ADMIN_AUTH_TOKEN_EVENT));
 }
 
 export type ApiError = Error & { status?: number };
@@ -35,6 +44,14 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (token) {
     headers.set('Authorization', `Bearer ${token}`);
   }
+
+  const config = {
+    headers: {
+      Authorization: headers.get('Authorization') ?? undefined,
+    },
+  };
+  console.log('[TOKEN]', getAuthToken());
+  console.log('[AUTH HEADER]', config.headers.Authorization);
 
   const requestUrl = `${API_URL}${path}`;
 
@@ -61,6 +78,13 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
 
   if (!response.ok) {
+    if (response.status === 401 && !isHandlingUnauthorized) {
+      isHandlingUnauthorized = true;
+      setAuthToken(null);
+      clearStoredPermissions();
+      window.dispatchEvent(new Event(ADMIN_UNAUTHORIZED_EVENT));
+    }
+
     const message = typeof body === 'object' && body && 'message' in body ? (body as any).message : response.statusText || `API request failed: ${response.status}`;
     const error = new Error(message) as ApiError;
     error.status = response.status;

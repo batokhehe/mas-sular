@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AdminShell } from '@/components/layout/admin-shell';
 import { ProductForm, ProductFormValues } from '@/app/products/components/product-form';
+import { ROUTE_PERMISSIONS } from '@/lib/access';
 import { fetchAdminCategories, fetchAdminProduct, updateAdminProduct, deleteAdminProduct } from '@/lib/admin';
 
 export default function ProductDetailPage() {
@@ -44,7 +45,7 @@ export default function ProductDetailPage() {
 
   if (categoriesQuery.isLoading || productQuery.isLoading) {
     return (
-      <AdminShell>
+      <AdminShell requiredPermissions={ROUTE_PERMISSIONS.productUpdate}>
         <p className="p-6 text-sm text-gray-500">Loading product details…</p>
       </AdminShell>
     );
@@ -52,7 +53,7 @@ export default function ProductDetailPage() {
 
   if (categoriesQuery.isError || productQuery.isError || !categoriesQuery.data || !productQuery.data) {
     return (
-      <AdminShell>
+      <AdminShell requiredPermissions={ROUTE_PERMISSIONS.productUpdate}>
         <div className="space-y-3 rounded-2xl border border-red-100 bg-red-50 p-6 text-sm text-red-700">
           <p>Unable to load product details. Please reauthenticate or try again later.</p>
           <Link href="/products" className="font-medium text-[#465fff] underline">
@@ -64,7 +65,7 @@ export default function ProductDetailPage() {
   }
 
   return (
-    <AdminShell>
+    <AdminShell requiredPermissions={ROUTE_PERMISSIONS.productUpdate}>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-semibold text-gray-900">Edit Product</h2>

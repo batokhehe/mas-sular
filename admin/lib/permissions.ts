@@ -17,7 +17,8 @@ export function hasPermission(permissions: readonly string[] | null | undefined,
     return false;
   }
 
-  return permissions.includes(permission);
+  const permissionSet = new Set(permissions);
+  return expandPermissionAliases(permission).some((alias) => permissionSet.has(alias));
 }
 
 export function hasAllPermissions(
@@ -32,8 +33,7 @@ export function hasAllPermissions(
     return false;
   }
 
-  const permissionSet = new Set(permissions);
-  return requiredPermissions.every((permission) => permissionSet.has(permission));
+  return requiredPermissions.every((permission) => hasPermission(permissions, permission));
 }
 
 export function hasAnyPermission(
@@ -48,8 +48,20 @@ export function hasAnyPermission(
     return false;
   }
 
-  const permissionSet = new Set(permissions);
-  return requiredPermissions.some((permission) => permissionSet.has(permission));
+  return requiredPermissions.some((permission) => hasPermission(permissions, permission));
+}
+
+export function expandPermissionAliases(permission: string) {
+  const aliases = new Set([permission]);
+  const [subject, action] = permission.split('.');
+
+  if (subject && action) {
+    const legacySubject = `${subject.charAt(0).toLowerCase()}${subject.slice(1)}s`;
+    const legacyAction = action === 'read' ? 'view' : action;
+    aliases.add(`${legacySubject}.${legacyAction}`);
+  }
+
+  return Array.from(aliases);
 }
 
 export function readStoredPermissions() {

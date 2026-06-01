@@ -3,10 +3,12 @@
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { PermissionGate } from '@/components/auth/permission-gate';
 import { AdminShell } from '@/components/layout/admin-shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardTitle } from '@/components/ui/card';
+import { ROUTE_PERMISSIONS } from '@/lib/access';
 import { fetchAdminShipments, AdminShipment } from '@/lib/admin';
 
 const statusOptions = ['ALL', 'PENDING', 'RATE_SELECTED', 'PICKED_UP', 'IN_TRANSIT', 'DELIVERED', 'FAILED'] as const;
@@ -32,15 +34,17 @@ export default function ShippingPage() {
   }, [data, search, statusFilter]);
 
   return (
-    <AdminShell>
+    <AdminShell requiredPermissions={ROUTE_PERMISSIONS.shipments}>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-semibold text-gray-900">Shipping Management</h2>
           <p className="mt-1 text-sm text-gray-500">Provider rates, shipment status, and tracking updates.</p>
         </div>
-        <Link href="/shipping/new">
-          <Button>New Shipment</Button>
-        </Link>
+        <PermissionGate permissions={ROUTE_PERMISSIONS.shipmentCreate}>
+          <Link href="/shipping/new">
+            <Button>New Shipment</Button>
+          </Link>
+        </PermissionGate>
       </div>
       <Card>
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

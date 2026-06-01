@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { AdminShell } from '@/components/layout/admin-shell';
+import { ROUTE_PERMISSIONS } from '@/lib/access';
 import { fetchAdminPermissions, createAdminRole } from '@/lib/admin';
 import { RoleForm } from '../components/role-form';
 
@@ -22,7 +23,7 @@ export default function NewRolePage() {
   });
 
   return (
-    <AdminShell>
+    <AdminShell requiredPermissions={ROUTE_PERMISSIONS.roleCreate}>
       <div className="mb-6">
         <h2 className="text-xl font-semibold text-gray-900">Create Role</h2>
         <p className="mt-1 text-sm text-gray-500">Define a new role and assign permission scopes.</p>

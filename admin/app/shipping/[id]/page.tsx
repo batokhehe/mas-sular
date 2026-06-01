@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AdminShell } from '@/components/layout/admin-shell';
 import { ShipmentForm, ShipmentFormValues } from '@/app/shipping/components/shipment-form';
+import { ROUTE_PERMISSIONS } from '@/lib/access';
 import { fetchAdminOrders, fetchAdminShipment, updateAdminShipment, deleteAdminShipment } from '@/lib/admin';
 
 export default function ShipmentDetailPage() {
@@ -49,7 +50,7 @@ export default function ShipmentDetailPage() {
 
   if (shipmentQuery.isLoading || ordersQuery.isLoading) {
     return (
-      <AdminShell>
+      <AdminShell requiredPermissions={ROUTE_PERMISSIONS.shipmentUpdate}>
         <p className="text-sm text-gray-500">Loading shipment details…</p>
       </AdminShell>
     );
@@ -57,7 +58,7 @@ export default function ShipmentDetailPage() {
 
   if (shipmentQuery.isError || !shipmentQuery.data || ordersQuery.isError || !ordersQuery.data) {
     return (
-      <AdminShell>
+      <AdminShell requiredPermissions={ROUTE_PERMISSIONS.shipmentUpdate}>
         <div className="space-y-3 rounded-2xl border border-red-100 bg-red-50 p-6 text-sm text-red-700">
           <p>Unable to load shipment details. Please try again later.</p>
           <Link href="/shipping" className="font-medium text-[#465fff] underline">Back to shipments</Link>
@@ -67,7 +68,7 @@ export default function ShipmentDetailPage() {
   }
 
   return (
-    <AdminShell>
+    <AdminShell requiredPermissions={ROUTE_PERMISSIONS.shipmentUpdate}>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-semibold text-gray-900">Edit Shipment</h2>

@@ -3,6 +3,7 @@
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { AdminShell } from '@/components/layout/admin-shell';
+import { ROUTE_PERMISSIONS } from '@/lib/access';
 import { fetchAdminRole, fetchAdminPermissions, updateAdminRole } from '@/lib/admin';
 import { RoleForm } from '../../components/role-form';
 
@@ -34,7 +35,7 @@ export default function EditRolePage() {
 
   if (roleQuery.isLoading || permissionsQuery.isLoading) {
     return (
-      <AdminShell>
+      <AdminShell requiredPermissions={ROUTE_PERMISSIONS.roleUpdate}>
         <p className="text-sm text-gray-500">Loading role information…</p>
       </AdminShell>
     );
@@ -42,7 +43,7 @@ export default function EditRolePage() {
 
   if (roleQuery.isError || permissionsQuery.isError || !roleQuery.data || !permissionsQuery.data) {
     return (
-      <AdminShell>
+      <AdminShell requiredPermissions={ROUTE_PERMISSIONS.roleUpdate}>
         <div className="rounded-2xl border border-red-100 bg-red-50 p-6 text-sm text-red-700">
           <p>Unable to load role data. Please try again later.</p>
         </div>
@@ -51,7 +52,7 @@ export default function EditRolePage() {
   }
 
   return (
-    <AdminShell>
+    <AdminShell requiredPermissions={ROUTE_PERMISSIONS.roleUpdate}>
       <div className="mb-6">
         <h2 className="text-xl font-semibold text-gray-900">Edit Role</h2>
         <p className="mt-1 text-sm text-gray-500">Update role name, description, and permissions.</p>

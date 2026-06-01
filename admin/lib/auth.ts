@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { api, ApiError, setAuthToken } from './api';
+import { ADMIN_AUTH_TOKEN_EVENT, api, ApiError, getAuthToken, setAuthToken } from './api';
 import {
   ADMIN_PERMISSIONS_EVENT,
   clearStoredPermissions,
@@ -16,6 +16,7 @@ export type AdminProfile = {
   email: string;
   name: string;
   isActive: boolean;
+  permissions?: string[];
 };
 
 export type AdminLoginResponse = {
@@ -46,31 +47,63 @@ export async function fetchAdminProfile() {
 }
 
 export async function logoutAdmin() {
-  await api('/admin/auth/logout', {
-    method: 'POST',
-  });
-  setAuthToken(null);
-  clearStoredPermissions();
+  try {
+    await api('/admin/auth/logout', {
+      method: 'POST',
+    });
+  } finally {
+    setAuthToken(null);
+    clearStoredPermissions();
+  }
 }
 
-export function useAdminProfile() {
-  const router = useRouter();
+export function useAdminProfile(options?: { enabled?: boolean }) {
+  const queryClient = useQueryClient();
   const profileQuery = useQuery<AdminProfile, ApiError>({
     queryKey: ['admin-profile'],
     queryFn: fetchAdminProfile,
     retry: false,
     staleTime: 1000 * 60 * 5,
+    enabled: options?.enabled ?? true,
   });
 
   useEffect(() => {
     if (profileQuery.error?.status === 401) {
-      setAuthToken(null);
-      clearStoredPermissions();
-      router.replace('/login');
+      queryClient.removeQueries({ queryKey: ['admin-profile'] });
     }
-  }, [profileQuery.error, router]);
+  }, [profileQuery.error, queryClient]);
+
+  useEffect(() => {
+    if (profileQuery.data?.permissions) {
+      writeStoredPermissions(profileQuery.data.permissions);
+    }
+  }, [profileQuery.data?.permissions]);
 
   return profileQuery;
+}
+
+export function useAdminAuthStatus() {
+  const [isInitialized, setIsInitialized] = useState(false);
+  const [hasToken, setHasToken] = useState(false);
+
+  useEffect(() => {
+    const syncAuthToken = () => {
+      setHasToken(isAdminAuthenticated());
+    };
+
+    syncAuthToken();
+    setIsInitialized(true);
+
+    window.addEventListener(ADMIN_AUTH_TOKEN_EVENT, syncAuthToken);
+    window.addEventListener('storage', syncAuthToken);
+
+    return () => {
+      window.removeEventListener(ADMIN_AUTH_TOKEN_EVENT, syncAuthToken);
+      window.removeEventListener('storage', syncAuthToken);
+    };
+  }, []);
+
+  return { isInitialized, hasToken };
 }
 
 export function useAdminPermissions() {
@@ -98,7 +131,7 @@ export function useAdminLogout() {
 
   return useMutation<void, ApiError>({
     mutationFn: logoutAdmin,
-    onSuccess() {
+    onSettled() {
       setAuthToken(null);
       clearStoredPermissions();
       queryClient.clear();
@@ -108,5 +141,5 @@ export function useAdminLogout() {
 }
 
 export function isAdminAuthenticated() {
-  return Boolean(typeof window !== 'undefined' && window.localStorage.getItem('mas-sular-admin-token'));
+  return Boolean(getAuthToken());
 }

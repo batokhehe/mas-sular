@@ -6,6 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import { AdminShell } from '@/components/layout/admin-shell';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardTitle } from '@/components/ui/card';
+import { ROUTE_PERMISSIONS } from '@/lib/access';
 import { fetchAdminOrders, AdminOrder } from '@/lib/admin';
 
 const statusOptions = ['ALL', 'PENDING', 'PROCESSING', 'DELIVERING', 'COMPLETED', 'CANCELLED'] as const;
@@ -32,7 +33,7 @@ export default function OrdersPage() {
   }, [data, search, statusFilter]);
 
   return (
-    <AdminShell>
+    <AdminShell requiredPermissions={ROUTE_PERMISSIONS.orders}>
       <div className="mb-6">
         <h2 className="text-xl font-semibold text-gray-900">Order Management</h2>
         <p className="mt-1 text-sm text-gray-500">Track checkout, fulfillment, delivery, and customer support states.</p>

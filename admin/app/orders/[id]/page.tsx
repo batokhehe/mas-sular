@@ -3,10 +3,12 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'next/navigation';
+import { PermissionGate } from '@/components/auth/permission-gate';
 import { AdminShell } from '@/components/layout/admin-shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardTitle } from '@/components/ui/card';
+import { ROUTE_PERMISSIONS } from '@/lib/access';
 import { fetchAdminOrder, updateAdminOrderStatus, AdminOrderDetail } from '@/lib/admin';
 
 const orderStatusOptions = ['PROCESSING', 'DELIVERING', 'COMPLETED', 'CANCELLED'] as const;
@@ -48,7 +50,7 @@ export default function OrderDetailPage() {
 
   if (isLoading) {
     return (
-      <AdminShell>
+      <AdminShell requiredPermissions={ROUTE_PERMISSIONS.orders}>
         <p className="text-sm text-gray-500">Loading order details…</p>
       </AdminShell>
     );
@@ -56,7 +58,7 @@ export default function OrderDetailPage() {
 
   if (isError || !order) {
     return (
-      <AdminShell>
+      <AdminShell requiredPermissions={ROUTE_PERMISSIONS.orders}>
         <p className="text-sm text-red-600">Unable to load order details. Please try again later.</p>
       </AdminShell>
     );
@@ -68,7 +70,7 @@ export default function OrderDetailPage() {
   });
 
   return (
-    <AdminShell>
+    <AdminShell requiredPermissions={ROUTE_PERMISSIONS.orders}>
       <div className="mb-6">
         <h2 className="text-xl font-semibold text-gray-900">Order {order.orderNumber}</h2>
         <p className="mt-1 text-sm text-gray-500">Order placed on {formattedDate}</p>
@@ -140,43 +142,48 @@ export default function OrderDetailPage() {
         <Card>
           <CardTitle>Admin Actions</CardTitle>
           <div className="mt-4 space-y-4 text-sm text-gray-700">
-            <div>
-              <label className="block text-xs uppercase text-gray-500">New status</label>
-              <select
-                value={nextStatus}
-                onChange={(event) => setNextStatus(event.target.value as typeof orderStatusOptions[number])}
-                className="mt-2 h-11 w-full rounded-xl border border-gray-200 bg-white px-4 text-sm outline-none focus:border-[#465fff]"
-              >
-                {orderStatusOptions.map((status) => (
-                  <option key={status} value={status}>
-                    {status}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs uppercase text-gray-500">Note</label>
-              <textarea
-                value={note}
-                onChange={(event) => setNote(event.target.value)}
-                rows={4}
-                className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none focus:border-[#465fff]"
-                placeholder="Add an optional internal note for this status update"
-              />
-            </div>
-
-            <Button
-              onClick={() => statusMutation.mutate()}
-              disabled={statusMutation.isPending}
-              className="w-full"
+            <PermissionGate
+              permissions={ROUTE_PERMISSIONS.orderUpdate}
+              fallback={<p className="rounded-xl bg-gray-50 p-4 text-sm text-gray-500">Your role can view this order but cannot update its status.</p>}
             >
-              {statusMutation.isPending ? 'Updating...' : 'Update Order Status'}
-            </Button>
+              <div>
+                <label className="block text-xs uppercase text-gray-500">New status</label>
+                <select
+                  value={nextStatus}
+                  onChange={(event) => setNextStatus(event.target.value as typeof orderStatusOptions[number])}
+                  className="mt-2 h-11 w-full rounded-xl border border-gray-200 bg-white px-4 text-sm outline-none focus:border-[#465fff]"
+                >
+                  {orderStatusOptions.map((status) => (
+                    <option key={status} value={status}>
+                      {status}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-            {statusMutation.isError ? (
-              <p className="text-sm text-red-600">Unable to update order status. Please try again.</p>
-            ) : null}
+              <div>
+                <label className="block text-xs uppercase text-gray-500">Note</label>
+                <textarea
+                  value={note}
+                  onChange={(event) => setNote(event.target.value)}
+                  rows={4}
+                  className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none focus:border-[#465fff]"
+                  placeholder="Add an optional internal note for this status update"
+                />
+              </div>
+
+              <Button
+                onClick={() => statusMutation.mutate()}
+                disabled={statusMutation.isPending}
+                className="w-full"
+              >
+                {statusMutation.isPending ? 'Updating...' : 'Update Order Status'}
+              </Button>
+
+              {statusMutation.isError ? (
+                <p className="text-sm text-red-600">Unable to update order status. Please try again.</p>
+              ) : null}
+            </PermissionGate>
           </div>
 
           <div className="mt-8">

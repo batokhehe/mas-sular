@@ -4,9 +4,11 @@ import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { AdminShell } from '@/components/layout/admin-shell';
+import { PermissionGate } from '@/components/auth/permission-gate';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardTitle } from '@/components/ui/card';
+import { ROUTE_PERMISSIONS } from '@/lib/access';
 import { fetchAdminProducts, AdminProduct } from '@/lib/admin';
 
 const PAGE_SIZE = 10;
@@ -53,15 +55,17 @@ export default function ProductsPage() {
   const pageProducts = products.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
-    <AdminShell>
+    <AdminShell requiredPermissions={ROUTE_PERMISSIONS.products}>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-semibold text-gray-900">Product Management</h2>
           <p className="mt-1 text-sm text-gray-500">Catalog, stock, pricing, and product visibility.</p>
         </div>
-        <Link href="/products/new">
-          <Button type="button">Add Product</Button>
-        </Link>
+        <PermissionGate permissions={ROUTE_PERMISSIONS.productCreate}>
+          <Link href="/products/new">
+            <Button type="button">Add Product</Button>
+          </Link>
+        </PermissionGate>
       </div>
 
       <Card>

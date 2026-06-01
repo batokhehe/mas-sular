@@ -3,10 +3,12 @@
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
+import { PermissionGate } from '@/components/auth/permission-gate';
 import { AdminShell } from '@/components/layout/admin-shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardTitle } from '@/components/ui/card';
+import { ROUTE_PERMISSIONS } from '@/lib/access';
 import { fetchAdminRole, AdminRole } from '@/lib/admin';
 
 export default function RoleDetailPage() {
@@ -22,7 +24,7 @@ export default function RoleDetailPage() {
 
   if (isLoading) {
     return (
-      <AdminShell>
+      <AdminShell requiredPermissions={ROUTE_PERMISSIONS.roles}>
         <p className="text-sm text-gray-500">Loading role details…</p>
       </AdminShell>
     );
@@ -30,7 +32,7 @@ export default function RoleDetailPage() {
 
   if (isError || !data) {
     return (
-      <AdminShell>
+      <AdminShell requiredPermissions={ROUTE_PERMISSIONS.roles}>
         <div className="space-y-3 rounded-2xl border border-red-100 bg-red-50 p-6 text-sm text-red-700">
           <p>Unable to load role details. Please try again later.</p>
         </div>
@@ -39,15 +41,17 @@ export default function RoleDetailPage() {
   }
 
   return (
-    <AdminShell>
+    <AdminShell requiredPermissions={ROUTE_PERMISSIONS.roles}>
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-xl font-semibold text-gray-900">Role Details</h2>
           <p className="mt-1 text-sm text-gray-500">Review role permissions and approval scope.</p>
         </div>
-        <Link href={`/roles/${roleId}/edit`}>
-          <Button>Edit Role</Button>
-        </Link>
+        <PermissionGate permissions={ROUTE_PERMISSIONS.roleUpdate}>
+          <Link href={`/roles/${roleId}/edit`}>
+            <Button>Edit Role</Button>
+          </Link>
+        </PermissionGate>
       </div>
 
       <Card>
