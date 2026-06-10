@@ -20,6 +20,7 @@ import { BottomNav } from '@/components/bottom-nav'
 import { useCartStore } from '@/lib/store'
 import { formatPrice } from '@/lib/data'
 import { cn } from '@/lib/utils'
+import { getProductImageSrc } from '@/lib/product-images'
 
 export default function CartPage() {
   const router = useRouter()
@@ -134,7 +135,7 @@ export default function CartPage() {
                 >
                   <div className="relative h-20 w-20 sm:h-24 sm:w-24 rounded-xl overflow-hidden bg-secondary shrink-0">
                     <Image
-                      src={item.product.image}
+                      src={getProductImageSrc(item.product)}
                       alt={item.product.name}
                       fill
                       className="object-cover"

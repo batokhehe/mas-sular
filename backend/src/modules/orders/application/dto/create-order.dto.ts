@@ -1,25 +1,23 @@
 import { Type } from 'class-transformer';
 import { IsArray, IsEnum, IsInt, IsOptional, IsString, Max, Min, ValidateNested } from 'class-validator';
-import { VoucherType } from '@prisma/client';
 
-export enum CheckoutPaymentMethod {
-  QRIS = 'QRIS',
-  BANK_TRANSFER = 'BANK_TRANSFER',
-  COD = 'COD',
+export enum CheckoutCourier {
+  PAXEL = 'paxel',
+  JNE = 'jne',
 }
 
 export class CheckoutItemDto {
   @IsString()
-  productId!: string;
+  product_id!: string;
 
   @IsInt()
   @Min(1)
-  quantity!: number;
+  qty!: number;
 
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
-  toppingIds?: string[];
+  topping_ids?: string[];
 
   @IsOptional()
   @IsInt()
@@ -34,17 +32,14 @@ export class CheckoutItemDto {
 
 export class CreateOrderDto {
   @IsString()
-  userId!: string;
+  address_id!: string;
 
-  @IsString()
-  addressId!: string;
-
-  @IsEnum(CheckoutPaymentMethod)
-  paymentMethod!: CheckoutPaymentMethod;
+  @IsEnum(CheckoutCourier)
+  courier!: CheckoutCourier;
 
   @IsOptional()
   @IsString()
-  promoCode?: string;
+  voucher_code?: string;
 
   @IsArray()
   @ValidateNested({ each: true })
@@ -54,12 +49,39 @@ export class CreateOrderDto {
 
 export class ValidateVoucherDto {
   @IsString()
-  userId!: string;
-
-  @IsString()
-  code!: string;
+  voucher_code!: string;
 
   @IsInt()
   @Min(0)
   subtotal!: number;
+}
+
+export class ShippingCostDto {
+  @IsString()
+  address_id!: string;
+
+  @IsEnum(CheckoutCourier)
+  courier!: CheckoutCourier;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CheckoutItemDto)
+  items!: CheckoutItemDto[];
+}
+
+export class CheckoutSummaryDto {
+  @IsString()
+  address_id!: string;
+
+  @IsEnum(CheckoutCourier)
+  courier!: CheckoutCourier;
+
+  @IsOptional()
+  @IsString()
+  voucher_code?: string;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CheckoutItemDto)
+  items!: CheckoutItemDto[];
 }

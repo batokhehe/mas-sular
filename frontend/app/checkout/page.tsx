@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -9,11 +9,10 @@ import {
   ArrowLeft,
   MapPin,
   ChevronRight,
-  CreditCard,
-  Wallet,
-  Banknote,
   CheckCircle2,
   Loader2,
+  TicketPercent,
+  Truck,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -24,29 +23,95 @@ import { useCartStore, useAddressStore, useAuthStore } from '@/lib/store'
 import { formatPrice } from '@/lib/data'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
+import { getProductImageSrc } from '@/lib/product-images'
+import { checkoutApi } from '@/lib/api'
+import type { CheckoutCourier, CheckoutItemRequest, CheckoutSummaryResponse } from '@/lib/types'
 
-const paymentMethods = [
-  { id: 'qris', name: 'QRIS', icon: CreditCard, description: 'Scan QR untuk bayar' },
-  { id: 'transfer', name: 'Bank Transfer', icon: Banknote, description: 'Transfer manual' },
-  { id: 'cod', name: 'Bayar di Tempat (COD)', icon: Wallet, description: 'Bayar saat pesanan tiba' },
+const couriers: Array<{ id: CheckoutCourier; name: string; description: string }> = [
+  { id: 'paxel', name: 'Paxel', description: 'Estimasi cepat untuk area terjangkau' },
+  { id: 'jne', name: 'JNE', description: 'Layanan reguler antar kota' },
 ]
+
+function getErrorMessage(error: unknown) {
+  if (typeof error === 'object' && error !== null && 'response' in error) {
+    const response = (error as { response?: { data?: { message?: string | string[] } } }).response
+    const message = response?.data?.message
+    return Array.isArray(message) ? message.join(', ') : message
+  }
+
+  return undefined
+}
 
 export default function CheckoutPage() {
   const router = useRouter()
-  const { items, getTotalPrice, clearCart } = useCartStore()
+  const { items, clearCart } = useCartStore()
   const selectedAddress = useAddressStore((state) => state.getSelectedAddress())
   const { isAuthenticated } = useAuthStore()
-  
-  const [paymentMethod, setPaymentMethod] = useState('qris')
-  const [promoCode, setPromoCode] = useState('')
+
+  const [courier, setCourier] = useState<CheckoutCourier>('paxel')
+  const [voucherCode, setVoucherCode] = useState('')
+  const [summary, setSummary] = useState<CheckoutSummaryResponse | null>(null)
+  const [summaryError, setSummaryError] = useState('')
+  const [isSummaryLoading, setIsSummaryLoading] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const [orderSuccess, setOrderSuccess] = useState(false)
 
-  const subtotal = getTotalPrice()
-  const deliveryFee = subtotal >= 100000 ? 0 : 10000
-  const total = subtotal + deliveryFee
+  const checkoutItems = useMemo<CheckoutItemRequest[]>(
+    () =>
+      items.map((item) => ({
+        product_id: item.product.id,
+        qty: item.quantity,
+        topping_ids: item.toppings.map((topping) => topping.id),
+        spicyLevel: item.spicyLevel,
+        notes: item.notes,
+      })),
+    [items]
+  )
 
-  // Redirect if cart is empty
+  useEffect(() => {
+    let isActive = true
+    const trimmedVoucher = voucherCode.trim().toUpperCase()
+
+    async function refreshSummary() {
+      if (!selectedAddress || checkoutItems.length === 0) {
+        setSummary(null)
+        setSummaryError('')
+        return
+      }
+
+      setIsSummaryLoading(true)
+      setSummaryError('')
+
+      try {
+        const nextSummary = await checkoutApi.getSummary({
+          address_id: selectedAddress.id,
+          courier,
+          voucher_code: trimmedVoucher || undefined,
+          items: checkoutItems,
+        })
+
+        if (isActive) {
+          setSummary(nextSummary)
+        }
+      } catch (error) {
+        if (isActive) {
+          setSummary(null)
+          setSummaryError(getErrorMessage(error) || 'Gagal menghitung checkout')
+        }
+      } finally {
+        if (isActive) {
+          setIsSummaryLoading(false)
+        }
+      }
+    }
+
+    refreshSummary()
+
+    return () => {
+      isActive = false
+    }
+  }, [checkoutItems, courier, selectedAddress, voucherCode])
+
   if (items.length === 0 && !orderSuccess) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -60,21 +125,56 @@ export default function CheckoutPage() {
     )
   }
 
+  const handleApplyVoucher = async () => {
+    if (!summary || !voucherCode.trim()) return
+
+    const result = await checkoutApi.validateVoucher({
+      voucher_code: voucherCode.trim().toUpperCase(),
+      subtotal: summary.subtotal,
+    })
+
+    if (result.valid) {
+      toast.success('Voucher berhasil diterapkan')
+      return
+    }
+
+    toast.error(result.message || 'Voucher tidak valid')
+  }
+
   const handlePlaceOrder = async () => {
+    if (!isAuthenticated) {
+      router.push('/login')
+      return
+    }
+
     if (!selectedAddress) {
       toast.error('Pilih alamat pengiriman terlebih dahulu')
       return
     }
 
+    if (!summary) {
+      toast.error(summaryError || 'Ringkasan checkout belum siap')
+      return
+    }
+
     setIsProcessing(true)
-    
-    // Simulate order processing
-    await new Promise((resolve) => setTimeout(resolve, 2000))
-    
-    setIsProcessing(false)
-    setOrderSuccess(true)
-    clearCart()
-    toast.success('Pesanan berhasil dibuat!')
+
+    try {
+      await checkoutApi.createOrder({
+        address_id: selectedAddress.id,
+        courier,
+        voucher_code: voucherCode.trim().toUpperCase() || undefined,
+        items: checkoutItems,
+      })
+
+      setOrderSuccess(true)
+      clearCart()
+      toast.success('Pesanan berhasil dibuat!')
+    } catch (error) {
+      toast.error(getErrorMessage(error) || 'Gagal membuat pesanan')
+    } finally {
+      setIsProcessing(false)
+    }
   }
 
   if (orderSuccess) {
@@ -112,13 +212,14 @@ export default function CheckoutPage() {
     )
   }
 
+  const totalLabel = summary ? formatPrice(summary.grand_total) : isSummaryLoading ? 'Menghitung...' : '-'
+
   return (
     <div className="min-h-screen pb-32 md:pb-0">
       <div className="hidden md:block">
         <Navbar />
       </div>
 
-      {/* Mobile Header */}
       <header className="sticky top-0 z-50 md:hidden bg-background border-b">
         <div className="flex items-center h-14 px-4 gap-3">
           <Button variant="ghost" size="icon" onClick={() => router.back()}>
@@ -133,7 +234,6 @@ export default function CheckoutPage() {
 
         <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
           <div className="space-y-4">
-            {/* Delivery Address */}
             <div className="p-4 bg-card border rounded-2xl">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="font-semibold">Alamat Pengiriman</h3>
@@ -143,7 +243,7 @@ export default function CheckoutPage() {
                   </Button>
                 </Link>
               </div>
-              
+
               {selectedAddress ? (
                 <div className="flex gap-3">
                   <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
@@ -170,19 +270,56 @@ export default function CheckoutPage() {
               )}
             </div>
 
-            {/* Order Items */}
+            <div className="p-4 bg-card border rounded-2xl">
+              <h3 className="font-semibold mb-3">Kurir Pengiriman</h3>
+              <RadioGroup value={courier} onValueChange={(value) => setCourier(value as CheckoutCourier)}>
+                <div className="space-y-2">
+                  {couriers.map((option) => (
+                    <Label
+                      key={option.id}
+                      htmlFor={option.id}
+                      className={cn(
+                        'flex items-center gap-3 p-3 border rounded-xl cursor-pointer transition-colors',
+                        courier === option.id ? 'border-primary bg-primary/5' : 'hover:border-primary/50'
+                      )}
+                    >
+                      <RadioGroupItem value={option.id} id={option.id} />
+                      <Truck className="h-5 w-5 text-muted-foreground" />
+                      <div className="flex-1">
+                        <p className="font-medium text-sm">{option.name}</p>
+                        <p className="text-xs text-muted-foreground">{option.description}</p>
+                      </div>
+                    </Label>
+                  ))}
+                </div>
+              </RadioGroup>
+            </div>
+
+            <div className="p-4 bg-card border rounded-2xl lg:hidden">
+              <h3 className="font-semibold mb-3">Voucher</h3>
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <TicketPercent className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    className="pl-9 uppercase"
+                    placeholder="WELCOME10"
+                    value={voucherCode}
+                    onChange={(e) => setVoucherCode(e.target.value)}
+                  />
+                </div>
+                <Button variant="outline" onClick={handleApplyVoucher} disabled={!voucherCode.trim() || !summary}>
+                  Terapkan
+                </Button>
+              </div>
+            </div>
+
             <div className="p-4 bg-card border rounded-2xl">
               <h3 className="font-semibold mb-3">Pesanan ({items.length} item)</h3>
               <div className="space-y-3">
                 {items.map((item) => (
                   <div key={item.id} className="flex gap-3">
                     <div className="relative h-16 w-16 rounded-lg overflow-hidden bg-secondary shrink-0">
-                      <Image
-                        src={item.product.image}
-                        alt={item.product.name}
-                        fill
-                        className="object-cover"
-                      />
+                      <Image src={getProductImageSrc(item.product)} alt={item.product.name} fill className="object-cover" />
                       <div className="absolute bottom-0 right-0 bg-primary text-primary-foreground text-xs font-bold px-1.5 py-0.5 rounded-tl">
                         x{item.quantity}
                       </div>
@@ -194,95 +331,97 @@ export default function CheckoutPage() {
                           + {item.toppings.map((t) => t.name).join(', ')}
                         </p>
                       )}
-                      <p className="text-sm font-semibold text-primary mt-1">
-                        {formatPrice(
-                          (item.product.price +
-                            item.toppings.reduce((sum, t) => sum + t.price, 0)) *
-                            item.quantity
-                        )}
-                      </p>
+                      <p className="text-sm text-muted-foreground mt-1">Harga dihitung ulang oleh sistem saat checkout</p>
                     </div>
                   </div>
                 ))}
               </div>
             </div>
 
-            {/* Payment Method */}
-            <div className="p-4 bg-card border rounded-2xl">
-              <h3 className="font-semibold mb-3">Metode Pembayaran</h3>
-              <RadioGroup value={paymentMethod} onValueChange={setPaymentMethod}>
-                <div className="space-y-2">
-                  {paymentMethods.map((method) => {
-                    const Icon = method.icon
-                    return (
-                      <Label
-                        key={method.id}
-                        htmlFor={method.id}
-                        className={cn(
-                          'flex items-center gap-3 p-3 border rounded-xl cursor-pointer transition-colors',
-                          paymentMethod === method.id
-                            ? 'border-primary bg-primary/5'
-                            : 'hover:border-primary/50'
-                        )}
-                      >
-                        <RadioGroupItem value={method.id} id={method.id} />
-                        <Icon className="h-5 w-5 text-muted-foreground" />
-                        <div className="flex-1">
-                          <p className="font-medium text-sm">{method.name}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {method.description}
-                          </p>
-                        </div>
-                      </Label>
-                    )
-                  })}
+            <div className="p-4 bg-card border rounded-2xl lg:hidden">
+              <h3 className="font-semibold mb-4">Ringkasan Pesanan</h3>
+              <div className="space-y-3 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Subtotal</span>
+                  <span>{summary ? formatPrice(summary.subtotal) : '-'}</span>
                 </div>
-              </RadioGroup>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Ongkos Kirim</span>
+                  <span>{summary ? formatPrice(summary.shipping_cost) : '-'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Diskon</span>
+                  <span>{summary ? `-${formatPrice(summary.discount)}` : '-'}</span>
+                </div>
+                {summary?.estimated_days && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Estimasi</span>
+                    <span>{summary.estimated_days} hari</span>
+                  </div>
+                )}
+                <div className="pt-3 border-t flex justify-between font-semibold text-base">
+                  <span>Total Pembayaran</span>
+                  <span className="text-primary">{totalLabel}</span>
+                </div>
+              </div>
+              {summaryError && <p className="mt-3 text-sm text-destructive">{summaryError}</p>}
             </div>
           </div>
 
-          {/* Order Summary - Desktop */}
           <div className="hidden lg:block">
             <div className="sticky top-24 space-y-4">
-              {/* Promo Code */}
               <div className="p-4 bg-card border rounded-2xl">
-                <h3 className="font-semibold mb-3">Kode Promo</h3>
+                <h3 className="font-semibold mb-3">Voucher</h3>
                 <div className="flex gap-2">
-                  <Input
-                    placeholder="Masukkan kode promo"
-                    value={promoCode}
-                    onChange={(e) => setPromoCode(e.target.value)}
-                  />
-                  <Button variant="outline">Terapkan</Button>
+                  <div className="relative flex-1">
+                    <TicketPercent className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      className="pl-9 uppercase"
+                      placeholder="WELCOME10"
+                      value={voucherCode}
+                      onChange={(e) => setVoucherCode(e.target.value)}
+                    />
+                  </div>
+                  <Button variant="outline" onClick={handleApplyVoucher} disabled={!voucherCode.trim() || !summary}>
+                    Terapkan
+                  </Button>
                 </div>
               </div>
 
-              {/* Summary */}
               <div className="p-4 bg-card border rounded-2xl">
-                <h3 className="font-semibold mb-4">Ringkasan Pembayaran</h3>
+                <h3 className="font-semibold mb-4">Ringkasan Pesanan</h3>
                 <div className="space-y-3 text-sm">
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Subtotal</span>
-                    <span>{formatPrice(subtotal)}</span>
+                    <span>{summary ? formatPrice(summary.subtotal) : '-'}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Ongkos Kirim</span>
-                    <span className={cn(deliveryFee === 0 && 'text-green-600')}>
-                      {deliveryFee === 0 ? 'GRATIS' : formatPrice(deliveryFee)}
-                    </span>
+                    <span>{summary ? formatPrice(summary.shipping_cost) : '-'}</span>
                   </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Diskon</span>
+                    <span>{summary ? `-${formatPrice(summary.discount)}` : '-'}</span>
+                  </div>
+                  {summary?.estimated_days && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Estimasi</span>
+                      <span>{summary.estimated_days} hari</span>
+                    </div>
+                  )}
                   <div className="pt-3 border-t flex justify-between font-semibold text-base">
                     <span>Total Pembayaran</span>
-                    <span className="text-primary">{formatPrice(total)}</span>
+                    <span className="text-primary">{totalLabel}</span>
                   </div>
                 </div>
+                {summaryError && <p className="mt-3 text-sm text-destructive">{summaryError}</p>}
               </div>
 
               <Button
                 className="w-full rounded-full"
                 size="lg"
                 onClick={handlePlaceOrder}
-                disabled={isProcessing || !selectedAddress}
+                disabled={isProcessing || isSummaryLoading || !selectedAddress || !summary}
               >
                 {isProcessing ? (
                   <>
@@ -290,7 +429,7 @@ export default function CheckoutPage() {
                     Memproses...
                   </>
                 ) : (
-                  `Bayar ${formatPrice(total)}`
+                  `Checkout ${totalLabel}`
                 )}
               </Button>
             </div>
@@ -298,17 +437,17 @@ export default function CheckoutPage() {
         </div>
       </main>
 
-      {/* Mobile Footer */}
       <div className="fixed bottom-0 left-0 right-0 z-40 bg-background border-t p-4 lg:hidden">
         <div className="flex items-center justify-between gap-4 mb-3">
           <div>
             <p className="text-xs text-muted-foreground">Total Pembayaran</p>
-            <p className="text-lg font-bold text-primary">{formatPrice(total)}</p>
+            <p className="text-lg font-bold text-primary">{totalLabel}</p>
+            {summaryError && <p className="text-xs text-destructive">{summaryError}</p>}
           </div>
           <Button
             className="flex-1 rounded-full"
             onClick={handlePlaceOrder}
-            disabled={isProcessing || !selectedAddress}
+            disabled={isProcessing || isSummaryLoading || !selectedAddress || !summary}
           >
             {isProcessing ? (
               <>
@@ -316,7 +455,7 @@ export default function CheckoutPage() {
                 Memproses...
               </>
             ) : (
-              'Bayar Sekarang'
+              'Buat Pesanan'
             )}
           </Button>
         </div>

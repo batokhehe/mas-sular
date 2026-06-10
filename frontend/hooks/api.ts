@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient, UseQueryOptions, UseMutationOpti
 import {
     catalogApi,
     cartApi,
+    checkoutApi,
     ordersApi,
     authApi,
 } from '@/lib/api';
@@ -17,6 +18,7 @@ import {
     CartSession,
     ListProductsQuery,
     ValidateVoucherRequest,
+    ValidateVoucherResponse,
     CreateOrderRequest,
     CartItem,
 } from '@/lib/types';
@@ -115,7 +117,7 @@ export function useCheckout(options?: UseMutationOptions<Order, unknown, CreateO
     const queryClient = useQueryClient();
 
     return useMutation<Order, unknown, CreateOrderRequest>({
-        mutationFn: (request) => ordersApi.checkout(request),
+        mutationFn: (request) => checkoutApi.createOrder(request),
         onSuccess: (order) => {
             // Invalidate relevant queries
             queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
@@ -126,10 +128,10 @@ export function useCheckout(options?: UseMutationOptions<Order, unknown, CreateO
 }
 
 export function useValidateVoucher(
-    options?: UseMutationOptions<Promo, unknown, ValidateVoucherRequest>
+    options?: UseMutationOptions<ValidateVoucherResponse, unknown, ValidateVoucherRequest>
 ) {
-    return useMutation<Promo, unknown, ValidateVoucherRequest>({
-        mutationFn: (request) => ordersApi.validateVoucher(request),
+    return useMutation<ValidateVoucherResponse, unknown, ValidateVoucherRequest>({
+        mutationFn: (request) => checkoutApi.validateVoucher(request),
         retry: false,
         ...options,
     });

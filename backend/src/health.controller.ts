@@ -11,7 +11,7 @@ export class HealthController {
   constructor(
     private readonly prisma: PrismaService,
     @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
-  ) {}
+  ) { }
 
   @Get()
   health() {
@@ -20,6 +20,29 @@ export class HealthController {
       uptime: process.uptime(),
       timestamp: new Date().toISOString(),
     };
+  }
+
+  @Get('redis')
+  async redisTest() {
+    try {
+      console.log('SET');
+
+      await this.cacheManager.set('test', 'hello');
+
+      console.log('GET');
+
+      const value = await this.cacheManager.get('test');
+
+      console.log('VALUE', value);
+
+      return { value };
+    } catch (e) {
+      console.error('CACHE ERROR', e);
+
+      return {
+        error: String(e),
+      };
+    }
   }
 
   @Get('ready')
@@ -34,10 +57,12 @@ export class HealthController {
     }
 
     try {
-      await this.cacheManager.set('health-check', 'ok', 5);
+      await this.cacheManager.set('health-check', 'ok');
       const value = await this.cacheManager.get<string>('health-check');
       checks.redis = value === 'ok' ? 'ok' : 'failed';
     } catch (error) {
+      console.error(error);
+
       checks.redis = 'failed';
     }
 

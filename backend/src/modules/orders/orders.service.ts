@@ -1,18 +1,36 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { OrderStatus, PaymentMethod, PaymentStatus, Promo, VoucherType } from '@prisma/client';
+import { OrderStatus, PaymentMethod, PaymentStatus, Product, Promo, VoucherType } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { EventBus } from '../../infrastructure/events/event-bus';
-import { CheckoutPaymentMethod, CreateOrderDto, ValidateVoucherDto } from './application/dto/create-order.dto';
+import { ShippingService } from '../shipping/shipping.service';
+import { CheckoutItemDto, CheckoutSummaryDto, CreateOrderDto, ShippingCostDto, ValidateVoucherDto } from './application/dto/create-order.dto';
+
+type NormalizedCheckoutItem = {
+  productId: string;
+  quantity: number;
+  toppingIds: string[];
+  spicyLevel?: number;
+  notes?: string;
+};
 
 @Injectable()
 export class OrdersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly eventBus: EventBus,
+    private readonly shipping: ShippingService,
   ) {}
 
-  private getDeliveryFee(subtotal: number) {
-    return subtotal >= 100000 ? 0 : 10000;
+  private normalizeItems(items: CheckoutItemDto[]): NormalizedCheckoutItem[] {
+    if (!items.length) throw new BadRequestException('Cart is empty');
+
+    return items.map((item) => ({
+      productId: item.product_id,
+      quantity: item.qty,
+      toppingIds: item.topping_ids ?? [],
+      spicyLevel: item.spicyLevel,
+      notes: item.notes,
+    }));
   }
 
   private async findVoucherByCode(code: string) {
@@ -73,14 +91,14 @@ export class OrdersService {
     }
   }
 
-  private calculateVoucherDiscount(voucher: Promo, subtotal: number, deliveryFee: number) {
+  private calculateVoucherDiscount(voucher: Promo, subtotal: number, shippingCost: number) {
     switch (voucher.voucherType) {
       case VoucherType.FREE_SHIPPING: {
-        if (deliveryFee === 0) {
+        if (shippingCost === 0) {
           return 0;
         }
-        const maxAmount = voucher.freeShippingMaxAmount ?? deliveryFee;
-        return Math.min(deliveryFee, maxAmount);
+        const maxAmount = voucher.freeShippingMaxAmount ?? shippingCost;
+        return Math.min(shippingCost, maxAmount);
       }
       case VoucherType.PERCENTAGE_DISCOUNT: {
         const discount = Math.floor((subtotal * (voucher.discountPercentage ?? 0)) / 100);
@@ -97,67 +115,165 @@ export class OrdersService {
     }
   }
 
-  async previewVoucher(dto: ValidateVoucherDto) {
-    const voucher = await this.findVoucherByCode(dto.code.trim().toUpperCase());
-    await this.assertVoucherAvailability(voucher, dto.userId, dto.subtotal);
-    const deliveryFee = this.getDeliveryFee(dto.subtotal);
-    const discountAmount = this.calculateVoucherDiscount(voucher, dto.subtotal, deliveryFee);
-
-    return {
-      voucherId: voucher.id,
-      voucherCode: voucher.code,
-      voucherType: voucher.voucherType,
-      discountAmount,
-      deliveryFee,
-      subtotal: dto.subtotal,
-      total: dto.subtotal + deliveryFee - discountAmount,
-    };
+  private async assertAddress(userId: string, addressId: string) {
+    const address = await this.prisma.address.findFirst({
+      where: { id: addressId, userId, deletedAt: null },
+    });
+    if (!address) throw new BadRequestException('Shipping address is invalid');
+    return address;
   }
 
-  async checkout(dto: CreateOrderDto) {
-    const productIds = dto.items.map((item) => item.productId);
-    const products = await this.prisma.product.findMany({ where: { id: { in: productIds }, deletedAt: null } });
+  private async getCartPricing(items: NormalizedCheckoutItem[]) {
+    const productIds = [...new Set(items.map((item) => item.productId))];
+    const products = await this.prisma.product.findMany({
+      where: { id: { in: productIds }, deletedAt: null, status: 'ACTIVE' },
+    });
     if (products.length !== productIds.length) throw new BadRequestException('Some products are unavailable');
 
-    const toppings = await this.prisma.topping.findMany({
-      where: { id: { in: dto.items.flatMap((item) => item.toppingIds ?? []) }, deletedAt: null },
-    });
+    const toppingIds = [...new Set(items.flatMap((item) => item.toppingIds))];
+    const toppings = toppingIds.length
+      ? await this.prisma.topping.findMany({ where: { id: { in: toppingIds }, deletedAt: null, isActive: true } })
+      : [];
+    if (toppings.length !== toppingIds.length) throw new BadRequestException('Some toppings are unavailable');
 
-    const subtotal = dto.items.reduce((sum, item) => {
-      const product = products.find((p) => p.id === item.productId)!;
-      const toppingTotal = (item.toppingIds ?? []).reduce((inner, id) => inner + (toppings.find((t) => t.id === id)?.price ?? 0), 0);
+    const subtotal = items.reduce((sum, item) => {
+      const product = products.find((candidate) => candidate.id === item.productId)!;
+      const toppingTotal = item.toppingIds.reduce((inner, id) => inner + (toppings.find((topping) => topping.id === id)?.price ?? 0), 0);
       return sum + (product.price + toppingTotal) * item.quantity;
     }, 0);
 
-    const deliveryFee = this.getDeliveryFee(subtotal);
-    let voucher: Promo | null = null;
-    let voucherDiscountAmount = 0;
+    const totalItems = items.reduce((sum, item) => sum + item.quantity, 0);
 
-    if (dto.promoCode) {
-      voucher = await this.findVoucherByCode(dto.promoCode.trim().toUpperCase());
-      await this.assertVoucherAvailability(voucher, dto.userId, subtotal);
-      voucherDiscountAmount = this.calculateVoucherDiscount(voucher, subtotal, deliveryFee);
+    return { products, toppings, subtotal, totalItems };
+  }
+
+  private assertStock(items: NormalizedCheckoutItem[], products: Product[]) {
+    for (const product of products) {
+      const requestedQty = items
+        .filter((item) => item.productId === product.id)
+        .reduce((sum, item) => sum + item.quantity, 0);
+
+      if (requestedQty > product.stock) {
+        throw new BadRequestException(`Insufficient stock for ${product.name}`);
+      }
+    }
+  }
+
+  private getShippingWeightGram(totalItems: number) {
+    return Math.max(1, totalItems) * 500;
+  }
+
+  private normalizeEstimatedDays(etd: string) {
+    return etd.replace(/\s*days?\s*$/i, '');
+  }
+
+  async calculateShippingCost(userId: string, dto: ShippingCostDto) {
+    await this.assertAddress(userId, dto.address_id);
+    const items = this.normalizeItems(dto.items);
+    const { totalItems } = await this.getCartPricing(items);
+    const rate = await this.shipping.calculateRateForCourier(dto.courier, {
+      originPostalCode: '00000',
+      destinationPostalCode: 'customer-address',
+      weightGram: this.getShippingWeightGram(totalItems),
+    });
+
+    return {
+      shipping_cost: rate.cost,
+      estimated_days: this.normalizeEstimatedDays(rate.etd),
+    };
+  }
+
+  async previewVoucher(userId: string, dto: ValidateVoucherDto) {
+    try {
+      const voucher = await this.findVoucherByCode(dto.voucher_code.trim().toUpperCase());
+      await this.assertVoucherAvailability(voucher, userId, dto.subtotal);
+      const discount = this.calculateVoucherDiscount(voucher, dto.subtotal, 0);
+
+      return {
+        valid: true,
+        discount,
+        voucher_type: voucher.voucherType,
+      };
+    } catch (error) {
+      return {
+        valid: false,
+        discount: 0,
+        voucher_type: null,
+        message: error instanceof BadRequestException ? error.message : 'Voucher is invalid',
+      };
+    }
+  }
+
+  async getSummary(userId: string, dto: CheckoutSummaryDto) {
+    await this.assertAddress(userId, dto.address_id);
+    const items = this.normalizeItems(dto.items);
+    const { products, subtotal, totalItems } = await this.getCartPricing(items);
+    this.assertStock(items, products);
+    const shipping = await this.calculateShippingCost(userId, {
+      address_id: dto.address_id,
+      courier: dto.courier,
+      items: dto.items,
+    });
+
+    let voucher: Promo | null = null;
+    let discount = 0;
+
+    if (dto.voucher_code) {
+      voucher = await this.findVoucherByCode(dto.voucher_code.trim().toUpperCase());
+      await this.assertVoucherAvailability(voucher, userId, subtotal);
+      discount = this.calculateVoucherDiscount(voucher, subtotal, shipping.shipping_cost);
     }
 
-    const totalPrice = subtotal + deliveryFee - voucherDiscountAmount;
+    return {
+      subtotal,
+      shipping_cost: shipping.shipping_cost,
+      discount,
+      grand_total: subtotal + shipping.shipping_cost - discount,
+      total_items: totalItems,
+      estimated_days: shipping.estimated_days,
+      voucher,
+    };
+  }
+
+  async checkout(userId: string, dto: CreateOrderDto) {
+    const items = this.normalizeItems(dto.items);
+    const { products, toppings } = await this.getCartPricing(items);
+    this.assertStock(items, products);
+    const summary = await this.getSummary(userId, dto);
+    const voucher = summary.voucher;
     const orderNumber = `BN-${new Date().toISOString().slice(0, 10).replaceAll('-', '')}-${Date.now().toString().slice(-5)}`;
 
     const order = await this.prisma.$transaction(async (tx) => {
+      for (const product of products) {
+        const requestedQty = items
+          .filter((item) => item.productId === product.id)
+          .reduce((sum, item) => sum + item.quantity, 0);
+
+        const stockUpdate = await tx.product.updateMany({
+          where: { id: product.id, stock: { gte: requestedQty } },
+          data: { stock: { decrement: requestedQty } },
+        });
+
+        if (stockUpdate.count !== 1) {
+          throw new BadRequestException(`Insufficient stock for ${product.name}`);
+        }
+      }
+
       const createdOrder = await tx.order.create({
         data: {
           orderNumber,
-          userId: dto.userId,
-          addressId: dto.addressId,
-          paymentMethod: dto.paymentMethod as PaymentMethod,
-          subtotal,
-          deliveryFee,
-          voucherDiscountAmount,
-          totalPrice,
+          userId,
+          addressId: dto.address_id,
+          paymentMethod: PaymentMethod.COD,
+          subtotal: summary.subtotal,
+          deliveryFee: summary.shipping_cost,
+          voucherDiscountAmount: summary.discount,
+          totalPrice: summary.grand_total,
           voucherId: voucher?.id,
           voucherCode: voucher?.code,
           voucherType: voucher?.voucherType,
           items: {
-            create: dto.items.map((item) => {
+            create: items.map((item) => {
               const product = products.find((p) => p.id === item.productId)!;
               return {
                 productId: product.id,
@@ -167,7 +283,7 @@ export class OrdersService {
                 spicyLevel: item.spicyLevel,
                 notes: item.notes,
                 toppings: {
-                  create: (item.toppingIds ?? []).map((id) => {
+                  create: item.toppingIds.map((id) => {
                     const topping = toppings.find((t) => t.id === id)!;
                     return { toppingId: id, name: topping.name, price: topping.price };
                   }),
@@ -177,9 +293,18 @@ export class OrdersService {
           },
           payment: {
             create: {
-              method: dto.paymentMethod as PaymentMethod,
-              amount: totalPrice,
-              status: dto.paymentMethod === CheckoutPaymentMethod.COD ? PaymentStatus.PENDING : PaymentStatus.WAITING_VERIFICATION,
+              method: PaymentMethod.COD,
+              amount: summary.grand_total,
+              status: PaymentStatus.PENDING,
+            },
+          },
+          shipment: {
+            create: {
+              provider: dto.courier,
+              service: dto.courier === 'paxel' ? 'Same Day' : 'REG',
+              status: 'RATE_SELECTED',
+              cost: summary.shipping_cost,
+              metadata: { estimatedDays: summary.estimated_days },
             },
           },
           events: {
@@ -205,7 +330,7 @@ export class OrdersService {
         await tx.voucherUsage.create({
           data: {
             voucherId: voucher.id,
-            userId: dto.userId,
+            userId,
             orderId: createdOrder.id,
           },
         });

@@ -35,7 +35,6 @@ export function Navbar() {
   if (!mounted) {
     return null
   }
-
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="container flex h-16 items-center justify-between gap-4">
@@ -128,7 +127,13 @@ export function Navbar() {
                   <img
                     src={user.avatar}
                     alt={user.name}
+                    referrerPolicy="no-referrer"
                     className="h-8 w-8 rounded-full object-cover"
+                    onLoad={() => console.log('LOADED')}
+                    onError={(e) => {
+                      console.log('FAILED');
+                      console.log(e.currentTarget.src);
+                    }}
                   />
                 ) : (
                   <User className="h-5 w-5" />

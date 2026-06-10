@@ -1,10 +1,34 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { Product, Topping, Address } from './data';
+import type { Topping, Address } from './data';
+import { getProductImageSrc } from './product-images';
+
+export type CartProduct = {
+  id: string;
+  name: string;
+  price: number;
+  description?: string;
+  image?: string;
+  imageUrl?: string;
+  originalPrice?: number;
+  rating?: number | string;
+  reviewCount?: number;
+  spicyLevel?: number;
+  isBestSeller?: boolean;
+  isNew?: boolean;
+  stock?: number;
+  slug?: string;
+  sku?: string;
+  category?: unknown;
+  categoryId?: string;
+  status?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
 
 export interface CartItem {
   id: string;
-  product: Product;
+  product: CartProduct;
   quantity: number;
   notes?: string;
   toppings: Topping[];
@@ -54,15 +78,71 @@ interface FavoritesState {
   isFavorite: (productId: string) => boolean;
 }
 
+function getCartItemKey(item: Omit<CartItem, 'id'>) {
+  const toppings = Array.isArray(item.toppings) ? item.toppings : [];
+  const toppingIds = [...toppings.map((t) => t.id)].sort();
+  return `${item.product.id}-${item.spicyLevel}-${toppingIds.join('-')}-${item.notes || ''}`;
+}
+
+function normalizeCartItems(items: CartItem[]) {
+  const itemsByKey = new Map<string, CartItem>();
+
+  items.forEach((item) => {
+    if (!item?.product?.id) return;
+
+    const id = getCartItemKey(item);
+    const existingItem = itemsByKey.get(id);
+    const quantity = Number.isFinite(item.quantity) && item.quantity > 0 ? item.quantity : 1;
+    const normalizedItem = {
+      ...item,
+      id,
+      quantity,
+      toppings: Array.isArray(item.toppings) ? item.toppings : [],
+      product: {
+        ...item.product,
+        image: getProductImageSrc(item.product),
+      },
+    };
+
+    if (existingItem) {
+      itemsByKey.set(id, {
+        ...existingItem,
+        quantity: existingItem.quantity + item.quantity,
+      });
+      return;
+    }
+
+    itemsByKey.set(id, normalizedItem);
+  });
+
+  return Array.from(itemsByKey.values());
+}
+
 export const useCartStore = create<CartState>()(
   persist(
     (set, get) => ({
       items: [],
       addItem: (item) => {
-        const id = `${item.product.id}-${item.spicyLevel}-${item.toppings.map(t => t.id).join('-')}-${Date.now()}`;
-        set((state) => ({
-          items: [...state.items, { ...item, id }],
-        }));
+        set((state) => {
+          if (item.quantity <= 0) {
+            return state;
+          }
+
+          const id = getCartItemKey(item);
+          return {
+            items: normalizeCartItems([
+              ...state.items,
+              {
+                ...item,
+                id,
+                product: {
+                  ...item.product,
+                  image: getProductImageSrc(item.product),
+                },
+              },
+            ]),
+          };
+        });
       },
       removeItem: (id) => {
         set((state) => ({
@@ -100,6 +180,14 @@ export const useCartStore = create<CartState>()(
     }),
     {
       name: 'baso-cart',
+      version: 2,
+      migrate: (persistedState) => {
+        const state = persistedState as CartState;
+        return {
+          ...state,
+          items: normalizeCartItems(state.items || []),
+        };
+      },
     }
   )
 );

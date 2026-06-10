@@ -1,6 +1,6 @@
 import { Injectable, UnauthorizedException, Logger, BadRequestException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import bcrypt from 'bcryptjs';
+import * as bcrypt from 'bcryptjs';
 import { StringValue } from 'ms';
 import { randomUUID } from 'crypto';
 import { OAuth2Client } from 'google-auth-library';

@@ -28,6 +28,7 @@ import { useCartStore, useFavoritesStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import type { Topping } from '@/lib/types'
+import { getProductImageSrc } from '@/lib/product-images'
 
 interface ProductPageProps {
   params: Promise<{ id: string }>
@@ -111,7 +112,8 @@ export default function ProductPage({ params }: ProductPageProps) {
       description: product.description,
       price: product.price,
       originalPrice: product.originalPrice,
-      image: product.imageUrl,
+      image: getProductImageSrc(product),
+      imageUrl: product.imageUrl,
       rating: product.rating,
       reviewCount: product.reviewCount,
       spicyLevel: product.spicyLevel,
@@ -178,7 +180,7 @@ export default function ProductPage({ params }: ProductPageProps) {
               className="relative aspect-square rounded-2xl overflow-hidden bg-secondary/50"
             >
               <Image
-                src={product.imageUrl || '/products/placeholder.jpg'}
+                src={getProductImageSrc(product)}
                 alt={product.name}
                 fill
                 className="object-cover"

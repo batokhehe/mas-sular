@@ -209,15 +209,57 @@ export interface ListProductsQuery {
 }
 
 export interface ValidateVoucherRequest {
-  userId: string;
-  code: string;
+  voucher_code: string;
   subtotal: number;
 }
 
+export type CheckoutCourier = 'paxel' | 'jne';
+
+export interface CheckoutItemRequest {
+  product_id: string;
+  qty: number;
+  topping_ids?: string[];
+  spicyLevel?: number;
+  notes?: string;
+}
+
+export interface ShippingCostRequest {
+  address_id: string;
+  courier: CheckoutCourier;
+  items: CheckoutItemRequest[];
+}
+
+export interface ShippingCostResponse {
+  shipping_cost: number;
+  estimated_days: string;
+}
+
+export interface CheckoutSummaryRequest {
+  address_id: string;
+  courier: CheckoutCourier;
+  voucher_code?: string;
+  items: CheckoutItemRequest[];
+}
+
+export interface CheckoutSummaryResponse {
+  subtotal: number;
+  shipping_cost: number;
+  discount: number;
+  grand_total: number;
+  total_items: number;
+  estimated_days?: string;
+}
+
+export interface ValidateVoucherResponse {
+  valid: boolean;
+  discount: number;
+  voucher_type: Promo['voucherType'] | null;
+  message?: string;
+}
+
 export interface CreateOrderRequest {
-  userId: string;
-  addressId: string;
-  paymentMethod: PaymentMethod;
-  promoCode?: string;
-  items: CartItem[];
+  address_id: string;
+  courier: CheckoutCourier;
+  voucher_code?: string;
+  items: CheckoutItemRequest[];
 }

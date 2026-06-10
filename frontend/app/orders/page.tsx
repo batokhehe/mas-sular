@@ -29,6 +29,7 @@ import { BottomNav } from '@/components/bottom-nav'
 import { useAuthStore } from '@/lib/store'
 import { sampleOrders, formatPrice, formatDate, type Order } from '@/lib/data'
 import { cn } from '@/lib/utils'
+import { getProductImageSrc } from '@/lib/product-images'
 
 const statusConfig = {
   pending: {
@@ -91,7 +92,7 @@ function OrderCard({ order, onClick }: { order: Order; onClick: () => void }) {
               className="relative h-12 w-12 rounded-lg overflow-hidden bg-secondary border-2 border-background"
             >
               <Image
-                src={item.product.image}
+                src={getProductImageSrc(item.product)}
                 alt={item.product.name}
                 fill
                 className="object-cover"
@@ -187,7 +188,7 @@ function OrderDetailModal({ order, open, onClose }: { order: Order | null; open:
                 <div key={index} className="flex gap-3">
                   <div className="relative h-14 w-14 rounded-lg overflow-hidden bg-secondary shrink-0">
                     <Image
-                      src={item.product.image}
+                      src={getProductImageSrc(item.product)}
                       alt={item.product.name}
                       fill
                       className="object-cover"

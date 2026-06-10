@@ -1,13 +1,13 @@
 'use client'
 
-import { useState } from 'react'
-import { useEffect } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import Script from 'next/script'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { MapPin, Loader2, Check } from 'lucide-react'
+import { Check, Loader2, MapPin } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -25,11 +25,28 @@ const addressSchema = z.object({
 
 type AddressFormData = z.infer<typeof addressSchema>
 
+const DEFAULT_LOCATION = { lat: -6.2088, lng: 106.8456 }
+const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+
+type LatLng = { lat: number; lng: number }
+
+declare global {
+  interface Window {
+    google?: any
+  }
+}
+
 export default function OnboardingPage() {
   const router = useRouter()
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [mapLocation, setMapLocation] = useState<{ lat: number; lng: number } | null>(null)
+  const [mapLocation, setMapLocation] = useState<LatLng | null>(null)
+  const [isMapReady, setIsMapReady] = useState(false)
+  const [isGeocoding, setIsGeocoding] = useState(false)
   const [isLocating, setIsLocating] = useState(false)
+  const mapRef = useRef<HTMLDivElement | null>(null)
+  const mapInstanceRef = useRef<any>(null)
+  const markerRef = useRef<any>(null)
+  const geocoderRef = useRef<any>(null)
   
   const addAddress = useAddressStore((state) => state.addAddress)
   const completeOnboarding = useAuthStore((state) => state.completeOnboarding)
@@ -53,6 +70,86 @@ export default function OnboardingPage() {
     },
   })
 
+  const reverseGeocodeLocation = useCallback((location: LatLng) => {
+    if (!geocoderRef.current) return
+
+    setIsGeocoding(true)
+    geocoderRef.current.geocode({ location }, (results: any[], status: string) => {
+      setIsGeocoding(false)
+
+      if (status === 'OK' && results?.[0]?.formatted_address) {
+        setValue('fullAddress', results[0].formatted_address, { shouldValidate: true })
+        return
+      }
+
+      toast.error('Alamat dari lokasi ini tidak ditemukan')
+    })
+  }, [setValue])
+
+  const selectMapLocation = useCallback((location: LatLng, shouldReverseGeocode = true) => {
+    setMapLocation(location)
+
+    if (mapInstanceRef.current) {
+      mapInstanceRef.current.panTo(location)
+      mapInstanceRef.current.setZoom(16)
+    }
+
+    if (markerRef.current) {
+      markerRef.current.setPosition(location)
+    }
+
+    if (shouldReverseGeocode) {
+      reverseGeocodeLocation(location)
+    }
+  }, [reverseGeocodeLocation])
+
+  const initializeMap = useCallback(() => {
+    if (!mapRef.current || !window.google?.maps || mapInstanceRef.current) return
+
+    const center = mapLocation || DEFAULT_LOCATION
+    geocoderRef.current = new window.google.maps.Geocoder()
+    mapInstanceRef.current = new window.google.maps.Map(mapRef.current, {
+      center,
+      zoom: mapLocation ? 16 : 12,
+      disableDefaultUI: true,
+      zoomControl: true,
+      fullscreenControl: true,
+      mapTypeControl: false,
+      streetViewControl: false,
+    })
+
+    markerRef.current = new window.google.maps.Marker({
+      position: center,
+      map: mapInstanceRef.current,
+      draggable: true,
+      title: 'Lokasi pengiriman',
+    })
+
+    mapInstanceRef.current.addListener('click', (event: any) => {
+      if (!event.latLng) return
+      selectMapLocation({
+        lat: event.latLng.lat(),
+        lng: event.latLng.lng(),
+      })
+    })
+
+    markerRef.current.addListener('dragend', (event: any) => {
+      if (!event.latLng) return
+      selectMapLocation({
+        lat: event.latLng.lat(),
+        lng: event.latLng.lng(),
+      })
+    })
+
+    setIsMapReady(true)
+  }, [mapLocation, selectMapLocation])
+
+  useEffect(() => {
+    if (googleMapsApiKey && window.google?.maps && mapRef.current && !mapInstanceRef.current) {
+      initializeMap()
+    }
+  }, [initializeMap])
+
   const handleGetLocation = () => {
     if (!navigator.geolocation) {
       toast.error('Browser Anda tidak mendukung geolokasi')
@@ -63,12 +160,9 @@ export default function OnboardingPage() {
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const { latitude, longitude } = position.coords
-        setMapLocation({ lat: latitude, lng: longitude })
+        selectMapLocation({ lat: latitude, lng: longitude }, Boolean(geocoderRef.current))
         setIsLocating(false)
         toast.success('Lokasi berhasil didapatkan')
-        
-        // Simulate reverse geocoding
-        setValue('fullAddress', `Jl. Contoh No. ${Math.floor(Math.random() * 100)}, Jakarta Pusat, DKI Jakarta 10110`)
       },
       (error) => {
         setIsLocating(false)
@@ -88,8 +182,8 @@ export default function OnboardingPage() {
         phone: data.phone,
         fullAddress: data.fullAddress,
         notes: data.notes,
-        latitude: mapLocation?.lat || -6.2088,
-        longitude: mapLocation?.lng || 106.8456,
+        latitude: mapLocation?.lat || DEFAULT_LOCATION.lat,
+        longitude: mapLocation?.lng || DEFAULT_LOCATION.lng,
         isDefault: true,
       })
 
@@ -164,36 +258,50 @@ export default function OnboardingPage() {
             </p>
           </div>
 
-          {/* Map Placeholder */}
-          <div className="relative h-48 rounded-2xl overflow-hidden bg-secondary mb-6">
-            <div className="absolute inset-0 flex flex-col items-center justify-center">
-              {mapLocation ? (
-                <>
-                  <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center mb-2">
-                    <MapPin className="h-6 w-6 text-primary" />
+          {googleMapsApiKey && (
+            <Script
+              src={`https://maps.googleapis.com/maps/api/js?key=${googleMapsApiKey}`}
+              strategy="afterInteractive"
+              onLoad={initializeMap}
+              onError={() => toast.error('Gagal memuat Google Maps')}
+            />
+          )}
+
+          {/* Map */}
+          <div className="relative h-56 rounded-lg overflow-hidden bg-secondary mb-3 border">
+            {googleMapsApiKey ? (
+              <>
+                <div ref={mapRef} className="absolute inset-0" />
+                {!isMapReady && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-secondary">
+                    <Loader2 className="h-7 w-7 animate-spin text-primary mb-2" />
+                    <p className="text-sm text-muted-foreground">Memuat Google Maps...</p>
                   </div>
-                  <p className="text-sm font-medium">Lokasi Terpilih</p>
-                  <p className="text-xs text-muted-foreground">
-                    {mapLocation.lat.toFixed(4)}, {mapLocation.lng.toFixed(4)}
-                  </p>
-                </>
-              ) : (
-                <>
-                  <MapPin className="h-8 w-8 text-muted-foreground mb-2" />
-                  <p className="text-sm text-muted-foreground">
-                    Pilih lokasi untuk pengiriman
-                  </p>
-                </>
-              )}
-            </div>
-            
-            {/* Grid overlay for map feel */}
-            <div className="absolute inset-0 opacity-20">
-              <div className="w-full h-full" style={{
-                backgroundImage: 'linear-gradient(to right, currentColor 1px, transparent 1px), linear-gradient(to bottom, currentColor 1px, transparent 1px)',
-                backgroundSize: '40px 40px',
-              }} />
-            </div>
+                )}
+              </>
+            ) : (
+              <div className="absolute inset-0 flex flex-col items-center justify-center px-6 text-center">
+                <MapPin className="h-8 w-8 text-muted-foreground mb-2" />
+                <p className="text-sm font-medium">Google Maps belum dikonfigurasi</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Tambahkan NEXT_PUBLIC_GOOGLE_MAPS_API_KEY untuk memilih titik pengiriman di peta.
+                </p>
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between gap-3 mb-6 text-xs text-muted-foreground">
+            <span>
+              {mapLocation
+                ? `${mapLocation.lat.toFixed(5)}, ${mapLocation.lng.toFixed(5)}`
+                : 'Ketuk peta atau gunakan lokasi saat ini'}
+            </span>
+            {isGeocoding && (
+              <span className="inline-flex items-center gap-1 whitespace-nowrap">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Membaca alamat
+              </span>
+            )}
           </div>
 
           <Button

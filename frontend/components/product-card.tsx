@@ -11,6 +11,7 @@ import { formatPrice } from '@/lib/data'
 import { type Product } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
+import { getProductImageSrc } from '@/lib/product-images'
 
 interface ProductCardProps {
   product: Product | (typeof import('@/lib/data').products)[0]
@@ -55,7 +56,7 @@ export function ProductCard({ product, index = 0 }: ProductCardProps) {
           {/* Image Container */}
           <div className="relative aspect-square overflow-hidden bg-secondary/50">
             <Image
-              src={('image' in product ? product.image : product.imageUrl) || '/products/placeholder.jpg'}
+              src={getProductImageSrc(product)}
               alt={product.name}
               fill
               className="object-cover transition-transform duration-300 group-hover:scale-105"

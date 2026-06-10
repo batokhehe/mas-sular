@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import amqp from 'amqplib';
+import * as amqp from 'amqplib';
 import { DomainEvent } from './domain-event';
 
 @Injectable()

@@ -20,6 +20,7 @@ import { PaymentsModule } from './modules/payments/payments.module';
 import { ShippingModule } from './modules/shipping/shipping.module';
 import { UsersModule } from './modules/users/users.module';
 import { HealthController } from './health.controller';
+import { UploadModule } from './modules/upload/upload.module';
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { HealthController } from './health.controller';
     ShippingModule,
     CmsModule,
     AuditModule,
+    UploadModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

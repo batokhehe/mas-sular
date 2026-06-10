@@ -1,5 +1,7 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { AuthUser, CurrentUser } from '../../../common/decorators/current-user.decorator';
+import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { CreateOrderDto, ValidateVoucherDto } from '../application/dto/create-order.dto';
 import { OrdersService } from '../orders.service';
 
@@ -9,13 +11,17 @@ export class OrdersController {
   constructor(private readonly orders: OrdersService) {}
 
   @Post('checkout')
-  checkout(@Body() dto: CreateOrderDto) {
-    return this.orders.checkout(dto);
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  checkout(@CurrentUser() user: AuthUser, @Body() dto: CreateOrderDto) {
+    return this.orders.checkout(user.sub, dto);
   }
 
   @Post('voucher/preview')
-  previewVoucher(@Body() dto: ValidateVoucherDto) {
-    return this.orders.previewVoucher(dto);
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  previewVoucher(@CurrentUser() user: AuthUser, @Body() dto: ValidateVoucherDto) {
+    return this.orders.previewVoucher(user.sub, dto);
   }
 
   @Get('users/:userId')

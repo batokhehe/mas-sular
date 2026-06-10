@@ -10,7 +10,12 @@ import {
   AuthResponse,
   ListProductsQuery,
   ValidateVoucherRequest,
+  ValidateVoucherResponse,
   CreateOrderRequest,
+  ShippingCostRequest,
+  ShippingCostResponse,
+  CheckoutSummaryRequest,
+  CheckoutSummaryResponse,
   CartItem,
   CreateAddressRequest,
   User,
@@ -155,6 +160,30 @@ export const ordersApi = {
     const { data } = await apiClient.get<Order[]>(`/orders/users/${userId}`, {
       params: { status },
     });
+    return data;
+  },
+};
+
+// ============ CHECKOUT API ============
+
+export const checkoutApi = {
+  async getShippingCost(request: ShippingCostRequest): Promise<ShippingCostResponse> {
+    const { data } = await apiClient.post<ShippingCostResponse>('/checkout/shipping-cost', request);
+    return data;
+  },
+
+  async validateVoucher(request: ValidateVoucherRequest): Promise<ValidateVoucherResponse> {
+    const { data } = await apiClient.post<ValidateVoucherResponse>('/checkout/validate-voucher', request);
+    return data;
+  },
+
+  async getSummary(request: CheckoutSummaryRequest): Promise<CheckoutSummaryResponse> {
+    const { data } = await apiClient.post<CheckoutSummaryResponse>('/checkout/summary', request);
+    return data;
+  },
+
+  async createOrder(request: CreateOrderRequest): Promise<Order> {
+    const { data } = await apiClient.post<Order>('/checkout/order', request);
     return data;
   },
 };

@@ -7,12 +7,18 @@ import { redisStore } from 'cache-manager-ioredis-yet';
   imports: [
     CacheModule.registerAsync({
       isGlobal: true,
-      useFactory: async () => ({
-        store: await redisStore({ url: process.env.REDIS_URL }),
-        ttl: 60_000,
-      }),
+      useFactory: async () => {
+        const store = await redisStore({
+          url: process.env.REDIS_URL,
+        });
+
+        return {
+          store,
+          ttl: 60000,
+        };
+      }
     }),
   ],
   exports: [CacheModule],
 })
-export class CacheInfrastructureModule {}
+export class CacheInfrastructureModule { }

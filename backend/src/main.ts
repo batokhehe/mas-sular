@@ -6,10 +6,14 @@ import helmet from 'helmet';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { NestExpressApplication } from '@nestjs/platform-express';
+import { join } from 'path';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
-  const logger = app.get(Logger);
+  const app = await NestFactory.create<NestExpressApplication>(
+    AppModule,
+    { bufferLogs: true },
+  ); const logger = app.get(Logger);
   app.useLogger(logger);
 
   app.setGlobalPrefix(process.env.API_PREFIX ?? 'api');
@@ -24,15 +28,21 @@ async function bootstrap(): Promise<void> {
       allowedOrigins.length === 0
         ? true
         : (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-            if (!origin || allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
-              callback(null, true);
-            } else {
-              callback(new Error('Not allowed by CORS'));
-            }
-          },
+          if (!origin || allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
+            callback(null, true);
+          } else {
+            callback(new Error('Not allowed by CORS'));
+          }
+        },
     credentials: true,
   });
-  app.use(helmet());
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: {
+        policy: 'cross-origin',
+      },
+    }),
+  );
   app.use(cookieParser(process.env.COOKIE_SECRET));
   app.useGlobalPipes(
     new ValidationPipe({
@@ -43,6 +53,12 @@ async function bootstrap(): Promise<void> {
     }),
   );
   app.useGlobalFilters(new AllExceptionsFilter(logger));
+  app.useStaticAssets(
+    join(process.cwd(), 'uploads'),
+    {
+      prefix: '/uploads/',
+    },
+  );
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle('Baso Nusantara API')

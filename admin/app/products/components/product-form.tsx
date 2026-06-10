@@ -4,6 +4,8 @@ import { useMemo, useState } from 'react';
 import { AdminCategory, AdminProduct } from '@/lib/admin';
 import { Button } from '@/components/ui/button';
 import { Card, CardTitle } from '@/components/ui/card';
+import Image from 'next/image';
+import { uploadImage } from '@/lib/upload';
 
 interface ProductFormProps {
   categories: AdminCategory[];
@@ -22,7 +24,7 @@ export type ProductFormValues = {
   description: string;
   price: number;
   originalPrice?: number;
-  imageUrl: string;
+  imageUrl?: string;
   spicyLevel?: number;
   isBestSeller: boolean;
   isNew: boolean;
@@ -47,6 +49,11 @@ export function ProductForm({
   isDeleting,
   submitLabel,
 }: ProductFormProps) {
+  const [isUploading, setIsUploading] = useState(false);
+  const [imagePreview, setImagePreview] = useState(
+    initialValues?.imageUrl ?? '',
+  );
+
   const [values, setValues] = useState<ProductFormValues>({
     sku: initialValues?.sku ?? '',
     slug: initialValues?.slug ?? '',
@@ -58,7 +65,9 @@ export function ProductForm({
     spicyLevel: initialValues?.spicyLevel ?? undefined,
     isBestSeller: initialValues?.isBestSeller ?? false,
     isNew: initialValues?.isNew ?? false,
-    status: (initialValues?.status as ProductFormValues['status']) ?? 'ACTIVE',
+    status:
+      (initialValues?.status as ProductFormValues['status']) ??
+      'ACTIVE',
     stock: initialValues?.stock ?? 0,
     categoryId: initialValues?.categoryId ?? categories[0]?.id ?? '',
   });
@@ -77,8 +86,45 @@ export function ProductForm({
     }));
   };
 
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+  const handleImageUpload = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = event.target.files?.[0];
+
+    if (!file) return;
+
+    setIsUploading(true);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await uploadImage(formData);
+
+      setValues((prev) => ({
+        ...prev,
+        imageUrl: response.url,
+      }));
+
+      setImagePreview(response.url);
+    } catch (error) {
+      console.error(error);
+      alert('Failed to upload image');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleSubmit = async (
+    event: React.FormEvent<HTMLFormElement>,
+  ) => {
     event.preventDefault();
+
+    if (!values.imageUrl) {
+      alert('Please upload an image first');
+      return;
+    }
+
     await onSubmit(values);
   };
 
@@ -182,13 +228,27 @@ export function ProductForm({
             </select>
           </label>
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Image URL</span>
+            <span>Product Image</span>
+
             <input
-              value={values.imageUrl}
-              onChange={(event) => handleChange('imageUrl', event.target.value)}
-              className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none focus:border-[#465fff] focus:bg-white"
-              required
+              type="file"
+              accept="image/*"
+              onChange={handleImageUpload}
             />
+
+            {isUploading && (
+              <p className="text-xs text-gray-500">
+                Uploading...
+              </p>
+            )}
+
+            {imagePreview && (
+              <img
+                src={imagePreview}
+                alt="Preview"
+                className="mt-2 h-40 w-40 rounded-lg border object-cover"
+              />
+            )}
           </label>
           <label className="space-y-2 text-sm text-gray-700">
             <span>Status</span>
@@ -230,10 +290,33 @@ export function ProductForm({
         </div>
 
         <div className="flex flex-wrap gap-3">
-          <Button type="submit" disabled={isSubmitting}>{submitLabel}</Button>
+          <Button
+            type="submit"
+            disabled={isSubmitting || isUploading}
+          >
+            {submitLabel}
+          </Button>
           {onDelete ? (
-            <Button type="button" className="bg-white text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50" disabled={isDeleting} onClick={onDelete}>
-              Delete
+            <Button
+              type="button"
+              disabled={isDeleting}
+              className="
+    bg-red-600
+    text-white
+    hover:bg-red-700
+    focus:ring-red-500
+  "
+              onClick={async () => {
+                const confirmed = window.confirm(
+                  'Are you sure you want to delete this product? This action cannot be undone.'
+                );
+
+                if (!confirmed) return;
+
+                await onDelete?.();
+              }}
+            >
+              {isDeleting ? 'Deleting...' : 'Delete'}
             </Button>
           ) : null}
         </div>
