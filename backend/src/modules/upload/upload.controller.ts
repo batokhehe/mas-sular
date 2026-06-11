@@ -8,9 +8,13 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth } from '@nestjs/swagger';
 import { diskStorage } from 'multer';
-import { extname } from 'path';
 import { AdminGuard } from '../../common/guards/admin.guard';
 import { UploadService } from './upload.service';
+import {
+    imageFileFilter,
+    MAX_UPLOAD_SIZE_BYTES,
+    normalizeUploadFilename,
+} from './upload.util';
 
 @Controller('upload')
 export class UploadController {
@@ -25,21 +29,12 @@ export class UploadController {
         FileInterceptor('file', {
             storage: diskStorage({
                 destination: './uploads',
-
                 filename: (req, file, cb) => {
-                    const uniqueName =
-                        Date.now() +
-                        '-' +
-                        Math.round(Math.random() * 1e9);
-
-                    cb(
-                        null,
-                        `${uniqueName}${extname(
-                            file.originalname,
-                        )}`,
-                    );
+                    cb(null, normalizeUploadFilename(file.originalname));
                 },
             }),
+            fileFilter: imageFileFilter,
+            limits: { fileSize: MAX_UPLOAD_SIZE_BYTES },
         }),
     )
     uploadFile(
