@@ -53,6 +53,9 @@ async function bootstrap(): Promise<void> {
     }),
   );
   app.useGlobalFilters(new AllExceptionsFilter(logger));
+  // Ensure OnModuleDestroy fires on SIGTERM/SIGINT so the outbox relay stops
+  // its loop and closes the shared AMQP connection cleanly.
+  app.enableShutdownHooks();
   app.useStaticAssets(
     join(process.cwd(), 'uploads'),
     {
