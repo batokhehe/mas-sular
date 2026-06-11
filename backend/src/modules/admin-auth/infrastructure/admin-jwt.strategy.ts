@@ -1,7 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
+import { PrismaService } from '../../../database/prisma.service';
 
 interface AdminJwtPayload {
   sub: string;
@@ -14,7 +15,10 @@ interface AdminJwtPayload {
 
 @Injectable()
 export class AdminJwtStrategy extends PassportStrategy(Strategy, 'admin-jwt') {
-  constructor(config: ConfigService) {
+  constructor(
+    config: ConfigService,
+    private readonly prisma: PrismaService,
+  ) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
@@ -22,7 +26,14 @@ export class AdminJwtStrategy extends PassportStrategy(Strategy, 'admin-jwt') {
     });
   }
 
-  validate(payload: AdminJwtPayload) {
+  async validate(payload: AdminJwtPayload) {
+    const admin = await this.prisma.admin.findFirst({
+      where: { id: payload.sub, isActive: true },
+      select: { id: true },
+    });
+    if (!admin) {
+      throw new UnauthorizedException('Admin account is no longer active');
+    }
     return {
       sub: payload.sub,
       email: payload.email,

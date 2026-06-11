@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -E \"\\(^|/\\)\\\\.env$\")",
+      "Bash(npx tsc *)",
+      "Bash(npx jest *)",
+      "Bash(git -C \"C:\\\\Users\\\\naufal.mahardika.GTX-NOTE-196\\\\Documents\\\\Naufal\\\\Example\\\\Mas Sular\\\\workspace\" add backend/src/modules/upload/upload.controller.ts admin/lib/upload.ts)",
+      "Bash(git -C 'C:\\\\Users\\\\naufal.mahardika.GTX-NOTE-196\\\\Documents\\\\Naufal\\\\Example\\\\Mas Sular\\\\workspace' commit -m ' *)",
+      "Bash(git -C \"C:\\\\Users\\\\naufal.mahardika.GTX-NOTE-196\\\\Documents\\\\Naufal\\\\Example\\\\Mas Sular\\\\workspace\" show --stat HEAD)",
+      "Bash(node -e \"console.log\\(require.resolve\\('ts-jest'\\)\\)\")",
+      "Bash(node -e \"console.log\\(require.resolve\\('ts-jest/package.json'\\)\\)\")",
+      "Bash(node -e \"try{require.resolve\\('ts-jest'\\)}catch\\(e\\){console.log\\(e.code, e.message.split\\('\\\\n'\\)[0]\\)}\")",
+      "Bash(pnpm install *)",
+      "Bash(node -e \"try{console.log\\('ts-jest dist:', require.resolve\\('ts-jest'\\)\\)}catch\\(e\\){console.log\\('ts-jest:', e.code\\)}\")",
+      "Bash(node -e \"try{console.log\\('typescript:', require.resolve\\('typescript'\\)\\)}catch\\(e\\){console.log\\('typescript:', e.code\\)}\")",
+      "Bash(node -e \"try{console.log\\('ts-jest OK:', require.resolve\\('ts-jest'\\)\\)}catch\\(e\\){console.log\\('ts-jest:', e.code\\)}\")",
+      "Bash(git -C \"C:\\\\Users\\\\naufal.mahardika.GTX-NOTE-196\\\\Documents\\\\Naufal\\\\Example\\\\Mas Sular\\\\workspace\" add backend/src/modules/upload/upload.util.ts backend/src/modules/upload/upload.controller.ts backend/jest.config.js backend/test/unit/upload.util.spec.ts)",
+      "Bash(git -C \"C:\\\\Users\\\\naufal.mahardika.GTX-NOTE-196\\\\Documents\\\\Naufal\\\\Example\\\\Mas Sular\\\\workspace\" add admin/lib/api.ts)",
+      "Bash(git -C \"C:\\\\Users\\\\naufal.mahardika.GTX-NOTE-196\\\\Documents\\\\Naufal\\\\Example\\\\Mas Sular\\\\workspace\" log --oneline -4)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
+    ]
+  }
+}
