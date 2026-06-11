@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, UnprocessableEntityException } from '@nestjs/common';
 import { IdempotencyKey, IdempotencyStatus, Prisma } from '@prisma/client';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
+import { hostname } from 'os';
 import { PrismaService } from '../../database/prisma.service';
 import { IDEMPOTENCY_CONFIG, IdempotencyConfig } from './idempotency.config';
 
@@ -17,6 +18,24 @@ export type BeginResult =
   | { kind: 'proceed'; record: IdempotencyKey }
   | { kind: 'replay'; statusCode: number; body: Prisma.JsonValue }
   | { kind: 'processing' };
+
+/** Resolution of a key when the caller no longer owns it (already replay/processing). */
+export type ResolveResult = Exclude<BeginResult, { kind: 'proceed' }>;
+
+/**
+ * Thrown by finalize()/markFailed() guards when the caller's fenceToken no longer
+ * matches the row: the reservation was reclaimed by a newer owner. Raising this
+ * inside the order transaction rolls the whole unit back.
+ */
+export class SupersededError extends Error {
+  constructor(
+    public readonly recordId: string,
+    public readonly fenceToken: number,
+  ) {
+    super(`Idempotency reservation ${recordId} was superseded (fenceToken ${fenceToken})`);
+    this.name = 'SupersededError';
+  }
+}
 
 export interface FinalizeData {
   statusCode: number;
@@ -71,6 +90,9 @@ export class IdempotencyService {
             endpoint: ctx.endpoint,
             requestFingerprint: fingerprint,
             status: IdempotencyStatus.PROCESSING,
+            // fenceToken defaults to 1 (first owner).
+            ownerId: this.newOwnerId(),
+            ownershipAcquiredAt: new Date(this.nowMs()),
             createdAt: new Date(this.nowMs()),
             expiresAt: new Date(this.nowMs() + this.config.retentionMs),
           },
@@ -91,11 +113,18 @@ export class IdempotencyService {
 
   /**
    * Finalize the reserved key inside the caller's transaction so the COMPLETED
-   * record commits atomically with the created resource.
+   * record commits atomically with the created resource. Fenced: only succeeds
+   * if fenceToken still matches (the caller still owns the reservation). On a
+   * mismatch it throws SupersededError, rolling back the caller's transaction.
    */
-  async finalize(tx: Prisma.TransactionClient, recordId: string, data: FinalizeData): Promise<void> {
-    await tx.idempotencyKey.update({
-      where: { id: recordId },
+  async finalize(
+    tx: Prisma.TransactionClient,
+    recordId: string,
+    fenceToken: number,
+    data: FinalizeData,
+  ): Promise<void> {
+    const result = await tx.idempotencyKey.updateMany({
+      where: { id: recordId, fenceToken, status: IdempotencyStatus.PROCESSING },
       data: {
         status: IdempotencyStatus.COMPLETED,
         responseStatusCode: data.statusCode,
@@ -104,19 +133,41 @@ export class IdempotencyService {
         resourceId: data.resourceId ?? null,
       },
     });
+    if (result.count !== 1) {
+      throw new SupersededError(recordId, fenceToken);
+    }
   }
 
-  async markFailed(recordId: string, error: unknown): Promise<void> {
+  /**
+   * Fenced FAILED transition. Only flips the row if the caller still owns it
+   * (fenceToken matches and it is still PROCESSING); a superseded caller is a
+   * no-op so it cannot clobber the new owner's in-flight reservation.
+   */
+  async markFailed(recordId: string, fenceToken: number, error: unknown): Promise<void> {
     const message = (error instanceof Error ? error.message : String(error)).slice(0, 1000);
     try {
-      await this.prisma.idempotencyKey.update({
-        where: { id: recordId },
+      await this.prisma.idempotencyKey.updateMany({
+        where: { id: recordId, fenceToken, status: IdempotencyStatus.PROCESSING },
         data: { status: IdempotencyStatus.FAILED, lastError: message },
       });
     } catch (err) {
       // Best-effort; never mask the original checkout error.
       this.logger.warn(`Failed to mark idempotency ${recordId} FAILED: ${err instanceof Error ? err.message : String(err)}`);
     }
+  }
+
+  /**
+   * Resolve a key after the caller's finalize was superseded: the order rolled
+   * back, so return the winner's response (replay) or signal still-in-progress.
+   */
+  async resolveAfterSupersession(userId: string, key: string): Promise<ResolveResult> {
+    const row = await this.prisma.idempotencyKey.findUnique({
+      where: { userId_idempotencyKey: { userId, idempotencyKey: key } },
+    });
+    if (row && row.status === IdempotencyStatus.COMPLETED) {
+      return { kind: 'replay', statusCode: row.responseStatusCode ?? 200, body: (row.responseBody ?? {}) as Prisma.JsonValue };
+    }
+    return { kind: 'processing' };
   }
 
   private async handleExisting(
@@ -131,41 +182,56 @@ export class IdempotencyService {
       return { kind: 'replay', statusCode: record.responseStatusCode ?? 200, body: (record.responseBody ?? {}) as Prisma.JsonValue };
     }
     if (record.status === IdempotencyStatus.FAILED) {
-      const claimed = await this.claim(record.id, fingerprint, ctx, 'FAILED');
+      const claimed = await this.claim(record.id, record.fenceToken, fingerprint, ctx, 'FAILED');
       return claimed ? { kind: 'proceed', record: claimed } : null;
     }
     // PROCESSING
     if (this.isReclaimable(record)) {
-      const claimed = await this.claim(record.id, fingerprint, ctx, 'STUCK');
+      const claimed = await this.claim(record.id, record.fenceToken, fingerprint, ctx, 'STUCK');
       return claimed ? { kind: 'proceed', record: claimed } : null;
     }
     return { kind: 'processing' };
   }
 
   private isReclaimable(record: IdempotencyKey): boolean {
-    return record.createdAt.getTime() < this.nowMs() - this.config.reclaimMs;
+    // Reclaim is driven by ownership age (createdAt stays immutable). Fall back to
+    // createdAt only for legacy rows that predate ownershipAcquiredAt.
+    const acquiredAt = record.ownershipAcquiredAt ?? record.createdAt;
+    return acquiredAt.getTime() < this.nowMs() - this.config.reclaimMs;
   }
 
-  /** Conditional claim of a FAILED or stuck-PROCESSING row; single winner via updateMany count. */
+  /**
+   * Conditional CAS claim of a FAILED or stuck-PROCESSING row: bumps fenceToken,
+   * transfers ownership, and leaves createdAt untouched. Single winner via the
+   * fenceToken compare-and-swap (updateMany count === 1).
+   */
   private async claim(
     id: string,
+    expectedToken: number,
     fingerprint: string,
     ctx: IdempotencyContext,
     mode: 'FAILED' | 'STUCK',
   ): Promise<IdempotencyKey | null> {
     const where: Prisma.IdempotencyKeyWhereInput =
       mode === 'FAILED'
-        ? { id, status: IdempotencyStatus.FAILED }
-        : { id, status: IdempotencyStatus.PROCESSING, createdAt: { lt: new Date(this.nowMs() - this.config.reclaimMs) } };
+        ? { id, fenceToken: expectedToken, status: IdempotencyStatus.FAILED }
+        : {
+            id,
+            fenceToken: expectedToken,
+            status: IdempotencyStatus.PROCESSING,
+            ownershipAcquiredAt: { lt: new Date(this.nowMs() - this.config.reclaimMs) },
+          };
 
     const result = await this.prisma.idempotencyKey.updateMany({
       where,
       data: {
         status: IdempotencyStatus.PROCESSING,
+        fenceToken: { increment: 1 },
+        ownerId: this.newOwnerId(),
+        ownershipAcquiredAt: new Date(this.nowMs()),
         requestFingerprint: fingerprint,
         requestMethod: ctx.method,
         endpoint: ctx.endpoint,
-        createdAt: new Date(this.nowMs()),
         expiresAt: new Date(this.nowMs() + this.config.retentionMs),
         lastError: null,
         responseStatusCode: null,
@@ -175,6 +241,10 @@ export class IdempotencyService {
     });
     if (result.count !== 1) return null;
     return this.prisma.idempotencyKey.findUnique({ where: { id } });
+  }
+
+  private newOwnerId(): string {
+    return `${hostname()}:${process.pid}#${randomUUID()}`;
   }
 }
 

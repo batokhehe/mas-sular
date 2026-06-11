@@ -1,4 +1,5 @@
 import { OrdersService } from '../../src/modules/orders/orders.service';
+import { SupersededError } from '../../src/infrastructure/idempotency/idempotency.service';
 import { CheckoutCourier, CreateOrderDto } from '../../src/modules/orders/application/dto/create-order.dto';
 
 const USER = 'user-1';
@@ -42,8 +43,11 @@ function buildIdempotency() {
     begin: jest.fn(),
     finalize: jest.fn().mockResolvedValue(undefined),
     markFailed: jest.fn().mockResolvedValue(undefined),
+    resolveAfterSupersession: jest.fn(),
   };
 }
+
+const PROCEED = { kind: 'proceed', record: { id: 'rec-1', fenceToken: 1 } };
 
 function build(prisma = buildPrisma(), idempotency = buildIdempotency()) {
   const eventBus = { publish: jest.fn().mockResolvedValue(undefined) };
@@ -76,10 +80,10 @@ describe('Checkout idempotency orchestration', () => {
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
   });
 
-  it('fresh key: reserves, creates ONE order, finalizes idempotency in-tx', async () => {
+  it('fresh key: reserves, creates ONE order, finalizes idempotency in-tx with fenceToken', async () => {
     const prisma = buildPrisma();
     const idempotency = buildIdempotency();
-    idempotency.begin.mockResolvedValue({ kind: 'proceed', record: { id: 'rec-1' } });
+    idempotency.begin.mockResolvedValue(PROCEED);
     const { service, eventBus } = build(prisma, idempotency);
 
     const outcome = await service.checkout(USER, DTO, IDEM);
@@ -89,6 +93,7 @@ describe('Checkout idempotency orchestration', () => {
     expect(idempotency.finalize).toHaveBeenCalledWith(
       prisma.__tx,
       'rec-1',
+      1, // fenceToken
       expect.objectContaining({ statusCode: 201, resourceType: 'Order', resourceId: 'order-1' }),
     );
     expect(eventBus.publish).toHaveBeenCalledTimes(1);
@@ -121,22 +126,50 @@ describe('Checkout idempotency orchestration', () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
-  it('marks the key FAILED and rethrows when checkout work fails', async () => {
+  it('marks the key FAILED (with fenceToken) and rethrows when checkout work fails', async () => {
     const prisma = buildPrisma();
     prisma.$transaction.mockRejectedValue(new Error('stock conflict'));
     const idempotency = buildIdempotency();
-    idempotency.begin.mockResolvedValue({ kind: 'proceed', record: { id: 'rec-1' } });
+    idempotency.begin.mockResolvedValue(PROCEED);
     const { service } = build(prisma, idempotency);
 
     await expect(service.checkout(USER, DTO, IDEM)).rejects.toThrow('stock conflict');
-    expect(idempotency.markFailed).toHaveBeenCalledWith('rec-1', expect.any(Error));
+    expect(idempotency.markFailed).toHaveBeenCalledWith('rec-1', 1, expect.any(Error));
+  });
+
+  it('superseded → replay: rolls back, never marks FAILED, returns the winner response', async () => {
+    const prisma = buildPrisma();
+    const idempotency = buildIdempotency();
+    idempotency.begin.mockResolvedValue(PROCEED);
+    idempotency.finalize.mockRejectedValue(new SupersededError('rec-1', 1)); // reclaimed mid-flight
+    idempotency.resolveAfterSupersession.mockResolvedValue({ kind: 'replay', statusCode: 201, body: { id: 'order-1' } });
+    const { service } = build(prisma, idempotency);
+
+    const outcome = await service.checkout(USER, DTO, IDEM);
+
+    expect(outcome).toEqual({ kind: 'result', statusCode: 201, replayed: true, body: { id: 'order-1' } });
+    expect(idempotency.markFailed).not.toHaveBeenCalled(); // we no longer own the key
+  });
+
+  it('superseded → processing: returns 409 outcome, never a raw 500', async () => {
+    const prisma = buildPrisma();
+    const idempotency = buildIdempotency();
+    idempotency.begin.mockResolvedValue(PROCEED);
+    idempotency.finalize.mockRejectedValue(new SupersededError('rec-1', 1));
+    idempotency.resolveAfterSupersession.mockResolvedValue({ kind: 'processing' });
+    const { service } = build(prisma, idempotency);
+
+    const outcome = await service.checkout(USER, DTO, IDEM);
+
+    expect(outcome).toEqual({ kind: 'processing', retryAfterSeconds: 2 });
+    expect(idempotency.markFailed).not.toHaveBeenCalled();
   });
 
   it('concurrency: a second request that resolves to processing creates no order', async () => {
     const prisma = buildPrisma();
     const idempotency = buildIdempotency();
     idempotency.begin
-      .mockResolvedValueOnce({ kind: 'proceed', record: { id: 'rec-1' } }) // winner
+      .mockResolvedValueOnce(PROCEED) // winner
       .mockResolvedValueOnce({ kind: 'processing' }); // concurrent loser
     const { service } = build(prisma, idempotency);
 

@@ -1,6 +1,6 @@
 import { UnprocessableEntityException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { IdempotencyService } from '../../src/infrastructure/idempotency/idempotency.service';
+import { IdempotencyService, SupersededError } from '../../src/infrastructure/idempotency/idempotency.service';
 import { IdempotencyConfig } from '../../src/infrastructure/idempotency/idempotency.config';
 
 const NOW = 2_000_000_000_000;
@@ -45,7 +45,7 @@ function uniqueViolation() {
   });
 }
 
-describe('IdempotencyService', () => {
+describe('IdempotencyService (fencing)', () => {
   describe('computeFingerprint', () => {
     it('is stable under object key reordering', () => {
       const { service } = build();
@@ -58,16 +58,19 @@ describe('IdempotencyService', () => {
     });
   });
 
-  describe('begin', () => {
-    it('reserves a fresh key (PROCESSING) and returns proceed', async () => {
+  describe('begin / reserve', () => {
+    it('reserves a fresh key stamping owner + acquisition time (token defaults to 1)', async () => {
       const { service, prisma } = build();
       prisma.idempotencyKey.findUnique.mockResolvedValue(null);
-      prisma.idempotencyKey.create.mockResolvedValue({ id: 'rec-1', status: 'PROCESSING' });
+      prisma.idempotencyKey.create.mockResolvedValue({ id: 'rec-1', status: 'PROCESSING', fenceToken: 1 });
 
       const result = await service.begin(CTX);
 
-      expect(result).toEqual({ kind: 'proceed', record: { id: 'rec-1', status: 'PROCESSING' } });
-      expect(prisma.idempotencyKey.create).toHaveBeenCalledTimes(1);
+      expect(result).toEqual({ kind: 'proceed', record: { id: 'rec-1', status: 'PROCESSING', fenceToken: 1 } });
+      const data = prisma.idempotencyKey.create.mock.calls[0][0].data;
+      expect(typeof data.ownerId).toBe('string');
+      expect(data.ownershipAcquiredAt).toBeInstanceOf(Date);
+      expect(data.status).toBe('PROCESSING');
     });
 
     it('replays a COMPLETED record', async () => {
@@ -81,9 +84,7 @@ describe('IdempotencyService', () => {
         responseBody: { id: 'order-1' },
       });
 
-      const result = await service.begin(CTX);
-
-      expect(result).toEqual({ kind: 'replay', statusCode: 201, body: { id: 'order-1' } });
+      expect(await service.begin(CTX)).toEqual({ kind: 'replay', statusCode: 201, body: { id: 'order-1' } });
       expect(prisma.idempotencyKey.create).not.toHaveBeenCalled();
     });
 
@@ -94,7 +95,9 @@ describe('IdempotencyService', () => {
         id: 'rec-1',
         requestFingerprint: fp,
         status: 'PROCESSING',
-        createdAt: new Date(NOW - 1_000), // within reclaim window
+        fenceToken: 1,
+        ownershipAcquiredAt: new Date(NOW - 1_000), // within reclaim window
+        createdAt: new Date(NOW - 1_000),
       });
 
       expect(await service.begin(CTX)).toEqual({ kind: 'processing' });
@@ -102,12 +105,7 @@ describe('IdempotencyService', () => {
 
     it('throws 422 on fingerprint mismatch', async () => {
       const { service, prisma } = build();
-      prisma.idempotencyKey.findUnique.mockResolvedValue({
-        id: 'rec-1',
-        requestFingerprint: 'a-different-hash',
-        status: 'COMPLETED',
-      });
-
+      prisma.idempotencyKey.findUnique.mockResolvedValue({ id: 'rec-1', requestFingerprint: 'different', status: 'COMPLETED' });
       await expect(service.begin(CTX)).rejects.toBeInstanceOf(UnprocessableEntityException);
     });
 
@@ -115,81 +113,120 @@ describe('IdempotencyService', () => {
       const { service, prisma } = build();
       const fp = service.computeFingerprint(CTX.fingerprintInput);
       prisma.idempotencyKey.findUnique
-        .mockResolvedValueOnce(null) // first lookup: nothing
-        .mockResolvedValueOnce({ id: 'rec-1', requestFingerprint: fp, status: 'PROCESSING', createdAt: new Date(NOW) }); // after conflict
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ id: 'rec-1', requestFingerprint: fp, status: 'PROCESSING', fenceToken: 1, ownershipAcquiredAt: new Date(NOW) });
       prisma.idempotencyKey.create.mockRejectedValue(uniqueViolation());
-
-      expect(await service.begin(CTX)).toEqual({ kind: 'processing' });
-    });
-
-    it('re-reserves a FAILED record and proceeds', async () => {
-      const { service, prisma } = build();
-      const fp = service.computeFingerprint(CTX.fingerprintInput);
-      prisma.idempotencyKey.findUnique
-        .mockResolvedValueOnce({ id: 'rec-1', requestFingerprint: fp, status: 'FAILED', createdAt: new Date(NOW) })
-        .mockResolvedValueOnce({ id: 'rec-1', status: 'PROCESSING' });
-      prisma.idempotencyKey.updateMany.mockResolvedValue({ count: 1 });
-
-      const result = await service.begin(CTX);
-
-      expect(prisma.idempotencyKey.updateMany).toHaveBeenCalledTimes(1);
-      expect(result).toEqual({ kind: 'proceed', record: { id: 'rec-1', status: 'PROCESSING' } });
-    });
-
-    it('reclaims a stuck PROCESSING record (older than reclaim window)', async () => {
-      const { service, prisma } = build();
-      const fp = service.computeFingerprint(CTX.fingerprintInput);
-      prisma.idempotencyKey.findUnique
-        .mockResolvedValueOnce({ id: 'rec-1', requestFingerprint: fp, status: 'PROCESSING', createdAt: new Date(NOW - 200_000) })
-        .mockResolvedValueOnce({ id: 'rec-1', status: 'PROCESSING' });
-      prisma.idempotencyKey.updateMany.mockResolvedValue({ count: 1 });
-
-      const result = await service.begin(CTX);
-
-      expect(result.kind).toBe('proceed');
-      // claim guarded on the stuck window
-      expect(prisma.idempotencyKey.updateMany.mock.calls[0][0].where).toEqual(
-        expect.objectContaining({ id: 'rec-1', status: 'PROCESSING' }),
-      );
-    });
-
-    it('returns processing when a reclaim race is lost', async () => {
-      const { service, prisma } = build();
-      const fp = service.computeFingerprint(CTX.fingerprintInput);
-      prisma.idempotencyKey.findUnique.mockResolvedValue({
-        id: 'rec-1',
-        requestFingerprint: fp,
-        status: 'PROCESSING',
-        createdAt: new Date(NOW - 200_000),
-      });
-      prisma.idempotencyKey.updateMany.mockResolvedValue({ count: 0 }); // someone else claimed
 
       expect(await service.begin(CTX)).toEqual({ kind: 'processing' });
     });
   });
 
-  describe('finalize / markFailed', () => {
-    it('finalize writes COMPLETED via the provided tx client', async () => {
+  describe('reclaim CAS', () => {
+    it('re-reserves a FAILED record by compare-and-swapping the fenceToken', async () => {
+      const { service, prisma } = build();
+      const fp = service.computeFingerprint(CTX.fingerprintInput);
+      prisma.idempotencyKey.findUnique
+        .mockResolvedValueOnce({ id: 'rec-1', requestFingerprint: fp, status: 'FAILED', fenceToken: 3, createdAt: new Date(NOW), ownershipAcquiredAt: new Date(NOW) })
+        .mockResolvedValueOnce({ id: 'rec-1', status: 'PROCESSING', fenceToken: 4 });
+      prisma.idempotencyKey.updateMany.mockResolvedValue({ count: 1 });
+
+      const result = await service.begin(CTX);
+
+      const call = prisma.idempotencyKey.updateMany.mock.calls[0][0];
+      expect(call.where).toEqual(expect.objectContaining({ id: 'rec-1', fenceToken: 3, status: 'FAILED' }));
+      expect(call.data).toEqual(expect.objectContaining({ fenceToken: { increment: 1 }, status: 'PROCESSING' }));
+      expect(result).toEqual({ kind: 'proceed', record: { id: 'rec-1', status: 'PROCESSING', fenceToken: 4 } });
+    });
+
+    it('reclaims a stuck PROCESSING record using ownershipAcquiredAt (not createdAt)', async () => {
+      const { service, prisma } = build();
+      const fp = service.computeFingerprint(CTX.fingerprintInput);
+      prisma.idempotencyKey.findUnique
+        .mockResolvedValueOnce({ id: 'rec-1', requestFingerprint: fp, status: 'PROCESSING', fenceToken: 5, createdAt: new Date(NOW - 10_000_000), ownershipAcquiredAt: new Date(NOW - 200_000) })
+        .mockResolvedValueOnce({ id: 'rec-1', status: 'PROCESSING', fenceToken: 6 });
+      prisma.idempotencyKey.updateMany.mockResolvedValue({ count: 1 });
+
+      const result = await service.begin(CTX);
+
+      const call = prisma.idempotencyKey.updateMany.mock.calls[0][0];
+      expect(call.where).toEqual(
+        expect.objectContaining({ id: 'rec-1', fenceToken: 5, status: 'PROCESSING', ownershipAcquiredAt: { lt: expect.any(Date) } }),
+      );
+      // claim must not touch immutable createdAt
+      expect(call.data.createdAt).toBeUndefined();
+      expect((result as any).record.fenceToken).toBe(6);
+    });
+
+    it('returns processing when a reclaim CAS race is lost', async () => {
+      const { service, prisma } = build();
+      const fp = service.computeFingerprint(CTX.fingerprintInput);
+      prisma.idempotencyKey.findUnique.mockResolvedValue({
+        id: 'rec-1', requestFingerprint: fp, status: 'PROCESSING', fenceToken: 5,
+        createdAt: new Date(NOW - 10_000_000), ownershipAcquiredAt: new Date(NOW - 200_000),
+      });
+      prisma.idempotencyKey.updateMany.mockResolvedValue({ count: 0 });
+
+      expect(await service.begin(CTX)).toEqual({ kind: 'processing' });
+    });
+  });
+
+  describe('finalize CAS', () => {
+    it('completes the row when the fenceToken still matches', async () => {
       const { service } = build();
-      const tx = { idempotencyKey: { update: jest.fn().mockResolvedValue({}) } };
+      const tx = { idempotencyKey: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) } };
 
-      await service.finalize(tx as any, 'rec-1', { statusCode: 201, body: { id: 'order-1' }, resourceType: 'Order', resourceId: 'order-1' });
+      await service.finalize(tx as any, 'rec-1', 5, { statusCode: 201, body: { id: 'order-1' }, resourceType: 'Order', resourceId: 'order-1' });
 
-      expect(tx.idempotencyKey.update).toHaveBeenCalledWith({
-        where: { id: 'rec-1' },
+      expect(tx.idempotencyKey.updateMany).toHaveBeenCalledWith({
+        where: { id: 'rec-1', fenceToken: 5, status: 'PROCESSING' },
         data: expect.objectContaining({ status: 'COMPLETED', responseStatusCode: 201, resourceId: 'order-1' }),
       });
     });
 
-    it('markFailed sets FAILED and swallows errors', async () => {
-      const { service, prisma } = build();
-      prisma.idempotencyKey.update.mockRejectedValue(new Error('db down'));
+    it('throws SupersededError when the fenceToken no longer matches (count 0)', async () => {
+      const { service } = build();
+      const tx = { idempotencyKey: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) } };
 
-      await expect(service.markFailed('rec-1', new Error('boom'))).resolves.toBeUndefined();
-      expect(prisma.idempotencyKey.update).toHaveBeenCalledWith({
-        where: { id: 'rec-1' },
+      await expect(
+        service.finalize(tx as any, 'rec-1', 5, { statusCode: 201, body: {} }),
+      ).rejects.toBeInstanceOf(SupersededError);
+    });
+  });
+
+  describe('markFailed CAS', () => {
+    it('flips to FAILED only when still owned (fenceToken + PROCESSING)', async () => {
+      const { service, prisma } = build();
+      prisma.idempotencyKey.updateMany.mockResolvedValue({ count: 1 });
+
+      await service.markFailed('rec-1', 5, new Error('boom'));
+
+      expect(prisma.idempotencyKey.updateMany).toHaveBeenCalledWith({
+        where: { id: 'rec-1', fenceToken: 5, status: 'PROCESSING' },
         data: expect.objectContaining({ status: 'FAILED', lastError: 'boom' }),
       });
+    });
+
+    it('is a no-op (count 0) when superseded and swallows DB errors', async () => {
+      const { service, prisma } = build();
+      prisma.idempotencyKey.updateMany.mockResolvedValue({ count: 0 });
+      await expect(service.markFailed('rec-1', 5, new Error('boom'))).resolves.toBeUndefined();
+
+      prisma.idempotencyKey.updateMany.mockRejectedValue(new Error('db down'));
+      await expect(service.markFailed('rec-1', 5, new Error('boom'))).resolves.toBeUndefined();
+    });
+  });
+
+  describe('resolveAfterSupersession', () => {
+    it('replays when the winner has COMPLETED', async () => {
+      const { service, prisma } = build();
+      prisma.idempotencyKey.findUnique.mockResolvedValue({ status: 'COMPLETED', responseStatusCode: 201, responseBody: { id: 'order-1' } });
+      expect(await service.resolveAfterSupersession('user-1', 'key-abc')).toEqual({ kind: 'replay', statusCode: 201, body: { id: 'order-1' } });
+    });
+
+    it('returns processing when the winner is still in flight', async () => {
+      const { service, prisma } = build();
+      prisma.idempotencyKey.findUnique.mockResolvedValue({ status: 'PROCESSING' });
+      expect(await service.resolveAfterSupersession('user-1', 'key-abc')).toEqual({ kind: 'processing' });
     });
   });
 });

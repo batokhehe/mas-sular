@@ -2,7 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { OrderStatus, PaymentMethod, PaymentStatus, Prisma, Product, Promo, VoucherType } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { EventBus } from '../../infrastructure/events/event-bus';
-import { IdempotencyService } from '../../infrastructure/idempotency/idempotency.service';
+import { IdempotencyService, SupersededError } from '../../infrastructure/idempotency/idempotency.service';
 import { ShippingService } from '../shipping/shipping.service';
 import { CheckoutItemDto, CheckoutSummaryDto, CreateOrderDto, ShippingCostDto, ValidateVoucherDto } from './application/dto/create-order.dto';
 
@@ -251,7 +251,7 @@ export class OrdersService {
     // Phase A: idempotency is opt-in (key present) and flag-gated. Without it,
     // checkout behaves exactly as before.
     if (!idem || !this.idempotency.isCheckoutEnabled()) {
-      const order = await this.runCheckout(userId, dto, null);
+      const order = await this.runCheckout(userId, dto, null, null);
       return { kind: 'result', statusCode: 201, replayed: false, body: order };
     }
 
@@ -271,10 +271,18 @@ export class OrdersService {
     }
 
     try {
-      const order = await this.runCheckout(userId, dto, begin.record.id);
+      const order = await this.runCheckout(userId, dto, begin.record.id, begin.record.fenceToken);
       return { kind: 'result', statusCode: 201, replayed: false, body: order };
     } catch (err) {
-      await this.idempotency.markFailed(begin.record.id, err);
+      // Ownership lost mid-flight (a reclaimer superseded us): the order tx already
+      // rolled back. Never surface a raw 500 — replay the winner or signal 409.
+      if (err instanceof SupersededError) {
+        const resolved = await this.idempotency.resolveAfterSupersession(userId, idem.key);
+        return resolved.kind === 'replay'
+          ? { kind: 'result', statusCode: resolved.statusCode, replayed: true, body: resolved.body }
+          : { kind: 'processing', retryAfterSeconds: this.idempotency.retryAfterSeconds() };
+      }
+      await this.idempotency.markFailed(begin.record.id, begin.record.fenceToken, err);
       throw err;
     }
   }
@@ -309,7 +317,12 @@ export class OrdersService {
     };
   }
 
-  private async runCheckout(userId: string, dto: CreateOrderDto, idempotencyRecordId: string | null) {
+  private async runCheckout(
+    userId: string,
+    dto: CreateOrderDto,
+    idempotencyRecordId: string | null,
+    fenceToken: number | null,
+  ) {
     const items = this.normalizeItems(dto.items);
     const { products, toppings } = await this.getCartPricing(items);
     this.assertStock(items, products);
@@ -412,8 +425,10 @@ export class OrdersService {
 
       // Finalize the idempotency key in the SAME transaction as the order, so the
       // COMPLETED record and its replayable response commit atomically with the order.
+      // Fenced: if we were superseded by a reclaimer, finalize throws SupersededError
+      // and this whole transaction (order, stock, voucher) rolls back.
       if (idempotencyRecordId) {
-        await this.idempotency.finalize(tx, idempotencyRecordId, {
+        await this.idempotency.finalize(tx, idempotencyRecordId, fenceToken!, {
           statusCode: 201,
           body: JSON.parse(JSON.stringify(createdOrder)) as Prisma.InputJsonValue,
           resourceType: 'Order',
