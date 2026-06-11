@@ -473,3 +473,31 @@ model OutboxEvent {
   @@index([aggregateId, createdAt])
   @@index([status, createdAt])
 }
+
+enum IdempotencyStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+model IdempotencyKey {
+  id                 String            @id @default(uuid())
+  userId             String            @db.VarChar(36)
+  idempotencyKey     String            @db.VarChar(255)
+  requestMethod      String            @db.VarChar(8)
+  endpoint           String            @db.VarChar(128)
+  requestFingerprint String            @db.VarChar(64)
+  status             IdempotencyStatus @default(PROCESSING)
+  responseStatusCode Int?
+  responseBody       Json?
+  resourceType       String?           @db.VarChar(64)
+  resourceId         String?           @db.VarChar(36)
+  lastError          String?           @db.Text
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  expiresAt          DateTime
+
+  @@unique([userId, idempotencyKey])
+  @@index([expiresAt])
+  @@index([status, createdAt])
+}
