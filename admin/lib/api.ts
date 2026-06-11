@@ -45,14 +45,6 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers.set('Authorization', `Bearer ${token}`);
   }
 
-  const config = {
-    headers: {
-      Authorization: headers.get('Authorization') ?? undefined,
-    },
-  };
-  console.log('[TOKEN]', getAuthToken());
-  console.log('[AUTH HEADER]', config.headers.Authorization);
-
   const requestUrl = `${API_URL}${path}`;
 
   let response: Response;
