@@ -100,7 +100,12 @@ export class AuthService {
       
       this.logger.log(`[USER CREATE] User created/updated: ${user.id}`);
       this.logger.debug(`[USER CREATE] User roles: ${user.roles.map((r) => r.role.name).join(', ')}`);
-      
+
+      if (!user.isActive || user.deletedAt) {
+        this.logger.warn(`[ACCOUNT STATUS] Rejecting Google login for disabled user ${user.id}`);
+        throw new UnauthorizedException('Account is disabled');
+      }
+
       this.logger.log('[TOKEN GENERATION] Generating tokens...');
       const tokens = await this.issueTokens(user.id, user.email, user.roles.map((r) => r.role.name));
       this.logger.log(`[TOKEN GENERATION] Tokens generated successfully`);
@@ -116,6 +121,15 @@ export class AuthService {
   async issueTokens(userId: string, email: string, roles: string[]) {
     this.logger.log(`[TOKEN GENERATION] Creating tokens for user ${userId}`);
     try {
+      const activeAccount = await this.prisma.user.findFirst({
+        where: { id: userId, isActive: true, deletedAt: null },
+        select: { id: true },
+      });
+      if (!activeAccount) {
+        this.logger.warn(`[ACCOUNT STATUS] Refusing to issue tokens for disabled user ${userId}`);
+        throw new UnauthorizedException('Account is disabled');
+      }
+
       const familyId = randomUUID();
       const expiresIn = (process.env.JWT_ACCESS_TTL ?? '15m') as StringValue;
       this.logger.debug(`[TOKEN GENERATION] Access token TTL: ${expiresIn}`);
@@ -157,6 +171,10 @@ export class AuthService {
     const record = candidates.find((token) => bcrypt.compareSync(refreshToken, token.tokenHash));
     if (!record) throw new UnauthorizedException('Invalid refresh token');
     await this.prisma.refreshToken.update({ where: { id: record.id }, data: { revokedAt: new Date() } });
+    if (!record.user.isActive || record.user.deletedAt) {
+      this.logger.warn(`[ACCOUNT STATUS] Refusing refresh rotation for disabled user ${record.userId}`);
+      throw new UnauthorizedException('Account is disabled');
+    }
     return this.issueTokens(record.userId, record.user.email, record.user.roles.map((r) => r.role.name));
   }
 }
