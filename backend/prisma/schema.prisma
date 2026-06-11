@@ -441,3 +441,35 @@ model AuditLog {
   @@index([actorId, createdAt])
   @@index([entity, entityId])
 }
+
+enum OutboxStatus {
+  PENDING
+  PUBLISHED
+  FAILED
+}
+
+model OutboxEvent {
+  id            String       @id @default(uuid())
+  aggregateType String       @db.VarChar(32)
+  aggregateId   String       @db.VarChar(36)
+  eventName     String       @db.VarChar(128)
+  eventVersion  Int          @default(1)
+  exchange      String       @db.VarChar(128)
+  routingKey    String       @db.VarChar(128)
+  payload       Json
+  metadata      Json?
+  status        OutboxStatus @default(PENDING)
+  attempts      Int          @default(0) @db.UnsignedInt
+  maxAttempts   Int          @default(10) @db.UnsignedInt
+  nextAttemptAt DateTime     @default(now())
+  lockedUntil   DateTime?
+  lockedBy      String?      @db.VarChar(64)
+  lastError     String?      @db.Text
+  occurredAt    DateTime
+  createdAt     DateTime     @default(now())
+  publishedAt   DateTime?
+
+  @@index([status, nextAttemptAt])
+  @@index([aggregateId, createdAt])
+  @@index([status, createdAt])
+}
