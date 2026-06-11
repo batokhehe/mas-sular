@@ -488,6 +488,9 @@ model IdempotencyKey {
   endpoint           String            @db.VarChar(128)
   requestFingerprint String            @db.VarChar(64)
   status             IdempotencyStatus @default(PROCESSING)
+  fenceToken          Int              @default(1) @db.UnsignedInt
+  ownerId             String?          @db.VarChar(64)
+  ownershipAcquiredAt DateTime?
   responseStatusCode Int?
   responseBody       Json?
   resourceType       String?           @db.VarChar(64)
