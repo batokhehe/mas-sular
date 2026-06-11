@@ -1,7 +1,8 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { OrderStatus, PaymentMethod, PaymentStatus, Product, Promo, VoucherType } from '@prisma/client';
+import { OrderStatus, PaymentMethod, PaymentStatus, Prisma, Product, Promo, VoucherType } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { EventBus } from '../../infrastructure/events/event-bus';
+import { IdempotencyService } from '../../infrastructure/idempotency/idempotency.service';
 import { ShippingService } from '../shipping/shipping.service';
 import { CheckoutItemDto, CheckoutSummaryDto, CreateOrderDto, ShippingCostDto, ValidateVoucherDto } from './application/dto/create-order.dto';
 
@@ -13,12 +14,23 @@ type NormalizedCheckoutItem = {
   notes?: string;
 };
 
+export interface IdempotencyRequest {
+  key: string;
+  method: string;
+  endpoint: string;
+}
+
+export type CheckoutOutcome =
+  | { kind: 'result'; statusCode: number; replayed: boolean; body: unknown }
+  | { kind: 'processing'; retryAfterSeconds: number };
+
 @Injectable()
 export class OrdersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly eventBus: EventBus,
     private readonly shipping: ShippingService,
+    private readonly idempotency: IdempotencyService,
   ) {}
 
   private normalizeItems(items: CheckoutItemDto[]): NormalizedCheckoutItem[] {
@@ -235,7 +247,69 @@ export class OrdersService {
     };
   }
 
-  async checkout(userId: string, dto: CreateOrderDto) {
+  async checkout(userId: string, dto: CreateOrderDto, idem?: IdempotencyRequest): Promise<CheckoutOutcome> {
+    // Phase A: idempotency is opt-in (key present) and flag-gated. Without it,
+    // checkout behaves exactly as before.
+    if (!idem || !this.idempotency.isCheckoutEnabled()) {
+      const order = await this.runCheckout(userId, dto, null);
+      return { kind: 'result', statusCode: 201, replayed: false, body: order };
+    }
+
+    const begin = await this.idempotency.begin({
+      userId,
+      key: idem.key,
+      method: idem.method,
+      endpoint: idem.endpoint,
+      fingerprintInput: this.buildFingerprintInput(userId, idem, dto),
+    });
+
+    if (begin.kind === 'replay') {
+      return { kind: 'result', statusCode: begin.statusCode, replayed: true, body: begin.body };
+    }
+    if (begin.kind === 'processing') {
+      return { kind: 'processing', retryAfterSeconds: this.idempotency.retryAfterSeconds() };
+    }
+
+    try {
+      const order = await this.runCheckout(userId, dto, begin.record.id);
+      return { kind: 'result', statusCode: 201, replayed: false, body: order };
+    } catch (err) {
+      await this.idempotency.markFailed(begin.record.id, err);
+      throw err;
+    }
+  }
+
+  /** Canonical projection of the checkout request that is hashed into the fingerprint. */
+  private buildFingerprintInput(userId: string, idem: IdempotencyRequest, dto: CreateOrderDto) {
+    const items = (dto.items ?? [])
+      .map((item) => ({
+        product_id: item.product_id,
+        qty: item.qty,
+        spicyLevel: item.spicyLevel ?? null,
+        notes: item.notes ?? null,
+        topping_ids: [...(item.topping_ids ?? [])].sort(),
+      }))
+      .sort(
+        (a, b) =>
+          a.product_id.localeCompare(b.product_id) ||
+          a.topping_ids.join(',').localeCompare(b.topping_ids.join(',')) ||
+          (a.spicyLevel ?? -1) - (b.spicyLevel ?? -1) ||
+          String(a.notes).localeCompare(String(b.notes)),
+      );
+    return {
+      userId,
+      method: idem.method,
+      endpoint: idem.endpoint,
+      body: {
+        address_id: dto.address_id,
+        courier: dto.courier,
+        voucher_code: dto.voucher_code ? dto.voucher_code.trim().toUpperCase() : null,
+        items,
+      },
+    };
+  }
+
+  private async runCheckout(userId: string, dto: CreateOrderDto, idempotencyRecordId: string | null) {
     const items = this.normalizeItems(dto.items);
     const { products, toppings } = await this.getCartPricing(items);
     this.assertStock(items, products);
@@ -333,6 +407,17 @@ export class OrdersService {
             userId,
             orderId: createdOrder.id,
           },
+        });
+      }
+
+      // Finalize the idempotency key in the SAME transaction as the order, so the
+      // COMPLETED record and its replayable response commit atomically with the order.
+      if (idempotencyRecordId) {
+        await this.idempotency.finalize(tx, idempotencyRecordId, {
+          statusCode: 201,
+          body: JSON.parse(JSON.stringify(createdOrder)) as Prisma.InputJsonValue,
+          resourceType: 'Order',
+          resourceId: createdOrder.id,
         });
       }
 
