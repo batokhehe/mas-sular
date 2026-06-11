@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { OrderStatus, PaymentStatus, Prisma, ShipmentStatus } from '@prisma/client';
+import { randomUUID } from 'crypto';
 import { PrismaService } from '../../database/prisma.service';
 import { EventBus } from '../../infrastructure/events/event-bus';
 import { CreateBannerDto } from '../cms/application/dto/banner.dto';
@@ -270,24 +271,56 @@ export class AdminService {
     const payment = await this.prisma.payment.findUnique({ where: { id: paymentId } });
     if (!payment || payment.deletedAt) throw new NotFoundException('Payment not found');
 
-    const updated = await this.prisma.payment.update({
-      where: { id: paymentId },
-      data: { status: PaymentStatus.PAID, verifiedByUserId: adminId, verifiedAt: new Date() },
-    });
-    await this.prisma.order.update({
-      where: { id: payment.orderId },
-      data: {
-        status: OrderStatus.PROCESSING,
-        events: { create: { status: OrderStatus.PROCESSING, note: dto.note ?? 'Payment verified by admin' } },
-      },
-    });
-    await this.eventBus.publish('payments', 'payment.paid', {
-      id: updated.id,
-      name: 'payment.paid',
-      occurredAt: new Date(),
-      payload: { paymentId: updated.id, orderId: updated.orderId },
-    });
-    return updated;
+    const verifiedAt = new Date();
+    // Payment must never become PAID unless the order update, audit record, and
+    // outbox event all commit. All four writes run in one interactive transaction.
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.payment.update({
+        where: { id: paymentId },
+        data: { status: PaymentStatus.PAID, verifiedByUserId: adminId, verifiedAt },
+      });
+      await tx.order.update({
+        where: { id: payment.orderId },
+        data: {
+          status: OrderStatus.PROCESSING,
+          events: { create: { status: OrderStatus.PROCESSING, note: dto.note ?? 'Payment verified by admin' } },
+        },
+      });
+      // actorId is NULL: AuditLog.actorId FKs to User, but the verifier is an Admin.
+      // The admin identity is recorded in the JSON payload instead.
+      await tx.auditLog.create({
+        data: {
+          actorId: null,
+          action: 'payment.verified',
+          entity: 'Payment',
+          entityId: updated.id,
+          after: { verifiedByAdminId: adminId, status: 'PAID', orderStatus: 'PROCESSING', note: dto.note ?? null },
+        },
+      });
+      await tx.outboxEvent.create({
+        data: {
+          id: randomUUID(),
+          aggregateType: 'payment',
+          aggregateId: updated.id,
+          eventName: 'payment.paid',
+          eventVersion: 1,
+          exchange: 'payments',
+          routingKey: 'payment.paid',
+          payload: {
+            paymentId: updated.id,
+            orderId: updated.orderId,
+            amount: updated.amount,
+            status: 'PAID',
+            verifiedByUserId: updated.verifiedByUserId,
+            verifiedAt: verifiedAt.toISOString(),
+            orderStatus: 'PROCESSING',
+          },
+          metadata: { source: 'admin.verifyPayment' },
+          occurredAt: verifiedAt,
+        },
+      });
+      return updated;
+    }, { timeout: 10000 });
   }
 
   async rejectPayment(paymentId: string, dto: RejectAdminPaymentDto) {
