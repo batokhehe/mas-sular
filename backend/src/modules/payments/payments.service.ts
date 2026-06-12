@@ -1,14 +1,12 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../database/prisma.service';
-import { EventBus } from '../../infrastructure/events/event-bus';
 import { UploadManualPaymentDto, VerifyPaymentDto } from './application/dto/payment.dto';
 
 @Injectable()
 export class PaymentsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly eventBus: EventBus,
   ) {}
 
   async uploadManualReceipt(paymentId: string, dto: UploadManualPaymentDto) {

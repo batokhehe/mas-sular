@@ -2,7 +2,6 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { OrderStatus, PaymentMethod, PaymentStatus, Prisma, Product, Promo, VoucherType } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../database/prisma.service';
-import { EventBus } from '../../infrastructure/events/event-bus';
 import { IdempotencyService, SupersededError } from '../../infrastructure/idempotency/idempotency.service';
 import { ShippingService } from '../shipping/shipping.service';
 import { CheckoutItemDto, CheckoutSummaryDto, CreateOrderDto, ShippingCostDto, ValidateVoucherDto } from './application/dto/create-order.dto';
@@ -29,7 +28,6 @@ export type CheckoutOutcome =
 export class OrdersService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly eventBus: EventBus,
     private readonly shipping: ShippingService,
     private readonly idempotency: IdempotencyService,
   ) {}

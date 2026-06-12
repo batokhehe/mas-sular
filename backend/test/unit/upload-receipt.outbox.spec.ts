@@ -24,15 +24,14 @@ function build(failOp: FailOp = undefined) {
   const prisma = {
     $transaction: jest.fn().mockImplementation((cb: (tx: unknown) => Promise<unknown>) => cb(tx)),
   };
-  const eventBus = { publish: jest.fn() };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const service = new PaymentsService(prisma as any, eventBus as any);
-  return { service, prisma, tx, eventBus };
+  const service = new PaymentsService(prisma as any);
+  return { service, prisma, tx };
 }
 
 describe('PaymentsService.uploadManualReceipt atomicity', () => {
   it('commits the payment update and the outbox event in one transaction', async () => {
-    const { service, prisma, tx, eventBus } = build();
+    const { service, prisma, tx } = build();
 
     const result = await service.uploadManualReceipt('pay-1', DTO);
 
@@ -46,8 +45,6 @@ describe('PaymentsService.uploadManualReceipt atomicity', () => {
         manualAccountName: DTO.accountName,
       },
     });
-    // Legacy RabbitMQ publish is gone — delivery is now via the outbox.
-    expect(eventBus.publish).not.toHaveBeenCalled();
     expect(tx.outboxEvent.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         id: expect.any(String),

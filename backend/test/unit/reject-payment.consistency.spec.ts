@@ -34,15 +34,14 @@ function buildPrisma(tx: ReturnType<typeof buildTx>, payment: unknown = PAYMENT)
 function build(failOp: FailOp = undefined, payment: unknown = PAYMENT) {
   const tx = buildTx(failOp);
   const prisma = buildPrisma(tx, payment);
-  const eventBus = { publish: jest.fn() };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const service = new AdminService(prisma as any, eventBus as any);
-  return { service, prisma, tx, eventBus };
+  const service = new AdminService(prisma as any);
+  return { service, prisma, tx };
 }
 
 describe('AdminService.rejectPayment atomicity', () => {
   it('commits payment.failed, order.cancelled and the outbox event in one transaction', async () => {
-    const { service, prisma, tx, eventBus } = build();
+    const { service, prisma, tx } = build();
 
     const result = await service.rejectPayment('pay-1', { note: 'bad receipt' });
 
@@ -54,8 +53,6 @@ describe('AdminService.rejectPayment atomicity', () => {
         data: expect.objectContaining({ status: 'CANCELLED', events: { create: { status: 'CANCELLED', note: 'bad receipt' } } }),
       }),
     );
-    // Legacy RabbitMQ publish is gone — delivery is now via the outbox.
-    expect(eventBus.publish).not.toHaveBeenCalled();
     expect(tx.outboxEvent.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         id: expect.any(String),

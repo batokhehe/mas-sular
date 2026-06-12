@@ -2,7 +2,6 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { OrderStatus, PaymentStatus, Prisma, ShipmentStatus } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../database/prisma.service';
-import { EventBus } from '../../infrastructure/events/event-bus';
 import { CreateBannerDto } from '../cms/application/dto/banner.dto';
 import {
   CreateShipmentDto,
@@ -28,7 +27,6 @@ import { UpdateUserDto } from './application/dto/update-user.dto';
 export class AdminService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly eventBus: EventBus,
   ) {}
 
   async getDashboard() {

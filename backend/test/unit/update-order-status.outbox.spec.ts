@@ -26,15 +26,14 @@ function build(failOp: FailOp = undefined, existing: unknown = EXISTING) {
     order: { findUnique: jest.fn().mockResolvedValue(existing) }, // drives getOrder()
     $transaction: jest.fn().mockImplementation((cb: (tx: unknown) => Promise<unknown>) => cb(tx)),
   };
-  const eventBus = { publish: jest.fn() };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const service = new AdminService(prisma as any, eventBus as any);
-  return { service, prisma, tx, eventBus };
+  const service = new AdminService(prisma as any);
+  return { service, prisma, tx };
 }
 
 describe('AdminService.updateOrderStatus atomicity', () => {
   it('commits the status update and the outbox event in one transaction', async () => {
-    const { service, prisma, tx, eventBus } = build();
+    const { service, prisma, tx } = build();
 
     const result = await service.updateOrderStatus('order-1', { status: 'DELIVERING', note: 'on the way' } as any);
 
@@ -50,7 +49,6 @@ describe('AdminService.updateOrderStatus atomicity', () => {
         include: { payment: true, shipment: true }, // include preserved
       }),
     );
-    expect(eventBus.publish).not.toHaveBeenCalled();
     expect(tx.outboxEvent.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         id: expect.any(String),

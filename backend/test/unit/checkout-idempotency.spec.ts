@@ -51,44 +51,41 @@ function buildIdempotency() {
 const PROCEED = { kind: 'proceed', record: { id: 'rec-1', fenceToken: 1 } };
 
 function build(prisma = buildPrisma(), idempotency = buildIdempotency()) {
-  const eventBus = { publish: jest.fn().mockResolvedValue(undefined) };
   const shipping = { calculateRateForCourier: jest.fn().mockResolvedValue({ cost: 10000, etd: '2 days' }) };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const service = new OrdersService(prisma as any, eventBus as any, shipping as any, idempotency as any);
-  return { service, prisma, idempotency, eventBus };
+  const service = new OrdersService(prisma as any, shipping as any, idempotency as any);
+  return { service, prisma, idempotency };
 }
 
 describe('Checkout idempotency orchestration', () => {
   it('runs the legacy path when no Idempotency-Key is supplied (emits via outbox)', async () => {
-    const { service, prisma, idempotency, eventBus } = build();
+    const { service, prisma, idempotency } = build();
 
     const outcome = await service.checkout(USER, DTO); // no idem
 
     expect(idempotency.begin).not.toHaveBeenCalled();
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(prisma.__tx.outboxEvent.create).toHaveBeenCalledTimes(1); // order.created via outbox
-    expect(eventBus.publish).not.toHaveBeenCalled(); // legacy publish removed
     expect(outcome).toEqual({ kind: 'result', statusCode: 201, replayed: false, body: CREATED_ORDER });
   });
 
   it('runs the legacy path when the feature flag is disabled (emits via outbox)', async () => {
     const idempotency = buildIdempotency();
     idempotency.isCheckoutEnabled.mockReturnValue(false);
-    const { service, prisma, eventBus } = build(buildPrisma(), idempotency);
+    const { service, prisma } = build(buildPrisma(), idempotency);
 
     await service.checkout(USER, DTO, IDEM);
 
     expect(idempotency.begin).not.toHaveBeenCalled();
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(prisma.__tx.outboxEvent.create).toHaveBeenCalledTimes(1);
-    expect(eventBus.publish).not.toHaveBeenCalled();
   });
 
   it('fresh key: reserves, creates ONE order, finalizes idempotency in-tx with fenceToken', async () => {
     const prisma = buildPrisma();
     const idempotency = buildIdempotency();
     idempotency.begin.mockResolvedValue(PROCEED);
-    const { service, eventBus } = build(prisma, idempotency);
+    const { service } = build(prisma, idempotency);
 
     const outcome = await service.checkout(USER, DTO, IDEM);
 
@@ -100,8 +97,7 @@ describe('Checkout idempotency orchestration', () => {
       1, // fenceToken
       expect.objectContaining({ statusCode: 201, resourceType: 'Order', resourceId: 'order-1' }),
     );
-    // order.created emitted via the outbox inside the tx; legacy publish gone.
-    expect(eventBus.publish).not.toHaveBeenCalled();
+    // order.created emitted via the outbox inside the tx.
     expect(prisma.__tx.outboxEvent.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         id: expect.any(String),
@@ -121,7 +117,7 @@ describe('Checkout idempotency orchestration', () => {
     const prisma = buildPrisma();
     const idempotency = buildIdempotency();
     idempotency.begin.mockResolvedValue({ kind: 'replay', statusCode: 201, body: { id: 'order-1' } });
-    const { service, eventBus } = build(prisma, idempotency);
+    const { service } = build(prisma, idempotency);
 
     const outcome = await service.checkout(USER, DTO, IDEM);
 
@@ -129,7 +125,6 @@ describe('Checkout idempotency orchestration', () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
     expect(prisma.__tx.order.create).not.toHaveBeenCalled();
     expect(prisma.__tx.outboxEvent.create).not.toHaveBeenCalled(); // no event on replay
-    expect(eventBus.publish).not.toHaveBeenCalled();
   });
 
   it('processing: returns a processing outcome carrying Retry-After seconds', async () => {

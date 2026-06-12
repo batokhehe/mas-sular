@@ -47,18 +47,18 @@ function buildPrisma(tx: ReturnType<typeof buildTx>, payment: unknown) {
 const PATHS = [
   {
     name: 'PaymentsService.verify',
-    invoke: (prisma: unknown, eventBus: unknown) => {
+    invoke: (prisma: unknown) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const svc = new PaymentsService(prisma as any, eventBus as any);
+      const svc = new PaymentsService(prisma as any);
       return svc.verify('pay-1', { adminUserId: 'admin-1' } as any);
     },
     expectedSource: 'payments.verify',
   },
   {
     name: 'AdminService.verifyPayment',
-    invoke: (prisma: unknown, eventBus: unknown) => {
+    invoke: (prisma: unknown) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const svc = new AdminService(prisma as any, eventBus as any);
+      const svc = new AdminService(prisma as any);
       return svc.verifyPayment('pay-1', 'admin-1', { note: 'looks good' } as any);
     },
     expectedSource: 'admin.verifyPayment',
@@ -66,15 +66,13 @@ const PATHS = [
 ] as const;
 
 describe.each(PATHS)('Payment verification atomicity — $name', (path) => {
-  const eventBus = { publish: jest.fn() };
-
   beforeEach(() => jest.clearAllMocks());
 
   it('success path: all four writes happen in one transaction and no direct publish occurs', async () => {
     const tx = buildTx(undefined);
     const prisma = buildPrisma(tx, { ...UPDATED_PAYMENT });
 
-    const result = await path.invoke(prisma, eventBus);
+    const result = await path.invoke(prisma);
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(tx.payment.update).toHaveBeenCalledTimes(1);
@@ -83,8 +81,6 @@ describe.each(PATHS)('Payment verification atomicity — $name', (path) => {
     expect(tx.outboxEvent.create).toHaveBeenCalledTimes(1);
     expect(result).toBe(UPDATED_PAYMENT);
 
-    // Legacy RabbitMQ publish is gone — delivery is now via the outbox.
-    expect(eventBus.publish).not.toHaveBeenCalled();
 
     // Audit record: actorId NULL, admin captured in JSON payload.
     expect(tx.auditLog.create).toHaveBeenCalledWith({
@@ -122,47 +118,43 @@ describe.each(PATHS)('Payment verification atomicity — $name', (path) => {
     const tx = buildTx('payment');
     const prisma = buildPrisma(tx, { ...UPDATED_PAYMENT });
 
-    await expect(path.invoke(prisma, eventBus)).rejects.toThrow('payment update failed');
+    await expect(path.invoke(prisma)).rejects.toThrow('payment update failed');
     expect(tx.order.update).not.toHaveBeenCalled();
     expect(tx.auditLog.create).not.toHaveBeenCalled();
     expect(tx.outboxEvent.create).not.toHaveBeenCalled();
-    expect(eventBus.publish).not.toHaveBeenCalled();
   });
 
   it('order update failure: transaction rejects, audit and outbox never written', async () => {
     const tx = buildTx('order');
     const prisma = buildPrisma(tx, { ...UPDATED_PAYMENT });
 
-    await expect(path.invoke(prisma, eventBus)).rejects.toThrow('order update failed');
+    await expect(path.invoke(prisma)).rejects.toThrow('order update failed');
     expect(tx.auditLog.create).not.toHaveBeenCalled();
     expect(tx.outboxEvent.create).not.toHaveBeenCalled();
-    expect(eventBus.publish).not.toHaveBeenCalled();
   });
 
   it('audit insert failure: transaction rejects, outbox never written', async () => {
     const tx = buildTx('audit');
     const prisma = buildPrisma(tx, { ...UPDATED_PAYMENT });
 
-    await expect(path.invoke(prisma, eventBus)).rejects.toThrow('audit insert failed');
+    await expect(path.invoke(prisma)).rejects.toThrow('audit insert failed');
     expect(tx.outboxEvent.create).not.toHaveBeenCalled();
-    expect(eventBus.publish).not.toHaveBeenCalled();
   });
 
   it('outbox insert failure: transaction rejects so PAID is never committed', async () => {
     const tx = buildTx('outbox');
     const prisma = buildPrisma(tx, { ...UPDATED_PAYMENT });
 
-    await expect(path.invoke(prisma, eventBus)).rejects.toThrow('outbox insert failed');
+    await expect(path.invoke(prisma)).rejects.toThrow('outbox insert failed');
     // All four writes share one transaction; the rejection rolls back the PAID update.
     expect(tx.outboxEvent.create).toHaveBeenCalledTimes(1);
-    expect(eventBus.publish).not.toHaveBeenCalled();
   });
 
   it('unknown payment: 404 before any transaction is opened', async () => {
     const tx = buildTx(undefined);
     const prisma = buildPrisma(tx, null);
 
-    await expect(path.invoke(prisma, eventBus)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(path.invoke(prisma)).rejects.toBeInstanceOf(NotFoundException);
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 });
