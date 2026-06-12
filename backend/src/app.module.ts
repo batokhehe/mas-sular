@@ -7,6 +7,7 @@ import { appConfig } from './common/config/app.config';
 import { DatabaseModule } from './database/database.module';
 import { CacheInfrastructureModule } from './infrastructure/cache/cache.module';
 import { ConsumersModule } from './infrastructure/consumers/consumers.module';
+import { NotificationsModule } from './infrastructure/notifications/notifications.module';
 import { OutboxModule } from './infrastructure/outbox/outbox.module';
 import { QueueModule } from './infrastructure/queue/queue.module';
 import { AuditModule } from './modules/audit/audit.module';
@@ -37,6 +38,7 @@ import { UploadModule } from './modules/upload/upload.module';
     CacheInfrastructureModule,
     QueueModule,
     OutboxModule,
+    NotificationsModule,
     ConsumersModule,
     AuthModule,
     AdminAuthModule,

@@ -50,10 +50,14 @@ export class RabbitConnectionManager implements OnModuleDestroy {
     }
   }
 
-  /** A dedicated channel for consumers, on the shared connection (separate from the confirm channel). */
-  async createConsumerChannel(prefetch: number): Promise<amqp.Channel> {
+  /**
+   * A dedicated confirm channel for consumers, on the shared connection. It is a
+   * ConfirmChannel so consumers can publish to a DLQ and await the broker ack
+   * before acking the original message (F2 — no unconfirmed DLQ handoff).
+   */
+  async createConsumerChannel(prefetch: number): Promise<amqp.ConfirmChannel> {
     const connection = await this.ensureConnection();
-    const channel = await connection.createChannel();
+    const channel = await connection.createConfirmChannel();
     if (prefetch > 0) await channel.prefetch(prefetch);
     channel.on('error', (err: Error) => this.logger.error(`AMQP consumer channel error: ${err.message}`));
     return channel;

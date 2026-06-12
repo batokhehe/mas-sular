@@ -2,13 +2,14 @@ import { Inject, Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } f
 import { NotificationChannel, Prisma } from '@prisma/client';
 import * as amqp from 'amqplib';
 import { PrismaService } from '../../database/prisma.service';
+import { NotificationMetrics } from '../notifications/notification.metrics';
 import { RabbitConnectionManager } from '../outbox/rabbit-connection.manager';
 import { CONSUMERS_CONFIG, ConsumersConfig } from './consumers.config';
 
 // Topology (declared idempotently at startup):
 //   orders --(order.created)--> order.created.notifications  (main)
-//   main --nack--> default exchange --> order.created.notifications.retry (TTL) --> back to main
-//   poison / unrecoverable --> order.created.notifications.dlq (terminal)
+//   main --nack(requeue=false)--> default exchange --> order.created.notifications.retry (TTL) --> back to main
+//   poison / unrecoverable --> order.created.notifications.dlq (terminal, confirmed handoff)
 const EXCHANGE = 'orders';
 const ROUTING_KEY = 'order.created';
 const QUEUE = 'order.created.notifications';
@@ -18,23 +19,19 @@ const CONSUMER = 'order.notifications';
 
 type ProcessOutcome = 'enqueued' | 'duplicate' | 'skipped';
 
-/**
- * First production consumer. Consumes order.created and enqueues an
- * "order received" notification into NotificationOutbox. The notification row and
- * the ProcessedEvent dedup row are written in one transaction (exactly-once
- * enqueue). Delivery is a later, separate sender phase.
- */
 @Injectable()
 export class OrderCreatedNotificationConsumer implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger('OrderCreatedNotificationConsumer');
-  private channel: amqp.Channel | null = null;
+  private channel: amqp.ConfirmChannel | null = null;
   private consumerTag: string | null = null;
   private stopped = false;
+  private paused = false;
   private reinitTimer: NodeJS.Timeout | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly rabbit: RabbitConnectionManager,
+    private readonly metrics: NotificationMetrics,
     @Inject(CONSUMERS_CONFIG) private readonly config: ConsumersConfig,
   ) {}
 
@@ -72,15 +69,8 @@ export class OrderCreatedNotificationConsumer implements OnApplicationBootstrap,
       await this.declareTopology(channel);
       channel.on('close', () => this.handleChannelClose());
       channel.on('error', (err: Error) => this.logger.error(`consumer channel error: ${err.message}`));
-      const { consumerTag } = await channel.consume(
-        QUEUE,
-        (msg) => {
-          if (msg) void this.handleDelivery(channel, msg);
-        },
-        { noAck: false },
-      );
       this.channel = channel;
-      this.consumerTag = consumerTag;
+      await this.consume(channel);
       this.logger.log(`Consuming ${QUEUE}`);
     } catch (err) {
       this.logger.error(`Failed to start consumer: ${err instanceof Error ? err.message : String(err)}`);
@@ -88,7 +78,18 @@ export class OrderCreatedNotificationConsumer implements OnApplicationBootstrap,
     }
   }
 
-  private async declareTopology(channel: amqp.Channel): Promise<void> {
+  private async consume(channel: amqp.ConfirmChannel): Promise<void> {
+    const { consumerTag } = await channel.consume(
+      QUEUE,
+      (msg) => {
+        if (msg) void this.handleDelivery(channel, msg);
+      },
+      { noAck: false },
+    );
+    this.consumerTag = consumerTag;
+  }
+
+  private async declareTopology(channel: amqp.ConfirmChannel): Promise<void> {
     await channel.assertExchange(EXCHANGE, 'topic', { durable: true });
     await channel.assertQueue(DLQ, { durable: true });
     await channel.assertQueue(RETRY_QUEUE, {
@@ -106,35 +107,48 @@ export class OrderCreatedNotificationConsumer implements OnApplicationBootstrap,
     await channel.bindQueue(QUEUE, EXCHANGE, ROUTING_KEY);
   }
 
-  async handleDelivery(channel: amqp.Channel, msg: amqp.ConsumeMessage): Promise<void> {
-    const messageId = msg.properties.messageId;
-    if (!messageId) {
-      this.deadLetter(channel, msg, 'missing messageId');
-      return;
-    }
-
-    let event: { name?: string; payload?: Record<string, unknown> };
+  async handleDelivery(channel: amqp.ConfirmChannel, msg: amqp.ConsumeMessage): Promise<void> {
     try {
-      event = JSON.parse(msg.content.toString());
-    } catch {
-      this.deadLetter(channel, msg, 'unparseable body');
-      return;
-    }
-
-    try {
-      await this.process(messageId, event);
-      channel.ack(msg); // enqueued | duplicate | skipped are all "handled"
-    } catch (err) {
-      if (isUniqueViolation(err)) {
-        channel.ack(msg); // concurrent duplicate
+      const messageId = msg.properties.messageId;
+      if (!messageId) {
+        await this.deadLetter(channel, msg, 'missing messageId');
         return;
       }
-      const deaths = countDeaths(msg);
-      if (deaths >= this.config.maxAttempts) {
-        this.deadLetter(channel, msg, err);
-      } else {
-        channel.nack(msg, false, false); // → retry queue (TTL) → back to main
+
+      let event: { name?: string; payload?: Record<string, unknown> };
+      try {
+        event = JSON.parse(msg.content.toString());
+      } catch {
+        await this.deadLetter(channel, msg, 'unparseable body');
+        return;
       }
+
+      try {
+        const outcome = await this.process(messageId, event);
+        channel.ack(msg);
+        this.recordOutcome(outcome);
+      } catch (err) {
+        if (isUniqueViolation(err)) {
+          channel.ack(msg);
+          this.metrics.duplicate();
+          return;
+        }
+        if (isInfraError(err)) {
+          // F3: dependency down — requeue (no x-death increment) and pause; don't burn retries into the DLQ.
+          await this.pauseForInfra(channel, msg);
+          return;
+        }
+        const deaths = countDeaths(msg);
+        if (deaths >= this.config.maxAttempts) {
+          await this.deadLetter(channel, msg, err);
+        } else {
+          channel.nack(msg, false, false); // → retry queue (TTL) → back to main
+          this.metrics.consumerRetried();
+        }
+      }
+    } catch (dlErr) {
+      // A confirmed DLQ handoff failed → leave the message unacked for redelivery (no loss).
+      this.logger.error(`delivery handling failed (left unacked): ${dlErr instanceof Error ? dlErr.message : String(dlErr)}`);
     }
   }
 
@@ -183,18 +197,58 @@ export class OrderCreatedNotificationConsumer implements OnApplicationBootstrap,
       return 'enqueued';
     } catch (err) {
       if (isUniqueViolation(err)) return 'duplicate';
-      throw err; // transient → caller retries
+      throw err; // transient/infra → caller classifies
     }
   }
 
-  private deadLetter(channel: amqp.Channel, msg: amqp.ConsumeMessage, reason: unknown): void {
+  private recordOutcome(outcome: ProcessOutcome): void {
+    if (outcome === 'enqueued') this.metrics.enqueued();
+    else if (outcome === 'duplicate') this.metrics.duplicate();
+    else this.metrics.skipped('order_or_recipient_missing');
+  }
+
+  /** F2: publish to the DLQ on the confirm channel and await the broker ack BEFORE acking the original. */
+  private async deadLetter(channel: amqp.ConfirmChannel, msg: amqp.ConsumeMessage, reason: unknown): Promise<void> {
     const message = reason instanceof Error ? reason.message : String(reason);
-    this.logger.error(`Dead-lettering order.created delivery: ${message}`);
-    channel.sendToQueue(DLQ, msg.content, {
-      ...msg.properties,
-      headers: { ...(msg.properties.headers ?? {}), 'x-dead-letter-reason': message },
+    await new Promise<void>((resolve, reject) => {
+      channel.sendToQueue(
+        DLQ,
+        msg.content,
+        { ...msg.properties, headers: { ...(msg.properties.headers ?? {}), 'x-dead-letter-reason': message } },
+        (err) => (err ? reject(err instanceof Error ? err : new Error(String(err))) : resolve()),
+      );
     });
     channel.ack(msg);
+    this.metrics.deadLettered(message);
+    this.logger.error(`Dead-lettered order.created delivery: ${message}`);
+  }
+
+  /** F3: requeue without dead-lettering (no x-death increment), stop consuming, resume after pauseMs. */
+  private async pauseForInfra(channel: amqp.ConfirmChannel, msg: amqp.ConsumeMessage): Promise<void> {
+    channel.nack(msg, false, true);
+    if (this.paused) return;
+    this.paused = true;
+    this.metrics.consumerPaused();
+    this.logger.warn('Dependency unavailable; pausing consumer');
+    try {
+      if (this.consumerTag) await channel.cancel(this.consumerTag);
+    } catch {
+      // best-effort
+    }
+    this.consumerTag = null;
+    setTimeout(() => void this.resumeConsuming(channel), this.config.retryDelayMs).unref();
+  }
+
+  private async resumeConsuming(channel: amqp.ConfirmChannel): Promise<void> {
+    if (this.stopped || !this.paused) return;
+    try {
+      await this.consume(channel);
+      this.paused = false;
+      this.metrics.consumerResumed();
+      this.logger.log('Consumer resumed');
+    } catch {
+      setTimeout(() => void this.resumeConsuming(channel), this.config.retryDelayMs).unref();
+    }
   }
 
   private handleChannelClose(): void {
@@ -207,8 +261,12 @@ export class OrderCreatedNotificationConsumer implements OnApplicationBootstrap,
   }
 
   private scheduleReinit(): void {
-    if (this.stopped) return;
-    this.reinitTimer = setTimeout(() => void this.start(), this.config.retryDelayMs);
+    if (this.stopped || this.reinitTimer) return; // single-flight
+    this.reinitTimer = setTimeout(() => {
+      this.reinitTimer = null;
+      void this.start();
+    }, this.config.retryDelayMs);
+    this.reinitTimer.unref();
   }
 }
 
@@ -220,4 +278,11 @@ export function countDeaths(msg: amqp.ConsumeMessage): number {
 
 function isUniqueViolation(err: unknown): boolean {
   return err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002';
+}
+
+/** A dependency-unavailable error (DB connectivity), distinct from a poison message. */
+export function isInfraError(err: unknown): boolean {
+  if (err instanceof Prisma.PrismaClientInitializationError) return true;
+  if (err instanceof Prisma.PrismaClientRustPanicError) return true;
+  return err instanceof Prisma.PrismaClientKnownRequestError && ['P1001', 'P1002', 'P1008', 'P1017'].includes(err.code);
 }
