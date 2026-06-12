@@ -64,6 +64,10 @@ export class IdempotencyService {
     return this.config.checkoutEnabled;
   }
 
+  isCheckoutRequired(): boolean {
+    return this.config.checkoutRequired;
+  }
+
   retryAfterSeconds(): number {
     return this.config.retryAfterSeconds;
   }

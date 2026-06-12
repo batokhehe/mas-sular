@@ -7,6 +7,7 @@ const NOW = 2_000_000_000_000;
 
 const config: IdempotencyConfig = {
   checkoutEnabled: true,
+  checkoutRequired: false,
   retentionMs: 48 * 60 * 60 * 1000,
   reclaimMs: 120 * 1000,
   retryAfterSeconds: 2,

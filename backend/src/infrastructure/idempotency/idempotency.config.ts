@@ -3,6 +3,8 @@ export const IDEMPOTENCY_CONFIG = 'IDEMPOTENCY_CONFIG';
 export interface IdempotencyConfig {
   /** Gate for checkout idempotency. Defaults to false (Phase A optional rollout). */
   checkoutEnabled: boolean;
+  /** Phase B: when true, POST /checkout/order rejects a missing key with 400. */
+  checkoutRequired: boolean;
   /** How long a key (and its replayable response) is retained. */
   retentionMs: number;
   /** A PROCESSING row older than this is treated as abandoned and reclaimable. */
@@ -17,8 +19,20 @@ function positiveInt(value: string | undefined, fallback: number): number {
 }
 
 export function loadIdempotencyConfig(env: NodeJS.ProcessEnv = process.env): IdempotencyConfig {
+  const checkoutEnabled = env.CHECKOUT_IDEMPOTENCY_ENABLED === 'true';
+  const checkoutRequired = env.CHECKOUT_IDEMPOTENCY_REQUIRED === 'true';
+
+  // Requiring a key without the machinery engaged would 400 every checkout —
+  // fail fast at startup rather than break checkout in production.
+  if (checkoutRequired && !checkoutEnabled) {
+    throw new Error(
+      'CHECKOUT_IDEMPOTENCY_REQUIRED=true requires CHECKOUT_IDEMPOTENCY_ENABLED=true',
+    );
+  }
+
   return {
-    checkoutEnabled: env.CHECKOUT_IDEMPOTENCY_ENABLED === 'true',
+    checkoutEnabled,
+    checkoutRequired,
     retentionMs: positiveInt(env.IDEMPOTENCY_RETENTION_MS, 48 * 60 * 60 * 1000), // 48h
     reclaimMs: positiveInt(env.IDEMPOTENCY_RECLAIM_MS, 120 * 1000), // 120s
     retryAfterSeconds: positiveInt(env.IDEMPOTENCY_RETRY_AFTER_SECONDS, 2),
