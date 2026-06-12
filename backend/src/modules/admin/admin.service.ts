@@ -235,21 +235,34 @@ export class AdminService {
 
   async updateOrderStatus(id: string, dto: UpdateOrderStatusDto) {
     await this.getOrder(id);
-    const order = await this.prisma.order.update({
-      where: { id },
-      data: {
-        status: dto.status,
-        events: { create: { status: dto.status, note: dto.note ?? `Order marked as ${dto.status}` } },
-      },
-      include: { payment: true, shipment: true },
-    });
-    await this.eventBus.publish('orders', 'order.status_updated', {
-      id: order.id,
-      name: 'order.status_updated',
-      occurredAt: new Date(),
-      payload: { orderId: order.id, status: order.status },
-    });
-    return order;
+    // The status update (+ OrderEvent) and the order.status_updated event must
+    // commit atomically. Outbox insert is last; any failure rolls back the
+    // whole unit and emits no event.
+    return this.prisma.$transaction(async (tx) => {
+      const order = await tx.order.update({
+        where: { id },
+        data: {
+          status: dto.status,
+          events: { create: { status: dto.status, note: dto.note ?? `Order marked as ${dto.status}` } },
+        },
+        include: { payment: true, shipment: true },
+      });
+      await tx.outboxEvent.create({
+        data: {
+          id: randomUUID(),
+          aggregateType: 'order',
+          aggregateId: order.id,
+          eventName: 'order.status_updated',
+          eventVersion: 1,
+          exchange: 'orders',
+          routingKey: 'order.status_updated',
+          payload: { orderId: order.id, status: order.status },
+          metadata: { source: 'admin.updateOrderStatus' },
+          occurredAt: new Date(),
+        },
+      });
+      return order;
+    }, { timeout: 10000 });
   }
 
   listPayments(status: PaymentStatus = PaymentStatus.WAITING_VERIFICATION) {
