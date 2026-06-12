@@ -233,9 +233,34 @@ export class AdminService {
 
   async updateOrderStatus(id: string, dto: UpdateOrderStatusDto) {
     await this.getOrder(id);
-    // The status update (+ OrderEvent) and the order.status_updated event must
-    // commit atomically. Outbox insert is last; any failure rolls back the
-    // whole unit and emits no event.
+
+    if (dto.status === OrderStatus.CANCELLED) {
+      // Cancellation restocks inventory exactly once via the shared transition;
+      // order.status_updated is emitted only when this call actually cancels.
+      return this.prisma.$transaction(async (tx) => {
+        const { cancelled } = await this.cancelOrder(tx, id, dto.note ?? `Order marked as ${OrderStatus.CANCELLED}`);
+        if (cancelled) {
+          await tx.outboxEvent.create({
+            data: {
+              id: randomUUID(),
+              aggregateType: 'order',
+              aggregateId: id,
+              eventName: 'order.status_updated',
+              eventVersion: 1,
+              exchange: 'orders',
+              routingKey: 'order.status_updated',
+              payload: { orderId: id, status: OrderStatus.CANCELLED },
+              metadata: { source: 'admin.updateOrderStatus' },
+              occurredAt: new Date(),
+            },
+          });
+        }
+        return tx.order.findUnique({ where: { id }, include: { payment: true, shipment: true } });
+      }, { timeout: 10000 });
+    }
+
+    // Non-CANCELLED transitions: status update (+ OrderEvent) and the
+    // order.status_updated event commit atomically; outbox is last.
     return this.prisma.$transaction(async (tx) => {
       const order = await tx.order.update({
         where: { id },
@@ -338,37 +363,86 @@ export class AdminService {
     const payment = await this.prisma.payment.findUnique({ where: { id: paymentId } });
     if (!payment || payment.deletedAt) throw new NotFoundException('Payment not found');
 
-    // Payment FAILED, order CANCELLED, and the payment.failed event must commit
-    // atomically. All three writes run in one transaction; the outbox insert is
-    // last, so any failure rolls back the whole unit and emits no event.
+    // Restock + cancellation + payment.failed must commit atomically. The payment
+    // FAILED transition and the order CANCELLED transition are each CAS-gated, so
+    // a retry or a concurrent cancellation neither double-restocks nor double-emits.
     return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.payment.update({
-        where: { id: paymentId },
+      const paymentFlip = await tx.payment.updateMany({
+        where: { id: paymentId, status: { not: PaymentStatus.FAILED } },
         data: { status: PaymentStatus.FAILED },
       });
-      await tx.order.update({
-        where: { id: payment.orderId },
-        data: {
-          status: OrderStatus.CANCELLED,
-          events: { create: { status: OrderStatus.CANCELLED, note: dto.note ?? 'Payment rejected by admin' } },
-        },
-      });
-      await tx.outboxEvent.create({
-        data: {
-          id: randomUUID(),
-          aggregateType: 'payment',
-          aggregateId: updated.id,
-          eventName: 'payment.failed',
-          eventVersion: 1,
-          exchange: 'payments',
-          routingKey: 'payment.failed',
-          payload: { paymentId: updated.id, orderId: updated.orderId },
-          metadata: { source: 'admin.rejectPayment' },
-          occurredAt: new Date(),
-        },
-      });
-      return updated;
+
+      await this.cancelOrder(tx, payment.orderId, dto.note ?? 'Payment rejected by admin');
+
+      if (paymentFlip.count === 1) {
+        await tx.outboxEvent.create({
+          data: {
+            id: randomUUID(),
+            aggregateType: 'payment',
+            aggregateId: payment.id,
+            eventName: 'payment.failed',
+            eventVersion: 1,
+            exchange: 'payments',
+            routingKey: 'payment.failed',
+            payload: { paymentId: payment.id, orderId: payment.orderId },
+            metadata: { source: 'admin.rejectPayment' },
+            occurredAt: new Date(),
+          },
+        });
+      }
+
+      return tx.payment.findUnique({ where: { id: paymentId } });
     }, { timeout: 10000 });
+  }
+
+  /**
+   * Cancel an order exactly once. The order CANCELLED transition (a CAS over the
+   * active-status whitelist) is the source of truth: only the call that actually
+   * flips the order restocks inventory and writes the cancellation event. Returns
+   * whether this call performed the transition.
+   */
+  private async cancelOrder(
+    tx: Prisma.TransactionClient,
+    orderId: string,
+    note: string,
+  ): Promise<{ cancelled: boolean }> {
+    const flip = await tx.order.updateMany({
+      where: {
+        id: orderId,
+        deletedAt: null,
+        status: { in: [OrderStatus.PENDING, OrderStatus.PROCESSING, OrderStatus.DELIVERING] },
+      },
+      data: { status: OrderStatus.CANCELLED },
+    });
+    if (flip.count !== 1) {
+      return { cancelled: false };
+    }
+    await this.restockOrder(tx, orderId);
+    await tx.orderEvent.create({ data: { orderId, status: OrderStatus.CANCELLED, note } });
+    return { cancelled: true };
+  }
+
+  /**
+   * Restore inventory for a cancelled order: aggregate item quantities per product
+   * and increment product.stock — the exact inverse of the checkout decrement.
+   * Products only (toppings are not stock-tracked). updateMany tolerates a missing
+   * product without aborting the transaction.
+   */
+  private async restockOrder(tx: Prisma.TransactionClient, orderId: string): Promise<void> {
+    const items = await tx.orderItem.findMany({
+      where: { orderId },
+      select: { productId: true, quantity: true },
+    });
+    const quantityByProduct = new Map<string, number>();
+    for (const item of items) {
+      quantityByProduct.set(item.productId, (quantityByProduct.get(item.productId) ?? 0) + item.quantity);
+    }
+    for (const [productId, quantity] of quantityByProduct) {
+      await tx.product.updateMany({
+        where: { id: productId },
+        data: { stock: { increment: quantity } },
+      });
+    }
   }
 
   async createShipment(dto: CreateShipmentDto) {
