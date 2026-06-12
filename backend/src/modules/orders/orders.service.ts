@@ -1,10 +1,11 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { OrderStatus, PaymentMethod, PaymentStatus, Prisma, Product, Promo, VoucherType } from '@prisma/client';
+import { OrderStatus, PaymentMethod, PaymentStatus, Prisma, Product, Promo, Topping, VoucherType } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../database/prisma.service';
 import { IdempotencyService, SupersededError } from '../../infrastructure/idempotency/idempotency.service';
 import { ShippingService } from '../shipping/shipping.service';
 import { CheckoutItemDto, CheckoutSummaryDto, CreateOrderDto, ShippingCostDto, ValidateVoucherDto } from './application/dto/create-order.dto';
+import { generateOrderNumber, isOrderNumberConflict } from './order-number.util';
 
 type NormalizedCheckoutItem = {
   productId: string;
@@ -12,6 +13,17 @@ type NormalizedCheckoutItem = {
   toppingIds: string[];
   spicyLevel?: number;
   notes?: string;
+};
+
+type PersistOrderArgs = {
+  userId: string;
+  dto: CreateOrderDto;
+  items: NormalizedCheckoutItem[];
+  products: Product[];
+  toppings: Topping[];
+  summary: Awaited<ReturnType<OrdersService['getSummary']>>;
+  idempotencyRecordId: string | null;
+  fenceToken: number | null;
 };
 
 export interface IdempotencyRequest {
@@ -326,8 +338,30 @@ export class OrdersService {
     const { products, toppings } = await this.getCartPricing(items);
     this.assertStock(items, products);
     const summary = await this.getSummary(userId, dto);
+
+    return this.persistOrderWithRetry({ userId, dto, items, products, toppings, summary, idempotencyRecordId, fenceToken });
+  }
+
+  // Retry the order transaction on the astronomically-rare orderNumber unique
+  // violation (P2002), regenerating the random suffix each attempt.
+  private async persistOrderWithRetry(args: PersistOrderArgs) {
+    const MAX_ORDER_NUMBER_ATTEMPTS = 3;
+    for (let attempt = 1; attempt <= MAX_ORDER_NUMBER_ATTEMPTS; attempt += 1) {
+      try {
+        return await this.persistOrderOnce(generateOrderNumber(), args);
+      } catch (err) {
+        if (attempt < MAX_ORDER_NUMBER_ATTEMPTS && isOrderNumberConflict(err)) {
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw new Error('Failed to allocate a unique order number');
+  }
+
+  private async persistOrderOnce(orderNumber: string, args: PersistOrderArgs) {
+    const { userId, dto, items, products, toppings, summary, idempotencyRecordId, fenceToken } = args;
     const voucher = summary.voucher;
-    const orderNumber = `BN-${new Date().toISOString().slice(0, 10).replaceAll('-', '')}-${Date.now().toString().slice(-5)}`;
 
     const order = await this.prisma.$transaction(async (tx) => {
       for (const product of products) {
