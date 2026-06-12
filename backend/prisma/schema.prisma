@@ -548,4 +548,6 @@ model NotificationOutbox {
 
   @@index([status, nextAttemptAt])
   @@index([createdAt])
+  @@index([status, sentAt])
+  @@index([status, createdAt])
 }
