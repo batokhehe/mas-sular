@@ -12,7 +12,7 @@ const DTO: CreateOrderDto = {
 };
 
 const PRODUCT = { id: 'p1', name: 'Bakso', price: 20000, stock: 10, status: 'ACTIVE', deletedAt: null };
-const CREATED_ORDER = { id: 'order-1', orderNumber: 'BN-20260611-12345', items: [], payment: {} };
+const CREATED_ORDER = { id: 'order-1', orderNumber: 'BN-20260611-12345', totalPrice: 30000, items: [], payment: {} };
 
 function buildTx() {
   return {
@@ -20,6 +20,7 @@ function buildTx() {
     order: { create: jest.fn().mockResolvedValue(CREATED_ORDER) },
     promo: { update: jest.fn() },
     voucherUsage: { create: jest.fn() },
+    outboxEvent: { create: jest.fn().mockResolvedValue({}) },
   };
 }
 
@@ -58,26 +59,29 @@ function build(prisma = buildPrisma(), idempotency = buildIdempotency()) {
 }
 
 describe('Checkout idempotency orchestration', () => {
-  it('runs the legacy path when no Idempotency-Key is supplied', async () => {
+  it('runs the legacy path when no Idempotency-Key is supplied (emits via outbox)', async () => {
     const { service, prisma, idempotency, eventBus } = build();
 
     const outcome = await service.checkout(USER, DTO); // no idem
 
     expect(idempotency.begin).not.toHaveBeenCalled();
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
-    expect(eventBus.publish).toHaveBeenCalledTimes(1);
+    expect(prisma.__tx.outboxEvent.create).toHaveBeenCalledTimes(1); // order.created via outbox
+    expect(eventBus.publish).not.toHaveBeenCalled(); // legacy publish removed
     expect(outcome).toEqual({ kind: 'result', statusCode: 201, replayed: false, body: CREATED_ORDER });
   });
 
-  it('runs the legacy path when the feature flag is disabled', async () => {
+  it('runs the legacy path when the feature flag is disabled (emits via outbox)', async () => {
     const idempotency = buildIdempotency();
     idempotency.isCheckoutEnabled.mockReturnValue(false);
-    const { service, prisma } = build(buildPrisma(), idempotency);
+    const { service, prisma, eventBus } = build(buildPrisma(), idempotency);
 
     await service.checkout(USER, DTO, IDEM);
 
     expect(idempotency.begin).not.toHaveBeenCalled();
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prisma.__tx.outboxEvent.create).toHaveBeenCalledTimes(1);
+    expect(eventBus.publish).not.toHaveBeenCalled();
   });
 
   it('fresh key: reserves, creates ONE order, finalizes idempotency in-tx with fenceToken', async () => {
@@ -96,7 +100,20 @@ describe('Checkout idempotency orchestration', () => {
       1, // fenceToken
       expect.objectContaining({ statusCode: 201, resourceType: 'Order', resourceId: 'order-1' }),
     );
-    expect(eventBus.publish).toHaveBeenCalledTimes(1);
+    // order.created emitted via the outbox inside the tx; legacy publish gone.
+    expect(eventBus.publish).not.toHaveBeenCalled();
+    expect(prisma.__tx.outboxEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        id: expect.any(String),
+        aggregateType: 'order',
+        aggregateId: 'order-1',
+        eventName: 'order.created',
+        eventVersion: 1,
+        exchange: 'orders',
+        routingKey: 'order.created',
+        payload: { orderId: 'order-1', orderNumber: 'BN-20260611-12345', totalPrice: 30000 },
+      }),
+    });
     expect(outcome).toEqual({ kind: 'result', statusCode: 201, replayed: false, body: CREATED_ORDER });
   });
 
@@ -111,6 +128,7 @@ describe('Checkout idempotency orchestration', () => {
     expect(outcome).toEqual({ kind: 'result', statusCode: 201, replayed: true, body: { id: 'order-1' } });
     expect(prisma.$transaction).not.toHaveBeenCalled();
     expect(prisma.__tx.order.create).not.toHaveBeenCalled();
+    expect(prisma.__tx.outboxEvent.create).not.toHaveBeenCalled(); // no event on replay
     expect(eventBus.publish).not.toHaveBeenCalled();
   });
 
@@ -149,6 +167,7 @@ describe('Checkout idempotency orchestration', () => {
 
     expect(outcome).toEqual({ kind: 'result', statusCode: 201, replayed: true, body: { id: 'order-1' } });
     expect(idempotency.markFailed).not.toHaveBeenCalled(); // we no longer own the key
+    expect(prisma.__tx.outboxEvent.create).not.toHaveBeenCalled(); // superseded → no event (rolled back)
   });
 
   it('superseded → processing: returns 409 outcome, never a raw 500', async () => {
@@ -163,6 +182,7 @@ describe('Checkout idempotency orchestration', () => {
 
     expect(outcome).toEqual({ kind: 'processing', retryAfterSeconds: 2 });
     expect(idempotency.markFailed).not.toHaveBeenCalled();
+    expect(prisma.__tx.outboxEvent.create).not.toHaveBeenCalled(); // superseded → no event
   });
 
   it('concurrency: a second request that resolves to processing creates no order', async () => {

@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { OrderStatus, PaymentMethod, PaymentStatus, Prisma, Product, Promo, VoucherType } from '@prisma/client';
+import { randomUUID } from 'crypto';
 import { PrismaService } from '../../database/prisma.service';
 import { EventBus } from '../../infrastructure/events/event-bus';
 import { IdempotencyService, SupersededError } from '../../infrastructure/idempotency/idempotency.service';
@@ -436,14 +437,25 @@ export class OrdersService {
         });
       }
 
-      return createdOrder;
-    });
+      // Emit order.created via the transactional outbox, in the SAME transaction as
+      // the order. It is the last statement so a superseded finalize (above) rolls
+      // back the order AND this event together — no event for an uncommitted order.
+      await tx.outboxEvent.create({
+        data: {
+          id: randomUUID(),
+          aggregateType: 'order',
+          aggregateId: createdOrder.id,
+          eventName: 'order.created',
+          eventVersion: 1,
+          exchange: 'orders',
+          routingKey: 'order.created',
+          payload: { orderId: createdOrder.id, orderNumber: createdOrder.orderNumber, totalPrice: createdOrder.totalPrice },
+          metadata: { source: 'orders.checkout' },
+          occurredAt: new Date(),
+        },
+      });
 
-    await this.eventBus.publish('orders', 'order.created', {
-      id: order.id,
-      name: 'order.created',
-      occurredAt: new Date(),
-      payload: { orderId: order.id, orderNumber: order.orderNumber, totalPrice: order.totalPrice },
+      return createdOrder;
     });
 
     return order;
