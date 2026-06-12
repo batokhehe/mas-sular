@@ -504,3 +504,13 @@ model IdempotencyKey {
   @@index([expiresAt])
   @@index([status, createdAt])
 }
+
+model ProcessedEvent {
+  consumer    String   @db.VarChar(64)
+  messageId   String   @db.VarChar(36)
+  eventName   String   @db.VarChar(128)
+  processedAt DateTime @default(now())
+
+  @@id([consumer, messageId])
+  @@index([processedAt])
+}
