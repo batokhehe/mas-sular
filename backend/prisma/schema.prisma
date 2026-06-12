@@ -514,3 +514,35 @@ model ProcessedEvent {
   @@id([consumer, messageId])
   @@index([processedAt])
 }
+
+enum NotificationChannel {
+  EMAIL
+  SMS
+  PUSH
+  WHATSAPP
+  IN_APP
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+model NotificationOutbox {
+  id              String              @id @default(uuid())
+  channel         NotificationChannel
+  recipient       String              @db.VarChar(255)
+  template        String              @db.VarChar(128)
+  payload         Json
+  status          NotificationStatus  @default(PENDING)
+  attempts        Int                 @default(0) @db.UnsignedInt
+  nextAttemptAt   DateTime            @default(now())
+  lastError       String?             @db.Text
+  sourceMessageId String?             @db.VarChar(36)
+  createdAt       DateTime            @default(now())
+  sentAt          DateTime?
+
+  @@index([status, nextAttemptAt])
+  @@index([createdAt])
+}
