@@ -50,14 +50,29 @@ export class RabbitConnectionManager implements OnModuleDestroy {
     }
   }
 
-  private async connect(): Promise<amqp.ConfirmChannel> {
+  /** A dedicated channel for consumers, on the shared connection (separate from the confirm channel). */
+  async createConsumerChannel(prefetch: number): Promise<amqp.Channel> {
+    const connection = await this.ensureConnection();
+    const channel = await connection.createChannel();
+    if (prefetch > 0) await channel.prefetch(prefetch);
+    channel.on('error', (err: Error) => this.logger.error(`AMQP consumer channel error: ${err.message}`));
+    return channel;
+  }
+
+  private async ensureConnection(): Promise<amqp.Connection> {
+    if (this.connection) return this.connection;
     if (!this.config.rabbitmqUrl) {
       throw new Error('RABBITMQ_URL is not configured');
     }
     const connection = await amqp.connect(this.config.rabbitmqUrl);
     connection.on('error', (err: Error) => this.logger.error(`AMQP connection error: ${err.message}`));
     connection.on('close', () => this.handleClose());
+    this.connection = connection;
+    return connection;
+  }
 
+  private async connect(): Promise<amqp.ConfirmChannel> {
+    const connection = await this.ensureConnection();
     const channel = await connection.createConfirmChannel();
     channel.on('error', (err: Error) => this.logger.error(`AMQP channel error: ${err.message}`));
     channel.on('close', () => {
@@ -65,7 +80,6 @@ export class RabbitConnectionManager implements OnModuleDestroy {
       this.assertedExchanges.clear();
     });
 
-    this.connection = connection;
     this.channel = channel;
     this.assertedExchanges.clear();
     this.logger.log('AMQP confirm channel established');

@@ -9,5 +9,6 @@ import { RabbitConnectionManager } from './rabbit-connection.manager';
     RabbitConnectionManager,
     OutboxRelayWorker,
   ],
+  exports: [RabbitConnectionManager],
 })
 export class OutboxModule {}
