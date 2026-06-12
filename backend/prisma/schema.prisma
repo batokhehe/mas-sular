@@ -536,12 +536,15 @@ model NotificationOutbox {
   template        String              @db.VarChar(128)
   payload         Json
   status          NotificationStatus  @default(PENDING)
-  attempts        Int                 @default(0) @db.UnsignedInt
-  nextAttemptAt   DateTime            @default(now())
-  lastError       String?             @db.Text
-  sourceMessageId String?             @db.VarChar(36)
-  createdAt       DateTime            @default(now())
-  sentAt          DateTime?
+  attempts          Int                 @default(0) @db.UnsignedInt
+  nextAttemptAt     DateTime            @default(now())
+  lockedUntil       DateTime?
+  lockedBy          String?             @db.VarChar(64)
+  providerMessageId String?             @db.VarChar(255)
+  lastError         String?             @db.Text
+  sourceMessageId   String?             @db.VarChar(36)
+  createdAt         DateTime            @default(now())
+  sentAt            DateTime?
 
   @@index([status, nextAttemptAt])
   @@index([createdAt])
