@@ -327,24 +327,37 @@ export class AdminService {
     const payment = await this.prisma.payment.findUnique({ where: { id: paymentId } });
     if (!payment || payment.deletedAt) throw new NotFoundException('Payment not found');
 
-    const updated = await this.prisma.payment.update({
-      where: { id: paymentId },
-      data: { status: PaymentStatus.FAILED },
-    });
-    await this.prisma.order.update({
-      where: { id: payment.orderId },
-      data: {
-        status: OrderStatus.CANCELLED,
-        events: { create: { status: OrderStatus.CANCELLED, note: dto.note ?? 'Payment rejected by admin' } },
-      },
-    });
-    await this.eventBus.publish('payments', 'payment.failed', {
-      id: updated.id,
-      name: 'payment.failed',
-      occurredAt: new Date(),
-      payload: { paymentId: updated.id, orderId: updated.orderId },
-    });
-    return updated;
+    // Payment FAILED, order CANCELLED, and the payment.failed event must commit
+    // atomically. All three writes run in one transaction; the outbox insert is
+    // last, so any failure rolls back the whole unit and emits no event.
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.payment.update({
+        where: { id: paymentId },
+        data: { status: PaymentStatus.FAILED },
+      });
+      await tx.order.update({
+        where: { id: payment.orderId },
+        data: {
+          status: OrderStatus.CANCELLED,
+          events: { create: { status: OrderStatus.CANCELLED, note: dto.note ?? 'Payment rejected by admin' } },
+        },
+      });
+      await tx.outboxEvent.create({
+        data: {
+          id: randomUUID(),
+          aggregateType: 'payment',
+          aggregateId: updated.id,
+          eventName: 'payment.failed',
+          eventVersion: 1,
+          exchange: 'payments',
+          routingKey: 'payment.failed',
+          payload: { paymentId: updated.id, orderId: updated.orderId },
+          metadata: { source: 'admin.rejectPayment' },
+          occurredAt: new Date(),
+        },
+      });
+      return updated;
+    }, { timeout: 10000 });
   }
 
   async createShipment(dto: CreateShipmentDto) {
