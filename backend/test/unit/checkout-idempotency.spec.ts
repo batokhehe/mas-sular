@@ -29,7 +29,7 @@ function buildPrisma(tx = buildTx()) {
     product: { findMany: jest.fn().mockResolvedValue([PRODUCT]) },
     topping: { findMany: jest.fn().mockResolvedValue([]) },
     address: { findFirst: jest.fn().mockResolvedValue({ id: 'addr-1', userId: USER, deletedAt: null }) },
-    order: { count: jest.fn().mockResolvedValue(0) },
+    order: { count: jest.fn().mockResolvedValue(0), findUnique: jest.fn() },
     voucherUsage: { findFirst: jest.fn().mockResolvedValue(null) },
     promo: { findFirst: jest.fn().mockResolvedValue(null) },
     $transaction: jest.fn().mockImplementation((cb: (tx: unknown) => Promise<unknown>) => cb(tx)),
@@ -41,6 +41,7 @@ function buildIdempotency() {
   return {
     isCheckoutEnabled: jest.fn().mockReturnValue(true),
     retryAfterSeconds: jest.fn().mockReturnValue(2),
+    replayMode: jest.fn().mockReturnValue('snapshot'),
     begin: jest.fn(),
     finalize: jest.fn().mockResolvedValue(undefined),
     markFailed: jest.fn().mockResolvedValue(undefined),
@@ -163,6 +164,29 @@ describe('Checkout idempotency orchestration', () => {
     expect(outcome).toEqual({ kind: 'result', statusCode: 201, replayed: true, body: { id: 'order-1' } });
     expect(idempotency.markFailed).not.toHaveBeenCalled(); // we no longer own the key
     expect(prisma.__tx.outboxEvent.create).not.toHaveBeenCalled(); // superseded → no event (rolled back)
+  });
+
+  it('superseded → replay rehydrates the latest order (rehydrate mode)', async () => {
+    const prisma = buildPrisma();
+    const latest = { id: 'order-1', status: 'PROCESSING', payment: { status: 'PAID' } };
+    prisma.order.findUnique.mockResolvedValue(latest);
+    const idempotency = buildIdempotency();
+    idempotency.replayMode.mockReturnValue('rehydrate');
+    idempotency.begin.mockResolvedValue(PROCEED);
+    idempotency.finalize.mockRejectedValue(new SupersededError('rec-1', 1));
+    idempotency.resolveAfterSupersession.mockResolvedValue({
+      kind: 'replay',
+      statusCode: 201,
+      body: { id: 'order-1', status: 'PENDING', payment: { status: 'PENDING' } }, // stale snapshot
+      resourceType: 'Order',
+      resourceId: 'order-1',
+    });
+    const { service } = build(prisma, idempotency);
+
+    const outcome = await service.checkout(USER, DTO, IDEM);
+
+    expect(outcome).toEqual({ kind: 'result', statusCode: 201, replayed: true, body: latest });
+    expect(prisma.order.findUnique).toHaveBeenCalledTimes(1);
   });
 
   it('superseded → processing: returns 409 outcome, never a raw 500', async () => {

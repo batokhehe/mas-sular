@@ -3,7 +3,7 @@ import { IdempotencyKey, IdempotencyStatus, Prisma } from '@prisma/client';
 import { createHash, randomUUID } from 'crypto';
 import { hostname } from 'os';
 import { PrismaService } from '../../database/prisma.service';
-import { IDEMPOTENCY_CONFIG, IdempotencyConfig } from './idempotency.config';
+import { IDEMPOTENCY_CONFIG, IdempotencyConfig, ReplayMode } from './idempotency.config';
 
 export interface IdempotencyContext {
   userId: string;
@@ -16,7 +16,7 @@ export interface IdempotencyContext {
 
 export type BeginResult =
   | { kind: 'proceed'; record: IdempotencyKey }
-  | { kind: 'replay'; statusCode: number; body: Prisma.JsonValue }
+  | { kind: 'replay'; statusCode: number; body: Prisma.JsonValue; resourceType: string | null; resourceId: string | null }
   | { kind: 'processing' };
 
 /** Resolution of a key when the caller no longer owns it (already replay/processing). */
@@ -66,6 +66,10 @@ export class IdempotencyService {
 
   isCheckoutRequired(): boolean {
     return this.config.checkoutRequired;
+  }
+
+  replayMode(): ReplayMode {
+    return this.config.replayMode;
   }
 
   retryAfterSeconds(): number {
@@ -169,7 +173,13 @@ export class IdempotencyService {
       where: { userId_idempotencyKey: { userId, idempotencyKey: key } },
     });
     if (row && row.status === IdempotencyStatus.COMPLETED) {
-      return { kind: 'replay', statusCode: row.responseStatusCode ?? 200, body: (row.responseBody ?? {}) as Prisma.JsonValue };
+      return {
+        kind: 'replay',
+        statusCode: row.responseStatusCode ?? 200,
+        body: (row.responseBody ?? {}) as Prisma.JsonValue,
+        resourceType: row.resourceType,
+        resourceId: row.resourceId,
+      };
     }
     return { kind: 'processing' };
   }
@@ -183,7 +193,13 @@ export class IdempotencyService {
       throw new UnprocessableEntityException('Idempotency-Key was already used with a different request');
     }
     if (record.status === IdempotencyStatus.COMPLETED) {
-      return { kind: 'replay', statusCode: record.responseStatusCode ?? 200, body: (record.responseBody ?? {}) as Prisma.JsonValue };
+      return {
+        kind: 'replay',
+        statusCode: record.responseStatusCode ?? 200,
+        body: (record.responseBody ?? {}) as Prisma.JsonValue,
+        resourceType: record.resourceType,
+        resourceId: record.resourceId,
+      };
     }
     if (record.status === IdempotencyStatus.FAILED) {
       const claimed = await this.claim(record.id, record.fenceToken, fingerprint, ctx, 'FAILED');

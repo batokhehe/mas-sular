@@ -36,6 +36,13 @@ export type CheckoutOutcome =
   | { kind: 'result'; statusCode: number; replayed: boolean; body: unknown }
   | { kind: 'processing'; retryAfterSeconds: number };
 
+// Shared so the order.create response and a rehydrated replay return the
+// identical shape (single source of truth for the checkout order include).
+const ORDER_CHECKOUT_INCLUDE = {
+  items: { include: { toppings: true } },
+  payment: true,
+} satisfies Prisma.OrderInclude;
+
 @Injectable()
 export class OrdersService {
   constructor(
@@ -275,7 +282,7 @@ export class OrdersService {
     });
 
     if (begin.kind === 'replay') {
-      return { kind: 'result', statusCode: begin.statusCode, replayed: true, body: begin.body };
+      return { kind: 'result', statusCode: begin.statusCode, replayed: true, body: await this.resolveReplayBody(begin) };
     }
     if (begin.kind === 'processing') {
       return { kind: 'processing', retryAfterSeconds: this.idempotency.retryAfterSeconds() };
@@ -290,12 +297,37 @@ export class OrdersService {
       if (err instanceof SupersededError) {
         const resolved = await this.idempotency.resolveAfterSupersession(userId, idem.key);
         return resolved.kind === 'replay'
-          ? { kind: 'result', statusCode: resolved.statusCode, replayed: true, body: resolved.body }
+          ? { kind: 'result', statusCode: resolved.statusCode, replayed: true, body: await this.resolveReplayBody(resolved) }
           : { kind: 'processing', retryAfterSeconds: this.idempotency.retryAfterSeconds() };
       }
       await this.idempotency.markFailed(begin.record.id, begin.record.fenceToken, err);
       throw err;
     }
+  }
+
+  /**
+   * Resolve the body for a COMPLETED replay. In 'snapshot' mode (default) returns
+   * the stored response verbatim. In 'rehydrate' mode re-reads the Order by
+   * resourceId — same include as creation, so the shape is identical — returning
+   * current order/payment state. Falls back to the stored snapshot if the order
+   * is gone, so a previously-successful checkout never 404s.
+   */
+  private async resolveReplayBody(replay: {
+    body: Prisma.JsonValue;
+    resourceType: string | null;
+    resourceId: string | null;
+  }) {
+    if (this.idempotency.replayMode() !== 'rehydrate') {
+      return replay.body;
+    }
+    if (replay.resourceType !== 'Order' || !replay.resourceId) {
+      return replay.body;
+    }
+    const order = await this.prisma.order.findUnique({
+      where: { id: replay.resourceId },
+      include: ORDER_CHECKOUT_INCLUDE,
+    });
+    return order ?? replay.body;
   }
 
   /** Canonical projection of the checkout request that is hashed into the fingerprint. */
@@ -434,7 +466,7 @@ export class OrdersService {
             },
           },
         },
-        include: { items: { include: { toppings: true } }, payment: true },
+        include: ORDER_CHECKOUT_INCLUDE,
       });
 
       if (voucher) {
