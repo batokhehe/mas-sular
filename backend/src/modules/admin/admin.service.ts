@@ -23,6 +23,20 @@ import { UpdatePromoDto } from './application/dto/update-promo.dto';
 import { UpdateRoleDto } from './application/dto/update-role.dto';
 import { UpdateUserDto } from './application/dto/update-user.dto';
 
+// Payment terminal states: once a payment reaches any of these it is final and
+// no further transition is allowed. PENDING and WAITING_VERIFICATION are the
+// only verifiable/rejectable (non-terminal) states.
+const TERMINAL_PAYMENT_STATUSES: PaymentStatus[] = [
+  PaymentStatus.PAID,
+  PaymentStatus.FAILED,
+  PaymentStatus.EXPIRED,
+  PaymentStatus.REFUNDED,
+];
+
+function isTerminalPaymentStatus(status: PaymentStatus): boolean {
+  return TERMINAL_PAYMENT_STATUSES.includes(status);
+}
+
 @Injectable()
 export class AdminService {
   constructor(
@@ -307,9 +321,13 @@ export class AdminService {
     const payment = await this.prisma.payment.findUnique({ where: { id: paymentId } });
     if (!payment || payment.deletedAt) throw new NotFoundException('Payment not found');
 
-    // Terminal-state guard: a PAID or FAILED payment is final. Reject the re-verify
-    // up front so the common idempotent case returns 409 without opening a tx.
-    if (payment.status === PaymentStatus.PAID || payment.status === PaymentStatus.FAILED) {
+    // Idempotent replay: already in the target terminal state (PAID) → return the
+    // current payment with no side effects (no event, audit, or order update).
+    if (payment.status === PaymentStatus.PAID) {
+      return payment;
+    }
+    // Any OTHER terminal state (FAILED/EXPIRED/REFUNDED) cannot transition to PAID.
+    if (isTerminalPaymentStatus(payment.status)) {
       throw new ConflictException(`Payment cannot be verified from terminal status ${payment.status}`);
     }
 
@@ -321,7 +339,7 @@ export class AdminService {
       // call flips the row (count === 1); the loser aborts before emitting a second
       // payment.paid — exactly-once event emission.
       const flip = await tx.payment.updateMany({
-        where: { id: paymentId, status: { notIn: [PaymentStatus.PAID, PaymentStatus.FAILED] } },
+        where: { id: paymentId, status: { notIn: TERMINAL_PAYMENT_STATUSES } },
         data: { status: PaymentStatus.PAID, verifiedByUserId: adminId, verifiedAt },
       });
       if (flip.count !== 1) {
@@ -376,33 +394,46 @@ export class AdminService {
     const payment = await this.prisma.payment.findUnique({ where: { id: paymentId } });
     if (!payment || payment.deletedAt) throw new NotFoundException('Payment not found');
 
+    // Idempotent replay: already in the target terminal state (FAILED) → return the
+    // current payment with no side effects (no restock, event, or order change).
+    if (payment.status === PaymentStatus.FAILED) {
+      return payment;
+    }
+    // Any OTHER terminal state (PAID/EXPIRED/REFUNDED) cannot transition to FAILED.
+    if (isTerminalPaymentStatus(payment.status)) {
+      throw new ConflictException(`Payment cannot be rejected from terminal status ${payment.status}`);
+    }
+
     // Restock + cancellation + payment.failed must commit atomically. The payment
-    // FAILED transition and the order CANCELLED transition are each CAS-gated, so
-    // a retry or a concurrent cancellation neither double-restocks nor double-emits.
+    // FAILED transition is CAS-gated over the non-terminal states, so a concurrent
+    // reject flips the row once (count === 1); the loser aborts before emitting a
+    // second payment.failed. The order CANCELLED transition is independently CAS-
+    // gated, so it never double-restocks.
     return this.prisma.$transaction(async (tx) => {
       const paymentFlip = await tx.payment.updateMany({
-        where: { id: paymentId, status: { not: PaymentStatus.FAILED } },
+        where: { id: paymentId, status: { notIn: TERMINAL_PAYMENT_STATUSES } },
         data: { status: PaymentStatus.FAILED },
       });
+      if (paymentFlip.count !== 1) {
+        throw new ConflictException('Payment already in a terminal state');
+      }
 
       await this.cancelOrder(tx, payment.orderId, dto.note ?? 'Payment rejected by admin');
 
-      if (paymentFlip.count === 1) {
-        await tx.outboxEvent.create({
-          data: {
-            id: randomUUID(),
-            aggregateType: 'payment',
-            aggregateId: payment.id,
-            eventName: 'payment.failed',
-            eventVersion: 1,
-            exchange: 'payments',
-            routingKey: 'payment.failed',
-            payload: { paymentId: payment.id, orderId: payment.orderId },
-            metadata: { source: 'admin.rejectPayment' },
-            occurredAt: new Date(),
-          },
-        });
-      }
+      await tx.outboxEvent.create({
+        data: {
+          id: randomUUID(),
+          aggregateType: 'payment',
+          aggregateId: payment.id,
+          eventName: 'payment.failed',
+          eventVersion: 1,
+          exchange: 'payments',
+          routingKey: 'payment.failed',
+          payload: { paymentId: payment.id, orderId: payment.orderId },
+          metadata: { source: 'admin.rejectPayment' },
+          occurredAt: new Date(),
+        },
+      });
 
       return tx.payment.findUnique({ where: { id: paymentId } });
     }, { timeout: 10000 });

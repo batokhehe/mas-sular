@@ -1,7 +1,7 @@
-import { NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { AdminService } from '../../src/modules/admin/admin.service';
 
-const PAYMENT = { id: 'pay-1', orderId: 'order-1', deletedAt: null };
+const PAYMENT = { id: 'pay-1', orderId: 'order-1', status: 'WAITING_VERIFICATION', deletedAt: null };
 const REFRESHED = { id: 'pay-1', orderId: 'order-1', status: 'FAILED' };
 
 type Opts = {
@@ -52,9 +52,9 @@ describe('AdminService.rejectPayment — cancellation + restock', () => {
 
     const result = await service.rejectPayment('pay-1', { note: 'bad receipt' });
 
-    // payment CAS (only flip if not already FAILED)
+    // payment CAS (only flip from a non-terminal state)
     expect(tx.payment.updateMany).toHaveBeenCalledWith({
-      where: { id: 'pay-1', status: { not: 'FAILED' } },
+      where: { id: 'pay-1', status: { notIn: ['PAID', 'FAILED', 'EXPIRED', 'REFUNDED'] } },
       data: { status: 'FAILED' },
     });
     // order CAS over the active-status whitelist (NOT status != CANCELLED)
@@ -74,15 +74,29 @@ describe('AdminService.rejectPayment — cancellation + restock', () => {
     expect(result).toBe(REFRESHED);
   });
 
-  it('replay: payment already FAILED and order already CANCELLED → no restock, no event', async () => {
-    const { service, tx } = build({ paymentFlip: 0, orderCancel: 0 });
+  it('reject replay: already-FAILED returns the current payment with no side effects (200)', async () => {
+    const current = { ...PAYMENT, status: 'FAILED' };
+    const { service, prisma, tx } = build({}, current);
 
-    await service.rejectPayment('pay-1', {});
+    const result = await service.rejectPayment('pay-1', {});
 
-    expect(tx.product.updateMany).not.toHaveBeenCalled();
-    expect(tx.orderEvent.create).not.toHaveBeenCalled();
-    expect(tx.outboxEvent.create).not.toHaveBeenCalled();
+    expect(result).toBe(current); // returns the current payment
+    expect(prisma.$transaction).not.toHaveBeenCalled(); // no work
+    expect(tx.product.updateMany).not.toHaveBeenCalled(); // no restock
+    expect(tx.orderEvent.create).not.toHaveBeenCalled(); // no audit/cancellation event
+    expect(tx.outboxEvent.create).not.toHaveBeenCalled(); // no event
   });
+
+  it.each(['PAID', 'EXPIRED', 'REFUNDED'])(
+    'prevents rejecting a payment in terminal status %s (no transition to FAILED)',
+    async (status) => {
+      const { service, prisma, tx } = build({}, { ...PAYMENT, status });
+
+      await expect(service.rejectPayment('pay-1', {})).rejects.toBeInstanceOf(ConflictException);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(tx.outboxEvent.create).not.toHaveBeenCalled();
+    },
+  );
 
   it('order already cancelled by another path, payment not yet FAILED → payment.failed emitted, no restock', async () => {
     const { service, tx } = build({ paymentFlip: 1, orderCancel: 0 });

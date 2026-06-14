@@ -62,9 +62,9 @@ describe('AdminService.verifyPayment — hardened verification', () => {
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(tx.payment.updateMany).toHaveBeenCalledTimes(1);
-    // CAS guard targets only the non-terminal states.
+    // CAS guard targets only the non-terminal states (excludes every terminal status).
     expect(tx.payment.updateMany).toHaveBeenCalledWith({
-      where: { id: 'pay-1', status: { notIn: ['PAID', 'FAILED'] } },
+      where: { id: 'pay-1', status: { notIn: ['PAID', 'FAILED', 'EXPIRED', 'REFUNDED'] } },
       data: expect.objectContaining({ status: 'PAID', verifiedByUserId: 'admin-1' }),
     });
     expect(tx.order.update).toHaveBeenCalledTimes(1);
@@ -93,23 +93,31 @@ describe('AdminService.verifyPayment — hardened verification', () => {
     });
   });
 
-  it('idempotency: already-PAID is rejected before any transaction opens', async () => {
+  it('verify replay: already-PAID returns the current payment with no side effects (200)', async () => {
     const tx = buildTx(undefined);
-    const prisma = buildPrisma(tx, { ...UPDATED_PAYMENT, status: 'PAID' });
+    const current = { ...UPDATED_PAYMENT, status: 'PAID' };
+    const prisma = buildPrisma(tx, current);
 
-    await expect(invoke(prisma)).rejects.toBeInstanceOf(ConflictException);
-    expect(prisma.$transaction).not.toHaveBeenCalled();
-    expect(tx.outboxEvent.create).not.toHaveBeenCalled();
+    const result = await invoke(prisma);
+
+    expect(result).toBe(current); // returns the current payment
+    expect(prisma.$transaction).not.toHaveBeenCalled(); // no work
+    expect(tx.order.update).not.toHaveBeenCalled(); // no order update
+    expect(tx.auditLog.create).not.toHaveBeenCalled(); // no audit log
+    expect(tx.outboxEvent.create).not.toHaveBeenCalled(); // no event
   });
 
-  it('idempotency: already-FAILED is rejected before any transaction opens', async () => {
-    const tx = buildTx(undefined);
-    const prisma = buildPrisma(tx, { ...UPDATED_PAYMENT, status: 'FAILED' });
+  it.each(['FAILED', 'EXPIRED', 'REFUNDED'])(
+    'prevents verifying a payment in terminal status %s (no transition to PAID)',
+    async (status) => {
+      const tx = buildTx(undefined);
+      const prisma = buildPrisma(tx, { ...UPDATED_PAYMENT, status });
 
-    await expect(invoke(prisma)).rejects.toBeInstanceOf(ConflictException);
-    expect(prisma.$transaction).not.toHaveBeenCalled();
-    expect(tx.outboxEvent.create).not.toHaveBeenCalled();
-  });
+      await expect(invoke(prisma)).rejects.toBeInstanceOf(ConflictException);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(tx.outboxEvent.create).not.toHaveBeenCalled();
+    },
+  );
 
   it('duplicate-event prevention: a concurrent verify that loses the CAS (count 0) emits no payment.paid', async () => {
     const tx = buildTx(undefined, 0); // CAS matched nothing → another verifier already flipped it
