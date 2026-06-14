@@ -6,7 +6,7 @@ import { PrismaService } from '../../database/prisma.service';
 import { EmailNotificationProvider } from './email-notification.provider';
 import { NOTIFICATION_SENDER_CONFIG, NotificationSenderConfig } from './notification.config';
 import { NotificationMetrics } from './notification.metrics';
-import { NotificationProvider, PermanentSendError } from './notification-provider';
+import { NotificationProvider, PermanentSendError, TransientSendError } from './notification-provider';
 import { TemplateRenderer } from './template-renderer';
 
 /**
@@ -193,7 +193,9 @@ export class NotificationSenderWorker implements OnApplicationBootstrap, OnModul
       return;
     }
 
-    const delay = this.backoffDelayMs(attempts);
+    // Honor a provider-suggested Retry-After (e.g. 429), else exponential backoff.
+    const retryAfterMs = err instanceof TransientSendError ? err.retryAfterMs : undefined;
+    const delay = retryAfterMs ?? this.backoffDelayMs(attempts);
     await this.prisma.notificationOutbox.update({
       where: { id: row.id },
       data: { attempts, nextAttemptAt: new Date(this.nowMs() + delay), lastError: message, lockedUntil: null, lockedBy: null },

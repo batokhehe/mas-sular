@@ -21,6 +21,13 @@ export interface NotificationSenderConfig {
   breakerThreshold: number;
   /** How long the breaker stays open (sends paused) after tripping. */
   pauseMs: number;
+
+  /** Resend API key (secret). Required when enabled. */
+  emailApiKey?: string;
+  /** Verified sender address. Required when enabled. */
+  emailFrom?: string;
+  /** Provider HTTP request timeout; must be < leaseMs so a hung call can't outlive the lease. */
+  emailRequestTimeoutMs: number;
 }
 
 function positiveInt(value: string | undefined, fallback: number): number {
@@ -29,10 +36,12 @@ function positiveInt(value: string | undefined, fallback: number): number {
 }
 
 export function loadNotificationSenderConfig(env: NodeJS.ProcessEnv = process.env): NotificationSenderConfig {
-  return {
+  const leaseMs = positiveInt(env.NOTIFICATION_SENDER_LEASE_MS, 30_000);
+  const emailRequestTimeoutMs = positiveInt(env.EMAIL_REQUEST_TIMEOUT_MS, 10_000);
+  const config: NotificationSenderConfig = {
     enabled: env.NOTIFICATION_SENDER_ENABLED === 'true',
     batchSize: positiveInt(env.NOTIFICATION_SENDER_BATCH_SIZE, 50),
-    leaseMs: positiveInt(env.NOTIFICATION_SENDER_LEASE_MS, 30_000),
+    leaseMs,
     pollIntervalMs: positiveInt(env.NOTIFICATION_SENDER_POLL_INTERVAL_MS, 1_000),
     backoffBaseMs: positiveInt(env.NOTIFICATION_SENDER_BACKOFF_BASE_MS, 5_000),
     backoffCapMs: positiveInt(env.NOTIFICATION_SENDER_BACKOFF_CAP_MS, 3_600_000),
@@ -40,5 +49,21 @@ export function loadNotificationSenderConfig(env: NodeJS.ProcessEnv = process.en
     healthLogIntervalMs: positiveInt(env.NOTIFICATION_SENDER_HEALTH_LOG_INTERVAL_MS, 60_000),
     breakerThreshold: positiveInt(env.NOTIFICATION_SENDER_BREAKER_THRESHOLD, 5),
     pauseMs: positiveInt(env.NOTIFICATION_SENDER_PAUSE_MS, 30_000),
+    emailApiKey: env.RESEND_API_KEY,
+    emailFrom: env.EMAIL_FROM,
+    emailRequestTimeoutMs,
   };
+
+  // Fail fast: the sender cannot deliver without provider credentials, and a request
+  // timeout >= the lease could let a hung call outlive the lease (concurrent re-send).
+  if (config.enabled) {
+    if (!config.emailApiKey || !config.emailFrom) {
+      throw new Error('NOTIFICATION_SENDER_ENABLED=true requires RESEND_API_KEY and EMAIL_FROM');
+    }
+    if (emailRequestTimeoutMs >= leaseMs) {
+      throw new Error('EMAIL_REQUEST_TIMEOUT_MS must be < NOTIFICATION_SENDER_LEASE_MS');
+    }
+  }
+
+  return config;
 }

@@ -16,6 +16,9 @@ function cfg(over: Partial<NotificationSenderConfig> = {}): NotificationSenderCo
     healthLogIntervalMs: 60_000,
     breakerThreshold: 2,
     pauseMs: 30_000,
+    emailApiKey: 'rk_test',
+    emailFrom: 'orders@masular.test',
+    emailRequestTimeoutMs: 10_000,
     ...over,
   };
 }
@@ -107,6 +110,14 @@ describe('NotificationSenderWorker', () => {
       expect(data.status).toBeUndefined();
       expect((data.nextAttemptAt as Date).getTime()).toBe(NOW + 500); // base 1000 * 2^0 * 0.5
       expect(metrics.retried).toHaveBeenCalledTimes(1);
+    });
+
+    it('honors a provider Retry-After over the computed backoff', async () => {
+      const { worker, prisma, email } = build();
+      email.send.mockRejectedValue(new TransientSendError('rate limited', 7_000));
+      await worker.sendRow(row({ attempts: 0 }) as any);
+      const data = prisma.notificationOutbox.update.mock.calls[0][0].data;
+      expect((data.nextAttemptAt as Date).getTime()).toBe(NOW + 7_000); // Retry-After, not the 500ms backoff
     });
 
     it('permanent → terminal FAILED', async () => {

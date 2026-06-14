@@ -1,7 +1,6 @@
 import { loadNotificationSenderConfig } from '../../src/infrastructure/notifications/notification.config';
 import { TemplateRenderer } from '../../src/infrastructure/notifications/template-renderer';
 import { PermanentSendError } from '../../src/infrastructure/notifications/notification-provider';
-import { EmailNotificationProvider } from '../../src/infrastructure/notifications/email-notification.provider';
 
 describe('loadNotificationSenderConfig', () => {
   it('defaults enabled to false with sane defaults', () => {
@@ -9,12 +8,36 @@ describe('loadNotificationSenderConfig', () => {
     expect(cfg.enabled).toBe(false);
     expect(cfg.maxAttempts).toBe(8);
     expect(cfg.breakerThreshold).toBe(5);
+    expect(cfg.emailRequestTimeoutMs).toBe(10_000);
   });
 
-  it('parses overrides', () => {
-    const cfg = loadNotificationSenderConfig({ NOTIFICATION_SENDER_ENABLED: 'true', NOTIFICATION_SENDER_MAX_ATTEMPTS: '3' });
+  it('parses email + sender overrides when enabled', () => {
+    const cfg = loadNotificationSenderConfig({
+      NOTIFICATION_SENDER_ENABLED: 'true',
+      NOTIFICATION_SENDER_MAX_ATTEMPTS: '3',
+      RESEND_API_KEY: 'rk_test',
+      EMAIL_FROM: 'orders@masular.test',
+    });
     expect(cfg.enabled).toBe(true);
     expect(cfg.maxAttempts).toBe(3);
+    expect(cfg.emailApiKey).toBe('rk_test');
+    expect(cfg.emailFrom).toBe('orders@masular.test');
+  });
+
+  it('fails fast when enabled without RESEND_API_KEY / EMAIL_FROM', () => {
+    expect(() => loadNotificationSenderConfig({ NOTIFICATION_SENDER_ENABLED: 'true' })).toThrow(/RESEND_API_KEY/);
+  });
+
+  it('fails fast when the request timeout is >= the lease', () => {
+    expect(() =>
+      loadNotificationSenderConfig({
+        NOTIFICATION_SENDER_ENABLED: 'true',
+        RESEND_API_KEY: 'rk',
+        EMAIL_FROM: 'f@x.test',
+        NOTIFICATION_SENDER_LEASE_MS: '5000',
+        EMAIL_REQUEST_TIMEOUT_MS: '5000',
+      }),
+    ).toThrow(/EMAIL_REQUEST_TIMEOUT_MS/);
   });
 });
 
@@ -29,18 +52,5 @@ describe('TemplateRenderer', () => {
 
   it('throws PermanentSendError for an unknown template', () => {
     expect(() => renderer.render('nope', {})).toThrow(PermanentSendError);
-  });
-});
-
-describe('EmailNotificationProvider (stub)', () => {
-  it('returns a provider id derived from the idempotency key', async () => {
-    const result = await new EmailNotificationProvider().send({
-      channel: 'EMAIL',
-      recipient: 'a@b.com',
-      subject: 'S',
-      body: 'B',
-      idempotencyKey: 'n1',
-    });
-    expect(result.providerMessageId).toBe('stub-n1');
   });
 });

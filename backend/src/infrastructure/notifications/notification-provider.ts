@@ -21,7 +21,11 @@ export class PermanentSendError extends Error {
 
 /** Retry with backoff — network/provider 5xx/timeout/rate-limit. */
 export class TransientSendError extends Error {
-  constructor(message: string) {
+  /** Optional provider-suggested delay (from a 429 Retry-After) honored by the sender. */
+  constructor(
+    message: string,
+    public readonly retryAfterMs?: number,
+  ) {
     super(message);
     this.name = 'TransientSendError';
   }
