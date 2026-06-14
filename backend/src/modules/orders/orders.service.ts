@@ -394,6 +394,9 @@ export class OrdersService {
   private async persistOrderOnce(orderNumber: string, args: PersistOrderArgs) {
     const { userId, dto, items, products, toppings, summary, idempotencyRecordId, fenceToken } = args;
     const voucher = summary.voucher;
+    // Single source of truth for the method: persisted identically to the order
+    // and its payment. Defaults to COD when the client omits a selection.
+    const paymentMethod = dto.payment_method ?? PaymentMethod.COD;
 
     const order = await this.prisma.$transaction(async (tx) => {
       for (const product of products) {
@@ -416,7 +419,7 @@ export class OrdersService {
           orderNumber,
           userId,
           addressId: dto.address_id,
-          paymentMethod: PaymentMethod.COD,
+          paymentMethod,
           subtotal: summary.subtotal,
           deliveryFee: summary.shipping_cost,
           voucherDiscountAmount: summary.discount,
@@ -445,7 +448,7 @@ export class OrdersService {
           },
           payment: {
             create: {
-              method: PaymentMethod.COD,
+              method: paymentMethod,
               amount: summary.grand_total,
               status: PaymentStatus.PENDING,
             },

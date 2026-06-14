@@ -22,6 +22,20 @@ export class TemplateRenderer {
             `Hi ${payload.customerName ?? 'there'}, we have received your order ` +
             `${payload.orderNumber ?? ''} (total ${payload.totalPrice ?? ''}). Thank you!`,
         };
+      case 'payment.approved':
+        return {
+          subject: `Payment received for order ${payload.orderNumber ?? ''}`,
+          body:
+            `Hi ${payload.customerName ?? 'there'}, we have verified your payment for order ` +
+            `${payload.orderNumber ?? ''}. Your order is now being processed.`,
+        };
+      case 'payment.rejected':
+        return {
+          subject: `Payment issue for order ${payload.orderNumber ?? ''}`,
+          body:
+            `Hi ${payload.customerName ?? 'there'}, we could not verify your payment for order ` +
+            `${payload.orderNumber ?? ''}. Please contact us or try paying again.`,
+        };
       default:
         throw new PermanentSendError(`Unknown notification template: ${template}`);
     }

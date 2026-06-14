@@ -50,6 +50,19 @@ describe('TemplateRenderer', () => {
     expect(out.body).toContain('Jane');
   });
 
+  it('renders payment.approved', () => {
+    const out = renderer.render('payment.approved', { orderNumber: 'BN-1', customerName: 'Jane' });
+    expect(out.subject).toContain('BN-1');
+    expect(out.body).toContain('Jane');
+    expect(out.body).toContain('processed');
+  });
+
+  it('renders payment.rejected', () => {
+    const out = renderer.render('payment.rejected', { orderNumber: 'BN-1', customerName: 'Jane' });
+    expect(out.subject).toContain('BN-1');
+    expect(out.body).toContain('could not verify');
+  });
+
   it('throws PermanentSendError for an unknown template', () => {
     expect(() => renderer.render('nope', {})).toThrow(PermanentSendError);
   });

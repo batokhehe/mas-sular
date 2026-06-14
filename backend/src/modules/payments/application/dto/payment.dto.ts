@@ -12,8 +12,3 @@ export class UploadManualPaymentDto {
   @IsString()
   accountName?: string;
 }
-
-export class VerifyPaymentDto {
-  @IsString()
-  adminUserId!: string;
-}

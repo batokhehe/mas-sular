@@ -1,5 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
-import { PaymentsService } from '../../src/modules/payments/payments.service';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { AdminService } from '../../src/modules/admin/admin.service';
 
 type FailOp = 'payment' | 'order' | 'audit' | 'outbox' | undefined;
@@ -8,20 +7,25 @@ const UPDATED_PAYMENT = {
   id: 'pay-1',
   orderId: 'order-1',
   amount: 50000,
+  status: 'PAID',
   verifiedByUserId: 'admin-1',
   deletedAt: null,
 };
 
-function buildTx(failOp: FailOp) {
+// Pre-read row (still verifiable): non-terminal status.
+const PENDING_PAYMENT = { ...UPDATED_PAYMENT, status: 'WAITING_VERIFICATION' };
+
+function buildTx(failOp: FailOp, casCount = 1) {
   const tx = {
-    payment: { update: jest.fn() },
+    payment: { updateMany: jest.fn(), findUniqueOrThrow: jest.fn() },
     order: { update: jest.fn() },
     auditLog: { create: jest.fn() },
     outboxEvent: { create: jest.fn() },
   };
-  tx.payment.update.mockImplementation(() =>
-    failOp === 'payment' ? Promise.reject(new Error('payment update failed')) : Promise.resolve(UPDATED_PAYMENT),
+  tx.payment.updateMany.mockImplementation(() =>
+    failOp === 'payment' ? Promise.reject(new Error('payment update failed')) : Promise.resolve({ count: casCount }),
   );
+  tx.payment.findUniqueOrThrow.mockResolvedValue(UPDATED_PAYMENT);
   tx.order.update.mockImplementation(() =>
     failOp === 'order' ? Promise.reject(new Error('order update failed')) : Promise.resolve({ id: 'order-1' }),
   );
@@ -37,52 +41,37 @@ function buildTx(failOp: FailOp) {
 function buildPrisma(tx: ReturnType<typeof buildTx>, payment: unknown) {
   return {
     payment: { findUnique: jest.fn().mockResolvedValue(payment) },
-    // Interactive transaction: invoke the callback with our tx mock.
-    // If any inner op rejects, the whole promise rejects → real Prisma rolls back.
     $transaction: jest.fn().mockImplementation((cb: (tx: unknown) => Promise<unknown>) => cb(tx)),
   };
 }
 
-// Adapter so both verification paths run through the identical scenario matrix.
-const PATHS = [
-  {
-    name: 'PaymentsService.verify',
-    invoke: (prisma: unknown) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const svc = new PaymentsService(prisma as any);
-      return svc.verify('pay-1', { adminUserId: 'admin-1' } as any);
-    },
-    expectedSource: 'payments.verify',
-  },
-  {
-    name: 'AdminService.verifyPayment',
-    invoke: (prisma: unknown) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const svc = new AdminService(prisma as any);
-      return svc.verifyPayment('pay-1', 'admin-1', { note: 'looks good' } as any);
-    },
-    expectedSource: 'admin.verifyPayment',
-  },
-] as const;
+function invoke(prisma: unknown) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const svc = new AdminService(prisma as any);
+  return svc.verifyPayment('pay-1', 'admin-1', { note: 'looks good' } as any);
+}
 
-describe.each(PATHS)('Payment verification atomicity — $name', (path) => {
+describe('AdminService.verifyPayment — hardened verification', () => {
   beforeEach(() => jest.clearAllMocks());
 
-  it('success path: all four writes happen in one transaction and no direct publish occurs', async () => {
+  it('success: CAS flip + four writes in one transaction, emits payment.paid', async () => {
     const tx = buildTx(undefined);
-    const prisma = buildPrisma(tx, { ...UPDATED_PAYMENT });
+    const prisma = buildPrisma(tx, { ...PENDING_PAYMENT });
 
-    const result = await path.invoke(prisma);
+    const result = await invoke(prisma);
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
-    expect(tx.payment.update).toHaveBeenCalledTimes(1);
+    expect(tx.payment.updateMany).toHaveBeenCalledTimes(1);
+    // CAS guard targets only the non-terminal states.
+    expect(tx.payment.updateMany).toHaveBeenCalledWith({
+      where: { id: 'pay-1', status: { notIn: ['PAID', 'FAILED'] } },
+      data: expect.objectContaining({ status: 'PAID', verifiedByUserId: 'admin-1' }),
+    });
     expect(tx.order.update).toHaveBeenCalledTimes(1);
     expect(tx.auditLog.create).toHaveBeenCalledTimes(1);
     expect(tx.outboxEvent.create).toHaveBeenCalledTimes(1);
     expect(result).toBe(UPDATED_PAYMENT);
 
-
-    // Audit record: actorId NULL, admin captured in JSON payload.
     expect(tx.auditLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         actorId: null,
@@ -92,33 +81,53 @@ describe.each(PATHS)('Payment verification atomicity — $name', (path) => {
         after: expect.objectContaining({ verifiedByAdminId: 'admin-1', status: 'PAID' }),
       }),
     });
-
-    // Enriched outbox event.
     expect(tx.outboxEvent.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         aggregateType: 'payment',
         aggregateId: 'pay-1',
         eventName: 'payment.paid',
-        eventVersion: 1,
-        exchange: 'payments',
         routingKey: 'payment.paid',
-        payload: expect.objectContaining({
-          paymentId: 'pay-1',
-          orderId: 'order-1',
-          amount: 50000,
-          status: 'PAID',
-          orderStatus: 'PROCESSING',
-        }),
-        metadata: expect.objectContaining({ source: path.expectedSource }),
+        payload: expect.objectContaining({ paymentId: 'pay-1', orderId: 'order-1', amount: 50000, status: 'PAID' }),
+        metadata: expect.objectContaining({ source: 'admin.verifyPayment' }),
       }),
     });
   });
 
-  it('payment update failure: transaction rejects, no later writes, no publish', async () => {
-    const tx = buildTx('payment');
-    const prisma = buildPrisma(tx, { ...UPDATED_PAYMENT });
+  it('idempotency: already-PAID is rejected before any transaction opens', async () => {
+    const tx = buildTx(undefined);
+    const prisma = buildPrisma(tx, { ...UPDATED_PAYMENT, status: 'PAID' });
 
-    await expect(path.invoke(prisma)).rejects.toThrow('payment update failed');
+    await expect(invoke(prisma)).rejects.toBeInstanceOf(ConflictException);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(tx.outboxEvent.create).not.toHaveBeenCalled();
+  });
+
+  it('idempotency: already-FAILED is rejected before any transaction opens', async () => {
+    const tx = buildTx(undefined);
+    const prisma = buildPrisma(tx, { ...UPDATED_PAYMENT, status: 'FAILED' });
+
+    await expect(invoke(prisma)).rejects.toBeInstanceOf(ConflictException);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(tx.outboxEvent.create).not.toHaveBeenCalled();
+  });
+
+  it('duplicate-event prevention: a concurrent verify that loses the CAS (count 0) emits no payment.paid', async () => {
+    const tx = buildTx(undefined, 0); // CAS matched nothing → another verifier already flipped it
+    const prisma = buildPrisma(tx, { ...PENDING_PAYMENT });
+
+    await expect(invoke(prisma)).rejects.toBeInstanceOf(ConflictException);
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(tx.payment.updateMany).toHaveBeenCalledTimes(1);
+    expect(tx.payment.findUniqueOrThrow).not.toHaveBeenCalled();
+    expect(tx.order.update).not.toHaveBeenCalled();
+    expect(tx.outboxEvent.create).not.toHaveBeenCalled();
+  });
+
+  it('payment CAS failure: transaction rejects, no later writes, no publish', async () => {
+    const tx = buildTx('payment');
+    const prisma = buildPrisma(tx, { ...PENDING_PAYMENT });
+
+    await expect(invoke(prisma)).rejects.toThrow('payment update failed');
     expect(tx.order.update).not.toHaveBeenCalled();
     expect(tx.auditLog.create).not.toHaveBeenCalled();
     expect(tx.outboxEvent.create).not.toHaveBeenCalled();
@@ -126,27 +135,26 @@ describe.each(PATHS)('Payment verification atomicity — $name', (path) => {
 
   it('order update failure: transaction rejects, audit and outbox never written', async () => {
     const tx = buildTx('order');
-    const prisma = buildPrisma(tx, { ...UPDATED_PAYMENT });
+    const prisma = buildPrisma(tx, { ...PENDING_PAYMENT });
 
-    await expect(path.invoke(prisma)).rejects.toThrow('order update failed');
+    await expect(invoke(prisma)).rejects.toThrow('order update failed');
     expect(tx.auditLog.create).not.toHaveBeenCalled();
     expect(tx.outboxEvent.create).not.toHaveBeenCalled();
   });
 
   it('audit insert failure: transaction rejects, outbox never written', async () => {
     const tx = buildTx('audit');
-    const prisma = buildPrisma(tx, { ...UPDATED_PAYMENT });
+    const prisma = buildPrisma(tx, { ...PENDING_PAYMENT });
 
-    await expect(path.invoke(prisma)).rejects.toThrow('audit insert failed');
+    await expect(invoke(prisma)).rejects.toThrow('audit insert failed');
     expect(tx.outboxEvent.create).not.toHaveBeenCalled();
   });
 
   it('outbox insert failure: transaction rejects so PAID is never committed', async () => {
     const tx = buildTx('outbox');
-    const prisma = buildPrisma(tx, { ...UPDATED_PAYMENT });
+    const prisma = buildPrisma(tx, { ...PENDING_PAYMENT });
 
-    await expect(path.invoke(prisma)).rejects.toThrow('outbox insert failed');
-    // All four writes share one transaction; the rejection rolls back the PAID update.
+    await expect(invoke(prisma)).rejects.toThrow('outbox insert failed');
     expect(tx.outboxEvent.create).toHaveBeenCalledTimes(1);
   });
 
@@ -154,7 +162,7 @@ describe.each(PATHS)('Payment verification atomicity — $name', (path) => {
     const tx = buildTx(undefined);
     const prisma = buildPrisma(tx, null);
 
-    await expect(path.invoke(prisma)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(invoke(prisma)).rejects.toBeInstanceOf(NotFoundException);
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 });

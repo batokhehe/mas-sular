@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { OrderStatus, PaymentStatus, Prisma, ShipmentStatus } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../database/prisma.service';
@@ -307,14 +307,27 @@ export class AdminService {
     const payment = await this.prisma.payment.findUnique({ where: { id: paymentId } });
     if (!payment || payment.deletedAt) throw new NotFoundException('Payment not found');
 
+    // Terminal-state guard: a PAID or FAILED payment is final. Reject the re-verify
+    // up front so the common idempotent case returns 409 without opening a tx.
+    if (payment.status === PaymentStatus.PAID || payment.status === PaymentStatus.FAILED) {
+      throw new ConflictException(`Payment cannot be verified from terminal status ${payment.status}`);
+    }
+
     const verifiedAt = new Date();
     // Payment must never become PAID unless the order update, audit record, and
     // outbox event all commit. All four writes run in one interactive transaction.
     return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.payment.update({
-        where: { id: paymentId },
+      // CAS over the non-terminal states. Under a concurrent double-verify only one
+      // call flips the row (count === 1); the loser aborts before emitting a second
+      // payment.paid — exactly-once event emission.
+      const flip = await tx.payment.updateMany({
+        where: { id: paymentId, status: { notIn: [PaymentStatus.PAID, PaymentStatus.FAILED] } },
         data: { status: PaymentStatus.PAID, verifiedByUserId: adminId, verifiedAt },
       });
+      if (flip.count !== 1) {
+        throw new ConflictException('Payment already verified or rejected');
+      }
+      const updated = await tx.payment.findUniqueOrThrow({ where: { id: paymentId } });
       await tx.order.update({
         where: { id: payment.orderId },
         data: {

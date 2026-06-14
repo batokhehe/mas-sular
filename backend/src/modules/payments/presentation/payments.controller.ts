@@ -1,10 +1,7 @@
-import { Body, Controller, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Param, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { Permissions } from '../../../common/decorators/permissions.decorator';
-import { AdminGuard } from '../../../common/guards/admin.guard';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
-import { PermissionGuard } from '../../../common/guards/permission.guard';
-import { UploadManualPaymentDto, VerifyPaymentDto } from '../application/dto/payment.dto';
+import { UploadManualPaymentDto } from '../application/dto/payment.dto';
 import { PaymentsService } from '../payments.service';
 
 @ApiTags('payments')
@@ -19,11 +16,8 @@ export class PaymentsController {
     return this.payments.uploadManualReceipt(paymentId, dto);
   }
 
-  @Patch(':paymentId/verify')
-  @ApiBearerAuth()
-  @UseGuards(AdminGuard, PermissionGuard)
-  @Permissions('Payment.verify')
-  verify(@Param('paymentId') paymentId: string, @Body() dto: VerifyPaymentDto) {
-    return this.payments.verify(paymentId, dto);
-  }
+  // NOTE: payment verification is admin-only and lives on the admin surface
+  // (PATCH /admin/payments/:paymentId/verify), which binds the verifier to the
+  // authenticated admin principal. The previous customer-surface verify endpoint
+  // that trusted an adminUserId from the request body has been removed.
 }
