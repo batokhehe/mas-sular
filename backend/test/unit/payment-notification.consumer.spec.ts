@@ -65,6 +65,15 @@ describe('PaymentNotificationConsumer', () => {
     });
   });
 
+  it('payment.expired → enqueues a payment.expired NotificationOutbox', async () => {
+    const { consumer, prisma } = build();
+    const outcome = await consumer.process('evt-3', { name: 'payment.expired', payload: { paymentId: 'pay-1', orderId: 'order-1' } });
+    expect(outcome).toBe('enqueued');
+    expect(prisma.__tx.notificationOutbox.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ template: 'payment.expired', recipient: 'jane@example.com', sourceMessageId: 'evt-3' }),
+    });
+  });
+
   it('fast-path duplicate → no work', async () => {
     const { consumer, prisma } = build(buildPrisma({ seen: { messageId: 'evt-1' } }));
     expect(await consumer.process('evt-1', PAID)).toBe('duplicate');

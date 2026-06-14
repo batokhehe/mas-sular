@@ -12,7 +12,7 @@ import { countDeaths, isInfraError } from './order-created-notification.consumer
 //   main --nack(requeue=false)--> default exchange --> payment.notifications.retry (TTL) --> back to main
 //   poison / unrecoverable --> payment.notifications.dlq (terminal, confirmed handoff)
 const EXCHANGE = 'payments';
-const ROUTING_KEYS = ['payment.paid', 'payment.failed'] as const;
+const ROUTING_KEYS = ['payment.paid', 'payment.failed', 'payment.expired'] as const;
 const QUEUE = 'payment.notifications';
 const RETRY_QUEUE = 'payment.notifications.retry';
 const DLQ = 'payment.notifications.dlq';
@@ -22,6 +22,7 @@ const CONSUMER = 'payment.notifications';
 const TEMPLATE_BY_EVENT: Record<string, string> = {
   'payment.paid': 'payment.approved',
   'payment.failed': 'payment.rejected',
+  'payment.expired': 'payment.expired',
 };
 
 type ProcessOutcome = 'enqueued' | 'duplicate' | 'skipped';

@@ -22,6 +22,7 @@ import { CatalogModule } from './modules/catalog/catalog.module';
 import { CmsModule } from './modules/cms/cms.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { PaymentsModule } from './modules/payments/payments.module';
+import { PaymentLifecycleModule } from './modules/payments/payment-lifecycle.module';
 import { ShippingModule } from './modules/shipping/shipping.module';
 import { UsersModule } from './modules/users/users.module';
 import { HealthController } from './health.controller';
@@ -59,6 +60,7 @@ import { UploadModule } from './modules/upload/upload.module';
     CartModule,
     OrdersModule,
     PaymentsModule,
+    PaymentLifecycleModule,
     ShippingModule,
     CmsModule,
     AuditModule,

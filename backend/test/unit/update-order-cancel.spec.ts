@@ -1,4 +1,5 @@
 import { AdminService } from '../../src/modules/admin/admin.service';
+import { OrderCancellationService } from '../../src/modules/orders/order-cancellation.service';
 
 const ORDER = { id: 'order-1', deletedAt: null };
 const CANCELLED_ORDER = { id: 'order-1', status: 'CANCELLED', payment: {}, shipment: {} };
@@ -33,7 +34,7 @@ function build(opts: Opts = {}, existing: unknown = ORDER) {
     $transaction: jest.fn().mockImplementation((cb: (tx: unknown) => Promise<unknown>) => cb(tx)),
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const service = new AdminService(prisma as any);
+  const service = new AdminService(prisma as any, new OrderCancellationService());
   return { service, prisma, tx };
 }
 

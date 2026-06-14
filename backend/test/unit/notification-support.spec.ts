@@ -63,6 +63,21 @@ describe('TemplateRenderer', () => {
     expect(out.body).toContain('could not verify');
   });
 
+  it('renders payment.expired', () => {
+    const out = renderer.render('payment.expired', { orderNumber: 'BN-1', customerName: 'Jane' });
+    expect(out.subject).toContain('BN-1');
+    expect(out.body).toContain('expired');
+  });
+
+  it('renders payment.reminder.first and .second with the upload link', () => {
+    const payload = { orderNumber: 'BN-1', customerName: 'Jane', paymentMethod: 'BANK_TRANSFER', amount: 50000, uploadUrl: 'https://app/payments/upload/raw' };
+    const first = renderer.render('payment.reminder.first', payload);
+    expect(first.subject).toContain('BN-1');
+    expect(first.body).toContain('https://app/payments/upload/raw');
+    const second = renderer.render('payment.reminder.second', payload);
+    expect(second.body).toContain('final reminder');
+  });
+
   it('throws PermanentSendError for an unknown template', () => {
     expect(() => renderer.render('nope', {})).toThrow(PermanentSendError);
   });

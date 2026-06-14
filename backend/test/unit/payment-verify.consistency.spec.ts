@@ -1,5 +1,6 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { AdminService } from '../../src/modules/admin/admin.service';
+import { OrderCancellationService } from '../../src/modules/orders/order-cancellation.service';
 
 type FailOp = 'payment' | 'order' | 'audit' | 'outbox' | undefined;
 
@@ -47,7 +48,7 @@ function buildPrisma(tx: ReturnType<typeof buildTx>, payment: unknown) {
 
 function invoke(prisma: unknown) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const svc = new AdminService(prisma as any);
+  const svc = new AdminService(prisma as any, new OrderCancellationService());
   return svc.verifyPayment('pay-1', 'admin-1', { note: 'looks good' } as any);
 }
 

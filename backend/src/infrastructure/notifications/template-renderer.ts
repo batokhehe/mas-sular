@@ -38,6 +38,24 @@ export class TemplateRenderer {
             `Hi ${payload.customerName ?? 'there'}, we could not verify your payment for order ` +
             `${payload.orderNumber ?? ''}. Please contact us or try paying again.`,
         };
+      case 'payment.expired':
+        return {
+          subject: `Order ${payload.orderNumber ?? ''} payment expired`,
+          body:
+            `Hi ${payload.customerName ?? 'there'}, the payment window for order ${payload.orderNumber ?? ''} ` +
+            `has expired and the order was cancelled. You are welcome to place a new order.`,
+        };
+      case 'payment.reminder.first':
+      case 'payment.reminder.second': {
+        const tone = template === 'payment.reminder.first' ? 'a friendly reminder' : 'a final reminder';
+        return {
+          subject: `Reminder: complete payment for order ${payload.orderNumber ?? ''}`,
+          body:
+            `Hi ${payload.customerName ?? 'there'}, ${tone} to complete payment for order ` +
+            `${payload.orderNumber ?? ''} (${payload.paymentMethod ?? ''}, total ${payload.amount ?? ''}). ` +
+            `Upload your receipt here: ${payload.uploadUrl ?? ''}`,
+        };
+      }
       default:
         throw new PermanentSendError(`Unknown notification template: ${template}`);
     }

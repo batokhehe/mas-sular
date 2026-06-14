@@ -12,6 +12,7 @@ import {
   UpdateShipmentDto,
   VerifyAdminPaymentDto,
 } from './application/dto/admin-operations.dto';
+import { OrderCancellationService } from '../orders/order-cancellation.service';
 import { CreateCategoryDto } from './application/dto/create-category.dto';
 import { CreateProductDto } from './application/dto/create-product.dto';
 import { CreatePromoDto } from './application/dto/create-promo.dto';
@@ -41,6 +42,7 @@ function isTerminalPaymentStatus(status: PaymentStatus): boolean {
 export class AdminService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly cancellation: OrderCancellationService,
   ) {}
 
   async getDashboard() {
@@ -252,7 +254,7 @@ export class AdminService {
       // Cancellation restocks inventory exactly once via the shared transition;
       // order.status_updated is emitted only when this call actually cancels.
       return this.prisma.$transaction(async (tx) => {
-        const { cancelled } = await this.cancelOrder(tx, id, dto.note ?? `Order marked as ${OrderStatus.CANCELLED}`);
+        const { cancelled } = await this.cancellation.cancelAndRestock(tx, id, dto.note ?? `Order marked as ${OrderStatus.CANCELLED}`);
         if (cancelled) {
           await tx.outboxEvent.create({
             data: {
@@ -418,7 +420,7 @@ export class AdminService {
         throw new ConflictException('Payment already in a terminal state');
       }
 
-      await this.cancelOrder(tx, payment.orderId, dto.note ?? 'Payment rejected by admin');
+      await this.cancellation.cancelAndRestock(tx, payment.orderId, dto.note ?? 'Payment rejected by admin');
 
       await tx.outboxEvent.create({
         data: {
@@ -437,56 +439,6 @@ export class AdminService {
 
       return tx.payment.findUnique({ where: { id: paymentId } });
     }, { timeout: 10000 });
-  }
-
-  /**
-   * Cancel an order exactly once. The order CANCELLED transition (a CAS over the
-   * active-status whitelist) is the source of truth: only the call that actually
-   * flips the order restocks inventory and writes the cancellation event. Returns
-   * whether this call performed the transition.
-   */
-  private async cancelOrder(
-    tx: Prisma.TransactionClient,
-    orderId: string,
-    note: string,
-  ): Promise<{ cancelled: boolean }> {
-    const flip = await tx.order.updateMany({
-      where: {
-        id: orderId,
-        deletedAt: null,
-        status: { in: [OrderStatus.PENDING, OrderStatus.PROCESSING, OrderStatus.DELIVERING] },
-      },
-      data: { status: OrderStatus.CANCELLED },
-    });
-    if (flip.count !== 1) {
-      return { cancelled: false };
-    }
-    await this.restockOrder(tx, orderId);
-    await tx.orderEvent.create({ data: { orderId, status: OrderStatus.CANCELLED, note } });
-    return { cancelled: true };
-  }
-
-  /**
-   * Restore inventory for a cancelled order: aggregate item quantities per product
-   * and increment product.stock — the exact inverse of the checkout decrement.
-   * Products only (toppings are not stock-tracked). updateMany tolerates a missing
-   * product without aborting the transaction.
-   */
-  private async restockOrder(tx: Prisma.TransactionClient, orderId: string): Promise<void> {
-    const items = await tx.orderItem.findMany({
-      where: { orderId },
-      select: { productId: true, quantity: true },
-    });
-    const quantityByProduct = new Map<string, number>();
-    for (const item of items) {
-      quantityByProduct.set(item.productId, (quantityByProduct.get(item.productId) ?? 0) + item.quantity);
-    }
-    for (const [productId, quantity] of quantityByProduct) {
-      await tx.product.updateMany({
-        where: { id: productId },
-        data: { stock: { increment: quantity } },
-      });
-    }
   }
 
   async createShipment(dto: CreateShipmentDto) {

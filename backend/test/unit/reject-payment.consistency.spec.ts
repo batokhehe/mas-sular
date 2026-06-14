@@ -1,5 +1,6 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { AdminService } from '../../src/modules/admin/admin.service';
+import { OrderCancellationService } from '../../src/modules/orders/order-cancellation.service';
 
 const PAYMENT = { id: 'pay-1', orderId: 'order-1', status: 'WAITING_VERIFICATION', deletedAt: null };
 const REFRESHED = { id: 'pay-1', orderId: 'order-1', status: 'FAILED' };
@@ -36,7 +37,7 @@ function build(opts: Opts = {}, payment: unknown = PAYMENT) {
     $transaction: jest.fn().mockImplementation((cb: (tx: unknown) => Promise<unknown>) => cb(tx)),
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const service = new AdminService(prisma as any);
+  const service = new AdminService(prisma as any, new OrderCancellationService());
   return { service, prisma, tx };
 }
 

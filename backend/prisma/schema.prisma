@@ -369,6 +369,8 @@ model Payment {
   manualReceiptUrl    String?
   verifiedByUserId    String?
   verifiedAt          DateTime?
+  firstReminderAt     DateTime?
+  secondReminderAt    DateTime?
   webhookPayload      Json?
   order               Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
   transactions        Transaction[]
@@ -378,6 +380,7 @@ model Payment {
   deletedAt           DateTime?
 
   @@index([status, method])
+  @@index([status, method, createdAt])
 }
 
 /// Single-use, expiring capability token that lets an unauthenticated customer
