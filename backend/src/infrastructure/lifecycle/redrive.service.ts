@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import * as amqp from 'amqplib';
 import { PrismaService } from '../../database/prisma.service';
 import { RabbitConnectionManager } from '../outbox/rabbit-connection.manager';
+import { LifecycleMetrics } from './lifecycle.metrics';
 
 // Consumer DLQ topology (mirrors order-created-notification.consumer.ts).
 const DLQ = 'order.created.notifications.dlq';
@@ -58,23 +59,25 @@ export class RedriveService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly rabbit: RabbitConnectionManager,
+    private readonly metrics: LifecycleMetrics,
   ) {}
 
   // A. OutboxEvent FAILED -> PENDING
   async redriveFailedOutboxEvents(filter: OutboxRedriveFilter = {}): Promise<RedriveResult> {
     const { where, params } = buildOutboxWhere(filter);
-    return this.redriveFailedRows('OutboxEvent', '`OutboxEvent`', where, params, filter);
+    return this.redriveFailedRows('OutboxEvent', '`OutboxEvent`', 'outbox', where, params, filter);
   }
 
   // B. NotificationOutbox FAILED -> PENDING
   async redriveFailedNotifications(filter: NotificationRedriveFilter = {}): Promise<RedriveResult> {
     const { where, params } = buildNotificationWhere(filter);
-    return this.redriveFailedRows('NotificationOutbox', '`NotificationOutbox`', where, params, filter);
+    return this.redriveFailedRows('NotificationOutbox', '`NotificationOutbox`', 'notification', where, params, filter);
   }
 
   private async redriveFailedRows(
     name: string,
     table: string,
+    type: 'outbox' | 'notification',
     where: string,
     whereParams: unknown[],
     opts: { dryRun?: boolean; batchSize?: number; maxBatches?: number },
@@ -102,6 +105,7 @@ export class RedriveService {
       redriven += affected;
       if (affected < limit) break;
     }
+    this.metrics.redrive(type, redriven);
     this.audit({ op: 'redrive_failed', table: name, dryRun: false, redriven });
     return { matched: 0, redriven, dryRun: false };
   }
@@ -134,6 +138,7 @@ export class RedriveService {
         // best-effort
       }
     }
+    if (!dryRun) this.metrics.dlqRedrive(redriven);
     this.audit({ op: 'redrive_dlq', dryRun, inspected, redriven, limit });
     return { inspected, redriven, dryRun };
   }

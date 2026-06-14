@@ -8,6 +8,7 @@ import { DatabaseModule } from './database/database.module';
 import { CacheInfrastructureModule } from './infrastructure/cache/cache.module';
 import { ConsumersModule } from './infrastructure/consumers/consumers.module';
 import { LifecycleModule } from './infrastructure/lifecycle/lifecycle.module';
+import { MetricsModule } from './infrastructure/metrics/metrics.module';
 import { NotificationsModule } from './infrastructure/notifications/notifications.module';
 import { OutboxModule } from './infrastructure/outbox/outbox.module';
 import { QueueModule } from './infrastructure/queue/queue.module';
@@ -37,6 +38,7 @@ import { UploadModule } from './modules/upload/upload.module';
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
     DatabaseModule,
     CacheInfrastructureModule,
+    MetricsModule,
     QueueModule,
     OutboxModule,
     NotificationsModule,

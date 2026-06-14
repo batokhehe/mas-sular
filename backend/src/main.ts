@@ -1,4 +1,4 @@
-import { ValidationPipe, VersioningType } from '@nestjs/common';
+import { RequestMethod, ValidationPipe, VersioningType } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import * as cookieParser from 'cookie-parser';
@@ -16,7 +16,10 @@ async function bootstrap(): Promise<void> {
   ); const logger = app.get(Logger);
   app.useLogger(logger);
 
-  app.setGlobalPrefix(process.env.API_PREFIX ?? 'api');
+  // /metrics is served outside the API prefix/version (Prometheus scrape convention).
+  app.setGlobalPrefix(process.env.API_PREFIX ?? 'api', {
+    exclude: [{ path: 'metrics', method: RequestMethod.GET }],
+  });
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: process.env.API_VERSION ?? '1' });
   const allowedOrigins = (process.env.CORS_ORIGINS ?? '')
     .split(',')

@@ -29,9 +29,10 @@ function buildChannel(opts: { messages?: number; publishFails?: boolean } = {}) 
 function build(channel = buildChannel()) {
   const prisma = buildPrisma();
   const rabbit = { createConsumerChannel: jest.fn().mockResolvedValue(channel) };
+  const metrics = { redrive: jest.fn(), dlqRedrive: jest.fn() };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const service = new RedriveService(prisma as any, rabbit as any);
-  return { service, prisma, rabbit, channel };
+  const service = new RedriveService(prisma as any, rabbit as any, metrics as any);
+  return { service, prisma, rabbit, channel, metrics };
 }
 
 describe('RedriveService', () => {

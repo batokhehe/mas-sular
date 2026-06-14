@@ -31,6 +31,10 @@ function buildRabbit() {
   return { publishWithConfirm: jest.fn().mockResolvedValue(undefined) };
 }
 
+function buildMetrics() {
+  return { publishedOk: jest.fn(), retried: jest.fn(), failedTerminal: jest.fn(), health: jest.fn() };
+}
+
 function row(overrides: Record<string, unknown> = {}) {
   return {
     id: 'evt-1',
@@ -57,12 +61,12 @@ function row(overrides: Record<string, unknown> = {}) {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function build(config = buildConfig(), prisma = buildPrisma(), rabbit = buildRabbit()) {
-  const worker = new OutboxRelayWorker(prisma as any, rabbit as any, config);
+function build(config = buildConfig(), prisma = buildPrisma(), rabbit = buildRabbit(), metrics = buildMetrics()) {
+  const worker = new OutboxRelayWorker(prisma as any, rabbit as any, metrics as any, config);
   // deterministic seams
   (worker as any).nowMs = () => 1_000_000;
   (worker as any).randomFn = () => 0.5;
-  return { worker, prisma, rabbit, config };
+  return { worker, prisma, rabbit, config, metrics };
 }
 
 describe('OutboxRelayWorker', () => {

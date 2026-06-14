@@ -4,6 +4,7 @@ import * as amqp from 'amqplib';
 import { randomUUID } from 'crypto';
 import { hostname } from 'os';
 import { PrismaService } from '../../database/prisma.service';
+import { RelayMetrics } from '../metrics/relay.metrics';
 import { OUTBOX_CONFIG, OutboxRelayConfig } from './outbox.config';
 import { RabbitConnectionManager } from './rabbit-connection.manager';
 
@@ -34,6 +35,7 @@ export class OutboxRelayWorker implements OnApplicationBootstrap, OnModuleDestro
   constructor(
     private readonly prisma: PrismaService,
     private readonly rabbit: RabbitConnectionManager,
+    private readonly metrics: RelayMetrics,
     @Inject(OUTBOX_CONFIG) private readonly config: OutboxRelayConfig,
   ) {}
 
@@ -130,6 +132,7 @@ export class OutboxRelayWorker implements OnApplicationBootstrap, OnModuleDestro
   }
 
   async publishRow(row: OutboxEvent): Promise<void> {
+    const start = this.nowMs();
     try {
       const body = Buffer.from(
         JSON.stringify({
@@ -150,6 +153,7 @@ export class OutboxRelayWorker implements OnApplicationBootstrap, OnModuleDestro
       };
       await this.rabbit.publishWithConfirm(row.exchange, row.routingKey, body, options);
       await this.markPublished(row.id);
+      this.metrics.publishedOk((this.nowMs() - start) / 1000);
     } catch (err) {
       await this.scheduleRetry(row, err);
     }
@@ -179,6 +183,7 @@ export class OutboxRelayWorker implements OnApplicationBootstrap, OnModuleDestro
         where: { id: row.id },
         data: { status: 'FAILED', attempts, lastError: message, lockedUntil: null, lockedBy: null },
       });
+      this.metrics.failedTerminal();
       this.logger.error(`OutboxEvent ${row.id} (${row.eventName}) FAILED after ${attempts} attempts: ${message}`);
       return;
     }
@@ -189,6 +194,7 @@ export class OutboxRelayWorker implements OnApplicationBootstrap, OnModuleDestro
       where: { id: row.id },
       data: { attempts, nextAttemptAt, lastError: message, lockedUntil: null, lockedBy: null },
     });
+    this.metrics.retried();
     this.logger.warn(`OutboxEvent ${row.id} publish failed (attempt ${attempts}); retry in ${delay}ms: ${message}`);
   }
 
@@ -214,6 +220,7 @@ export class OutboxRelayWorker implements OnApplicationBootstrap, OnModuleDestro
       }),
     ]);
     const oldestPendingAgeMs = oldest ? now - oldest.createdAt.getTime() : 0;
+    this.metrics.health({ pending: pendingCount, failed: failedCount, oldestPendingAgeMs });
     this.logger.log(
       `relay health: pending_count=${pendingCount} failed_count=${failedCount} oldest_pending_age_ms=${oldestPendingAgeMs}`,
     );
