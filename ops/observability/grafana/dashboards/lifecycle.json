@@ -1,0 +1,57 @@
+{
+  "uid": "masular-lifecycle",
+  "title": "Mas Sular — Lifecycle & Recovery",
+  "tags": ["masular", "lifecycle"],
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": { "from": "now-24h", "to": "now" },
+  "templating": { "list": [] },
+  "annotations": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Retention deletions by table",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (table) (increase(masular_retention_deleted_total[1h]))", "legendFormat": "{{table}}" }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Time since last retention sweep",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "s", "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 90000 }, { "color": "red", "value": 93600 } ] } }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "time() - masular_retention_last_run_timestamp_seconds", "legendFormat": "age" }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Redrive activity (FAILED -> PENDING)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum by (type) (increase(masular_redrive_total[1h]))", "legendFormat": "{{type}}" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "DLQ redrive (shoveled back to source)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "increase(masular_dlq_redrive_total[1h])", "legendFormat": "dlq redriven (1h)" }
+      ]
+    }
+  ]
+}

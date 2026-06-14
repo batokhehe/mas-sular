@@ -1,0 +1,35 @@
+# Prometheus scrape + rule config for the Mas Sular notification/outbox pipeline.
+# Consumes the metrics emitted by Phase 7B1 (backend GET /metrics) and the
+# RabbitMQ per-object metrics (for DLQ depth). Wired by the compose overlay.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: masular
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
+scrape_configs:
+  # NestJS backend. Runs on the host (pnpm) at :3001; reachable from the
+  # compose network via host.docker.internal. Override BACKEND_TARGET for prod.
+  - job_name: 'masular-backend'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['host.docker.internal:3001']
+        labels:
+          service: backend
+
+  # RabbitMQ Prometheus plugin (per-object endpoint exposes rabbitmq_queue_messages,
+  # which the DLQDepth alert reads). Plugin enabled via ops/observability/rabbitmq.
+  - job_name: 'rabbitmq'
+    metrics_path: /metrics/per-object
+    static_configs:
+      - targets: ['rabbitmq:15692']
+        labels:
+          service: rabbitmq

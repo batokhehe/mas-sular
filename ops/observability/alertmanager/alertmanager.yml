@@ -1,0 +1,54 @@
+# AlertManager routing for the Mas Sular pipeline.
+# Critical -> pager (short group_wait, 1h repeat). Warning -> Slack only.
+# Inhibition drops the warning when the matching critical fires, so paging is
+# never duplicated by the lower tier. Replace the placeholder webhook URLs /
+# integration keys before using in a real environment.
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: 'slack-default'
+  group_by: ['alertname', 'pipeline']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    # Page only on critical — keeps paging quiet.
+    - matchers:
+        - severity = "critical"
+      receiver: 'pager'
+      group_wait: 10s
+      group_interval: 5m
+      repeat_interval: 1h
+      continue: false
+    - matchers:
+        - severity = "warning"
+      receiver: 'slack-default'
+
+receivers:
+  - name: 'pager'
+    # Replace with your real integration, e.g.:
+    # pagerduty_configs:
+    #   - routing_key: '<PAGERDUTY_ROUTING_KEY>'
+    # opsgenie_configs:
+    #   - api_key: '<OPSGENIE_API_KEY>'
+    webhook_configs:
+      - url: 'http://pager-webhook.invalid/'
+        send_resolved: true
+
+  - name: 'slack-default'
+    # Replace with your Slack webhook:
+    # slack_configs:
+    #   - api_url: '<SLACK_WEBHOOK_URL>'
+    #     channel: '#masular-alerts'
+    webhook_configs:
+      - url: 'http://slack-webhook.invalid/'
+        send_resolved: true
+
+inhibit_rules:
+  # A firing critical suppresses the warning for the same alert + pipeline.
+  - source_matchers:
+      - severity = "critical"
+    target_matchers:
+      - severity = "warning"
+    equal: ['alertname', 'pipeline']
