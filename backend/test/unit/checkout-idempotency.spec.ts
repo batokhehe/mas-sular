@@ -53,8 +53,9 @@ const PROCEED = { kind: 'proceed', record: { id: 'rec-1', fenceToken: 1 } };
 
 function build(prisma = buildPrisma(), idempotency = buildIdempotency()) {
   const shipping = { calculateRateForCourier: jest.fn().mockResolvedValue({ cost: 10000, etd: '2 days' }) };
+  const uploadTokens = { issue: jest.fn() }; // COD checkout → no token issued
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const service = new OrdersService(prisma as any, shipping as any, idempotency as any);
+  const service = new OrdersService(prisma as any, shipping as any, idempotency as any, uploadTokens as any);
   return { service, prisma, idempotency };
 }
 

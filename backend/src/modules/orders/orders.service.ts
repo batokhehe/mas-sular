@@ -3,6 +3,7 @@ import { OrderStatus, PaymentMethod, PaymentStatus, Prisma, Product, Promo, Topp
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../database/prisma.service';
 import { IdempotencyService, SupersededError } from '../../infrastructure/idempotency/idempotency.service';
+import { PaymentUploadTokenService } from '../payments/payment-upload-token.service';
 import { ShippingService } from '../shipping/shipping.service';
 import { CheckoutItemDto, CheckoutSummaryDto, CreateOrderDto, ShippingCostDto, ValidateVoucherDto } from './application/dto/create-order.dto';
 import { generateOrderNumber, isOrderNumberConflict } from './order-number.util';
@@ -49,6 +50,7 @@ export class OrdersService {
     private readonly prisma: PrismaService,
     private readonly shipping: ShippingService,
     private readonly idempotency: IdempotencyService,
+    private readonly uploadTokens: PaymentUploadTokenService,
   ) {}
 
   private normalizeItems(items: CheckoutItemDto[]): NormalizedCheckoutItem[] {
@@ -504,6 +506,16 @@ export class OrdersService {
         });
       }
 
+      // For non-COD methods, issue a single-use upload token in the SAME tx so the
+      // customer can submit a receipt via a link without logging in. The upload URL
+      // rides along in order.created so the notification can include it. COD has no
+      // receipt step, so no token is issued.
+      let uploadUrl: string | undefined;
+      if (paymentMethod === PaymentMethod.BANK_TRANSFER || paymentMethod === PaymentMethod.QRIS) {
+        const issued = await this.uploadTokens.issue(tx, createdOrder.payment!.id);
+        uploadUrl = issued.uploadUrl;
+      }
+
       // Emit order.created via the transactional outbox, in the SAME transaction as
       // the order. It is the last statement so a superseded finalize (above) rolls
       // back the order AND this event together — no event for an uncommitted order.
@@ -516,7 +528,12 @@ export class OrdersService {
           eventVersion: 1,
           exchange: 'orders',
           routingKey: 'order.created',
-          payload: { orderId: createdOrder.id, orderNumber: createdOrder.orderNumber, totalPrice: createdOrder.totalPrice },
+          payload: {
+            orderId: createdOrder.id,
+            orderNumber: createdOrder.orderNumber,
+            totalPrice: createdOrder.totalPrice,
+            ...(uploadUrl ? { uploadUrl } : {}),
+          },
           metadata: { source: 'orders.checkout' },
           occurredAt: new Date(),
         },

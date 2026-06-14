@@ -36,14 +36,22 @@ function buildPrisma(tx = buildTx()) {
 function build(prisma = buildPrisma()) {
   const shipping = { calculateRateForCourier: jest.fn().mockResolvedValue({ cost: 10000, etd: '2 days' }) };
   const idempotency = { isCheckoutEnabled: jest.fn().mockReturnValue(false) };
+  const uploadTokens = {
+    issue: jest.fn().mockResolvedValue({ rawToken: 'raw-secret', uploadUrl: 'https://app/payments/upload/raw-secret', expiresAt: new Date() }),
+  };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const service = new OrdersService(prisma as any, shipping as any, idempotency as any);
-  return { service, prisma };
+  const service = new OrdersService(prisma as any, shipping as any, idempotency as any, uploadTokens as any);
+  return { service, prisma, uploadTokens };
 }
 
 /** Pull the data passed to tx.order.create. */
 function orderCreateData(prisma: ReturnType<typeof buildPrisma>) {
   return prisma.__tx.order.create.mock.calls[0][0].data;
+}
+
+/** Pull the order.created event payload passed to tx.outboxEvent.create. */
+function orderCreatedPayload(prisma: ReturnType<typeof buildPrisma>) {
+  return prisma.__tx.outboxEvent.create.mock.calls[0][0].data.payload;
 }
 
 describe('Checkout — payment method persistence', () => {
@@ -69,4 +77,23 @@ describe('Checkout — payment method persistence', () => {
     // The two must never diverge.
     expect(data.payment.create.method).toBe(data.paymentMethod);
   });
+});
+
+describe('Checkout — upload token issuance', () => {
+  it('COD: issues no token and emits order.created without an uploadUrl', async () => {
+    const { service, prisma, uploadTokens } = build();
+    await service.checkout(USER, dto({ payment_method: PaymentMethod.COD }));
+    expect(uploadTokens.issue).not.toHaveBeenCalled();
+    expect(orderCreatedPayload(prisma).uploadUrl).toBeUndefined();
+  });
+
+  it.each([PaymentMethod.BANK_TRANSFER, PaymentMethod.QRIS])(
+    '%s: issues a token and includes the uploadUrl in order.created',
+    async (method) => {
+      const { service, prisma, uploadTokens } = build();
+      await service.checkout(USER, dto({ payment_method: method }));
+      expect(uploadTokens.issue).toHaveBeenCalledTimes(1);
+      expect(orderCreatedPayload(prisma).uploadUrl).toBe('https://app/payments/upload/raw-secret');
+    },
+  );
 });

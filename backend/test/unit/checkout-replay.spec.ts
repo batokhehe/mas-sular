@@ -32,8 +32,9 @@ function build(replayMode: 'snapshot' | 'rehydrate', latest: unknown = LATEST) {
     begin: jest.fn().mockResolvedValue(REPLAY),
     resolveAfterSupersession: jest.fn(),
   };
+  const uploadTokens = { issue: jest.fn() }; // replay paths never create an order
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const service = new OrdersService(prisma as any, shipping as any, idempotency as any);
+  const service = new OrdersService(prisma as any, shipping as any, idempotency as any, uploadTokens as any);
   return { service, prisma, idempotency };
 }
 

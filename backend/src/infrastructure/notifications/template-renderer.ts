@@ -20,7 +20,9 @@ export class TemplateRenderer {
           subject: `Order ${payload.orderNumber ?? ''} received`,
           body:
             `Hi ${payload.customerName ?? 'there'}, we have received your order ` +
-            `${payload.orderNumber ?? ''} (total ${payload.totalPrice ?? ''}). Thank you!`,
+            `${payload.orderNumber ?? ''} (total ${payload.totalPrice ?? ''}). Thank you!` +
+            // Non-COD orders carry an upload link so the customer can submit their receipt.
+            (payload.uploadUrl ? ` To complete payment, upload your receipt here: ${payload.uploadUrl}` : ''),
         };
       case 'payment.approved':
         return {

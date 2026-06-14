@@ -186,6 +186,7 @@ export class OrderCreatedNotificationConsumer implements OnApplicationBootstrap,
               orderNumber: event.payload?.orderNumber ?? null,
               totalPrice: event.payload?.totalPrice ?? null,
               customerName: order.user!.name,
+              uploadUrl: event.payload?.uploadUrl ?? null, // present for non-COD checkouts
             },
             sourceMessageId: messageId,
           },

@@ -372,11 +372,28 @@ model Payment {
   webhookPayload      Json?
   order               Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
   transactions        Transaction[]
+  uploadTokens        PaymentUploadToken[]
   createdAt           DateTime      @default(now())
   updatedAt           DateTime      @updatedAt
   deletedAt           DateTime?
 
   @@index([status, method])
+}
+
+/// Single-use, expiring capability token that lets an unauthenticated customer
+/// upload a payment receipt via a link (no login). Only the SHA-256 hash of the
+/// URL secret is stored; the raw secret lives only in the emailed link.
+model PaymentUploadToken {
+  id        String    @id @default(uuid())
+  token     String    @unique @db.VarChar(64)
+  paymentId String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  payment   Payment   @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@index([paymentId])
+  @@index([expiresAt])
 }
 
 model Transaction {

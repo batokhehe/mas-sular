@@ -24,8 +24,9 @@ function build(failOp: FailOp = undefined) {
   const prisma = {
     $transaction: jest.fn().mockImplementation((cb: (tx: unknown) => Promise<unknown>) => cb(tx)),
   };
+  const uploadTokens = { consume: jest.fn(), resolveActive: jest.fn() }; // not used by uploadManualReceipt
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const service = new PaymentsService(prisma as any);
+  const service = new PaymentsService(prisma as any, uploadTokens as any);
   return { service, prisma, tx };
 }
 
