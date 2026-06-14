@@ -1,6 +1,10 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { PaymentsService } from '../../src/modules/payments/payments.service';
 
+// API consistency (8A.1): a missing/used/expired token is a uniform 404 on BOTH
+// GET and POST (used vs invalid are indistinguishable → no enumeration). A valid
+// token onto a no-longer-uploadable payment is a 409 (genuine state conflict).
+
 const DTO = { receiptUrl: 'https://files/receipt.png', bankName: 'BCA', accountName: 'Jane' };
 const PAYMENT = { id: 'pay-1', orderId: 'order-1', status: 'WAITING_VERIFICATION' };
 
@@ -74,9 +78,9 @@ describe('Receipt submission — submitReceiptByToken', () => {
     expect(result).toBe(PAYMENT);
   });
 
-  it('upload duplicate: a used/replayed token is rejected and emits no event', async () => {
+  it('upload duplicate: a used/replayed token is a uniform 404 (matches GET) and emits no event', async () => {
     const { svc, tx } = buildSubmit({ consumed: false });
-    await expect(svc.submitReceiptByToken('raw', DTO)).rejects.toBeInstanceOf(ConflictException);
+    await expect(svc.submitReceiptByToken('raw', DTO)).rejects.toBeInstanceOf(NotFoundException);
     expect(tx.payment.updateMany).not.toHaveBeenCalled();
     expect(tx.outboxEvent.create).not.toHaveBeenCalled();
   });

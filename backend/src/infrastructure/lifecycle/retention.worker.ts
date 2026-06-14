@@ -114,6 +114,9 @@ export class RetentionWorker implements OnApplicationBootstrap, OnModuleDestroy 
       { name: 'NotificationOutbox.FAILED', table: '`NotificationOutbox`', where: "`status` = 'FAILED' AND `lockedUntil` IS NULL AND `createdAt` < ?", cutoff: cutoff(this.config.notificationFailedDays) },
       // IdempotencyKey: expired keys (live PROCESSING rows have a future expiresAt → never matched).
       { name: 'IdempotencyKey', table: '`IdempotencyKey`', where: '`expiresAt` < ?', cutoff: new Date(now) },
+      // PaymentUploadToken: deleted only N days AFTER expiry, so active and recently-
+      // expired tokens (future or within-window expiresAt) are never matched.
+      { name: 'PaymentUploadToken', table: '`PaymentUploadToken`', where: '`expiresAt` < ?', cutoff: cutoff(this.config.uploadTokenExpiredDays) },
     ];
   }
 

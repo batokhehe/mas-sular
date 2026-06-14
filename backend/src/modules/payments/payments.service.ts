@@ -85,7 +85,10 @@ export class PaymentsService {
     return this.prisma.$transaction(async (tx) => {
       const { consumed, paymentId } = await this.uploadTokens.consume(tx, rawToken);
       if (!consumed || !paymentId) {
-        throw new ConflictException('Upload link is invalid, already used, or expired');
+        // Normalized with GET: a missing/used/expired token is a uniform 404 so a
+        // used token is indistinguishable from an invalid one (no enumeration). A
+        // payment that is no longer uploadable (valid token) is a 409 below.
+        throw new NotFoundException('Upload link is invalid, already used, or expired');
       }
 
       // Status guard: only accept a receipt while PENDING/WAITING_VERIFICATION. A

@@ -20,6 +20,7 @@ export interface LifecycleConfig {
   processedDays: number; // ProcessedEvent
   notificationSentDays: number; // NotificationOutbox status=SENT (by sentAt)
   notificationFailedDays: number; // NotificationOutbox status=FAILED (retained long)
+  uploadTokenExpiredDays: number; // PaymentUploadToken, retained N days AFTER expiresAt
 }
 
 function positiveInt(value: string | undefined, fallback: number): number {
@@ -40,5 +41,6 @@ export function loadLifecycleConfig(env: NodeJS.ProcessEnv = process.env): Lifec
     processedDays: positiveInt(env.RETENTION_PROCESSED_DAYS, 30),
     notificationSentDays: positiveInt(env.RETENTION_NOTIFICATION_SENT_DAYS, 30),
     notificationFailedDays: positiveInt(env.RETENTION_NOTIFICATION_FAILED_DAYS, 90),
+    uploadTokenExpiredDays: positiveInt(env.RETENTION_UPLOAD_TOKEN_DAYS, 14),
   };
 }

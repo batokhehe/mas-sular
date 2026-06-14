@@ -1,5 +1,6 @@
 import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus } from '@nestjs/common';
 import { Logger } from 'nestjs-pino';
+import { redactSensitivePath } from '../logging/redact';
 
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
@@ -13,7 +14,10 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const rawMessage = exception instanceof HttpException ? exception.getResponse() : 'Internal server error';
     const message = this.parseMessage(rawMessage);
 
-    this.logger.error({ err: exception, method: request.method, url: request.url }, 'request failed');
+    // Redact capability tokens (e.g. the payment upload token) from the LOGGED url.
+    // The response `path` is returned only to the caller who already holds the token,
+    // so it is left unchanged (no API behavior change).
+    this.logger.error({ err: exception, method: request.method, url: redactSensitivePath(request.url) }, 'request failed');
     response.status(status).json({
       statusCode: status,
       message,

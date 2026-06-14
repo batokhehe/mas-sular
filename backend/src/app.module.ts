@@ -4,6 +4,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { LoggerModule } from 'nestjs-pino';
 import { appConfig } from './common/config/app.config';
+import { redactSensitivePath } from './common/logging/redact';
 import { DatabaseModule } from './database/database.module';
 import { CacheInfrastructureModule } from './infrastructure/cache/cache.module';
 import { ConsumersModule } from './infrastructure/consumers/consumers.module';
@@ -32,7 +33,13 @@ import { UploadModule } from './modules/upload/upload.module';
     LoggerModule.forRoot({
       pinoHttp: {
         level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
-        redact: ['req.headers.authorization', 'req.headers.cookie'],
+        // Headers fully censored; the request URL is partially censored so the
+        // payment-upload token segment never reaches request logs.
+        redact: {
+          paths: ['req.headers.authorization', 'req.headers.cookie', 'req.url'],
+          censor: (value: unknown, path: string[]) =>
+            path[path.length - 1] === 'url' ? redactSensitivePath(String(value)) : '[Redacted]',
+        },
       },
     }),
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
