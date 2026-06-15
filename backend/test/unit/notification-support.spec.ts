@@ -69,6 +69,13 @@ describe('TemplateRenderer', () => {
     expect(out.body).toContain('expired');
   });
 
+  it('renders payment.receipt_uploaded (admin-facing)', () => {
+    const out = renderer.render('payment.receipt_uploaded', { orderNumber: 'BN-1', customerName: 'Jane' });
+    expect(out.subject).toContain('BN-1');
+    expect(out.body).toContain('Jane');
+    expect(out.body).toContain('verify');
+  });
+
   it('renders payment.reminder.first and .second with the upload link', () => {
     const payload = { orderNumber: 'BN-1', customerName: 'Jane', paymentMethod: 'BANK_TRANSFER', amount: 50000, uploadUrl: 'https://app/payments/upload/raw' };
     const first = renderer.render('payment.reminder.first', payload);

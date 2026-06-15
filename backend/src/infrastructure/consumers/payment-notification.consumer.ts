@@ -12,7 +12,7 @@ import { countDeaths, isInfraError } from './order-created-notification.consumer
 //   main --nack(requeue=false)--> default exchange --> payment.notifications.retry (TTL) --> back to main
 //   poison / unrecoverable --> payment.notifications.dlq (terminal, confirmed handoff)
 const EXCHANGE = 'payments';
-const ROUTING_KEYS = ['payment.paid', 'payment.failed', 'payment.expired'] as const;
+const ROUTING_KEYS = ['payment.paid', 'payment.failed', 'payment.expired', 'payment.receipt_uploaded'] as const;
 const QUEUE = 'payment.notifications';
 const RETRY_QUEUE = 'payment.notifications.retry';
 const DLQ = 'payment.notifications.dlq';
@@ -23,7 +23,11 @@ const TEMPLATE_BY_EVENT: Record<string, string> = {
   'payment.paid': 'payment.approved',
   'payment.failed': 'payment.rejected',
   'payment.expired': 'payment.expired',
+  'payment.receipt_uploaded': 'payment.receipt_uploaded',
 };
+
+// Events whose notification targets the admin team rather than the customer.
+const ADMIN_RECIPIENT_EVENTS = new Set<string>(['payment.receipt_uploaded']);
 
 type ProcessOutcome = 'enqueued' | 'duplicate' | 'skipped';
 
@@ -189,8 +193,21 @@ export class PaymentNotificationConsumer implements OnApplicationBootstrap, OnMo
       where: { id: orderId },
       include: { user: { select: { email: true, name: true } } },
     });
-    if (!order || !order.user?.email) {
-      this.logger.warn(`order/recipient missing for order ${orderId}; skipping`);
+    if (!order) {
+      this.logger.warn(`order missing for order ${orderId}; skipping`);
+      return 'skipped';
+    }
+
+    // Admin-facing events go to the configured admin inbox; customer events go to
+    // the order's owner. Either way, a missing recipient is a skip (not a failure).
+    const isAdminEvent = ADMIN_RECIPIENT_EVENTS.has(eventName);
+    const recipient = isAdminEvent ? this.config.adminNotificationEmail : order.user?.email;
+    if (!recipient) {
+      this.logger.warn(
+        isAdminEvent
+          ? `admin notification email not configured; skipping ${eventName}`
+          : `recipient missing for order ${orderId}; skipping`,
+      );
       return 'skipped';
     }
 
@@ -199,7 +216,7 @@ export class PaymentNotificationConsumer implements OnApplicationBootstrap, OnMo
         await tx.notificationOutbox.create({
           data: {
             channel: NotificationChannel.EMAIL,
-            recipient: order.user!.email,
+            recipient,
             template,
             payload: {
               orderId,

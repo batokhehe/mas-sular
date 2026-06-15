@@ -1,5 +1,5 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { PaymentStatus } from '@prisma/client';
+import { Payment, PaymentStatus, Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../database/prisma.service';
 import { UploadManualPaymentDto } from './application/dto/payment.dto';
@@ -15,36 +15,68 @@ export class PaymentsService {
     private readonly uploadTokens: PaymentUploadTokenService,
   ) {}
 
-  async uploadManualReceipt(paymentId: string, dto: UploadManualPaymentDto) {
-    // The payment update and the payment.receipt_uploaded event must commit
-    // atomically. No pre-read: a missing payment still surfaces P2025 from the
-    // update (now inside the tx, so it rolls back). Outbox insert is last.
-    return this.prisma.$transaction(async (tx) => {
-      const payment = await tx.payment.update({
-        where: { id: paymentId },
-        data: {
-          status: 'WAITING_VERIFICATION',
-          manualReceiptUrl: dto.receiptUrl,
-          manualBankName: dto.bankName,
-          manualAccountName: dto.accountName,
-        },
-      });
-      await tx.outboxEvent.create({
-        data: {
-          id: randomUUID(),
-          aggregateType: 'payment',
-          aggregateId: payment.id,
-          eventName: 'payment.receipt_uploaded',
-          eventVersion: 1,
-          exchange: 'payments',
-          routingKey: 'payment.receipt_uploaded',
-          payload: { paymentId: payment.id, orderId: payment.orderId },
-          metadata: { source: 'payments.uploadManualReceipt' },
-          occurredAt: new Date(),
-        },
-      });
-      return payment;
-    }, { timeout: 10000 });
+  /**
+   * Authenticated receipt upload. Ownership-scoped (the payment must belong to the
+   * caller — closes the IDOR) and status-guarded (only PENDING/WAITING_VERIFICATION,
+   * so a PAID/FAILED/EXPIRED/REFUNDED payment can never be reverted). Mirrors the
+   * tokenized path via the shared applyReceiptInTx.
+   */
+  async uploadManualReceipt(paymentId: string, userId: string, dto: UploadManualPaymentDto): Promise<Payment> {
+    await this.assertPaymentOwner(paymentId, userId);
+    return this.prisma.$transaction(
+      (tx) => this.applyReceiptInTx(tx, paymentId, dto, 'payments.uploadManualReceipt'),
+      { timeout: 10000 },
+    );
+  }
+
+  /** Generic 404 when the payment is missing or not owned by the caller (no enumeration). */
+  async assertPaymentOwner(paymentId: string, userId: string): Promise<void> {
+    const owned = await this.prisma.payment.findFirst({
+      where: { id: paymentId, deletedAt: null, order: { userId } },
+      select: { id: true },
+    });
+    if (!owned) throw new NotFoundException('Payment not found');
+  }
+
+  /**
+   * Shared receipt application: a status-guarded CAS move to WAITING_VERIFICATION
+   * plus the payment.receipt_uploaded event, atomically. A terminal payment fails
+   * the CAS → 409 (and the caller's transaction rolls back).
+   */
+  private async applyReceiptInTx(
+    tx: Prisma.TransactionClient,
+    paymentId: string,
+    dto: UploadManualPaymentDto,
+    source: string,
+  ): Promise<Payment> {
+    const flip = await tx.payment.updateMany({
+      where: { id: paymentId, status: { in: UPLOADABLE_STATUSES } },
+      data: {
+        status: PaymentStatus.WAITING_VERIFICATION,
+        manualReceiptUrl: dto.receiptUrl,
+        manualBankName: dto.bankName,
+        manualAccountName: dto.accountName,
+      },
+    });
+    if (flip.count !== 1) {
+      throw new ConflictException('This order is no longer awaiting a payment receipt');
+    }
+    const payment = await tx.payment.findUniqueOrThrow({ where: { id: paymentId } });
+    await tx.outboxEvent.create({
+      data: {
+        id: randomUUID(),
+        aggregateType: 'payment',
+        aggregateId: payment.id,
+        eventName: 'payment.receipt_uploaded',
+        eventVersion: 1,
+        exchange: 'payments',
+        routingKey: 'payment.receipt_uploaded',
+        payload: { paymentId: payment.id, orderId: payment.orderId },
+        metadata: { source },
+        occurredAt: new Date(),
+      },
+    });
+    return payment;
   }
 
   /**
@@ -81,47 +113,15 @@ export class PaymentsService {
    * token), an expired token, or a terminal payment status rolls the whole tx back,
    * so neither the token nor the event is half-applied.
    */
-  async submitReceiptByToken(rawToken: string, dto: UploadManualPaymentDto) {
+  async submitReceiptByToken(rawToken: string, dto: UploadManualPaymentDto): Promise<Payment> {
     return this.prisma.$transaction(async (tx) => {
       const { consumed, paymentId } = await this.uploadTokens.consume(tx, rawToken);
       if (!consumed || !paymentId) {
         // Normalized with GET: a missing/used/expired token is a uniform 404 so a
-        // used token is indistinguishable from an invalid one (no enumeration). A
-        // payment that is no longer uploadable (valid token) is a 409 below.
+        // used token is indistinguishable from an invalid one (no enumeration).
         throw new NotFoundException('Upload link is invalid, already used, or expired');
       }
-
-      // Status guard: only accept a receipt while PENDING/WAITING_VERIFICATION. A
-      // terminal payment (PAID/FAILED/EXPIRED/REFUNDED) fails the CAS → rollback.
-      const flip = await tx.payment.updateMany({
-        where: { id: paymentId, status: { in: UPLOADABLE_STATUSES } },
-        data: {
-          status: PaymentStatus.WAITING_VERIFICATION,
-          manualReceiptUrl: dto.receiptUrl,
-          manualBankName: dto.bankName,
-          manualAccountName: dto.accountName,
-        },
-      });
-      if (flip.count !== 1) {
-        throw new ConflictException('This order is no longer awaiting a payment receipt');
-      }
-
-      const payment = await tx.payment.findUniqueOrThrow({ where: { id: paymentId } });
-      await tx.outboxEvent.create({
-        data: {
-          id: randomUUID(),
-          aggregateType: 'payment',
-          aggregateId: payment.id,
-          eventName: 'payment.receipt_uploaded',
-          eventVersion: 1,
-          exchange: 'payments',
-          routingKey: 'payment.receipt_uploaded',
-          payload: { paymentId: payment.id, orderId: payment.orderId },
-          metadata: { source: 'payments.submitReceiptByToken' },
-          occurredAt: new Date(),
-        },
-      });
-      return payment;
+      return this.applyReceiptInTx(tx, paymentId, dto, 'payments.submitReceiptByToken');
     }, { timeout: 10000 });
   }
 }

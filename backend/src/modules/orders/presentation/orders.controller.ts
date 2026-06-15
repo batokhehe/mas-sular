@@ -1,8 +1,8 @@
-import { Body, Controller, ForbiddenException, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Controller, ForbiddenException, Get, Param, Post, Query, UseGuards, Body } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { AuthUser, CurrentUser } from '../../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
-import { CreateOrderDto, ValidateVoucherDto } from '../application/dto/create-order.dto';
+import { ValidateVoucherDto } from '../application/dto/create-order.dto';
 import { OrdersService } from '../orders.service';
 
 @ApiTags('orders')
@@ -10,12 +10,10 @@ import { OrdersService } from '../orders.service';
 export class OrdersController {
   constructor(private readonly orders: OrdersService) {}
 
-  @Post('checkout')
-  @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard)
-  checkout(@CurrentUser() user: AuthUser, @Body() dto: CreateOrderDto) {
-    return this.orders.checkout(user.sub, dto);
-  }
+  // NOTE: order creation lives ONLY on POST /checkout/order (CheckoutController),
+  // which runs the idempotent, fence-tokened orchestration. The previous
+  // POST /orders/checkout bypassed idempotency (duplicate-order risk) and has
+  // been removed — all checkout requests must go through /checkout/order.
 
   @Post('voucher/preview')
   @ApiBearerAuth()

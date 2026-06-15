@@ -1,87 +1,91 @@
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { PaymentsService } from '../../src/modules/payments/payments.service';
 
-type FailOp = 'payment' | 'outbox' | undefined;
-
 const PAYMENT = { id: 'pay-1', orderId: 'order-1', status: 'WAITING_VERIFICATION' };
-const DTO = { receiptUrl: 'https://cdn/receipt.png', bankName: 'BCA', accountName: 'Jane' };
+const DTO = { receiptUrl: '/uploads/1700-abc.png', bankName: 'BCA', accountName: 'Jane' };
+const USER = 'user-1';
 
-function buildTx(failOp: FailOp) {
+type Opts = { owned?: boolean; flip?: number; fail?: 'outbox' };
+
+function buildTx(opts: Opts) {
   const tx = {
-    payment: { update: jest.fn() },
+    payment: {
+      updateMany: jest.fn().mockResolvedValue({ count: opts.flip ?? 1 }),
+      findUniqueOrThrow: jest.fn().mockResolvedValue(PAYMENT),
+    },
     outboxEvent: { create: jest.fn() },
   };
-  tx.payment.update.mockImplementation(() =>
-    failOp === 'payment' ? Promise.reject(new Error('P2025: record not found')) : Promise.resolve(PAYMENT),
-  );
   tx.outboxEvent.create.mockImplementation(() =>
-    failOp === 'outbox' ? Promise.reject(new Error('outbox insert failed')) : Promise.resolve({}),
+    opts.fail === 'outbox' ? Promise.reject(new Error('outbox insert failed')) : Promise.resolve({}),
   );
   return tx;
 }
 
-function build(failOp: FailOp = undefined) {
-  const tx = buildTx(failOp);
+function build(opts: Opts = {}) {
+  const tx = buildTx(opts);
   const prisma = {
+    // ownership pre-check
+    payment: { findFirst: jest.fn().mockResolvedValue(opts.owned === false ? null : { id: 'pay-1' }) },
     $transaction: jest.fn().mockImplementation((cb: (tx: unknown) => Promise<unknown>) => cb(tx)),
   };
-  const uploadTokens = { consume: jest.fn(), resolveActive: jest.fn() }; // not used by uploadManualReceipt
+  const uploadTokens = { consume: jest.fn(), resolveActive: jest.fn() };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = new PaymentsService(prisma as any, uploadTokens as any);
   return { service, prisma, tx };
 }
 
-describe('PaymentsService.uploadManualReceipt atomicity', () => {
-  it('commits the payment update and the outbox event in one transaction', async () => {
+describe('PaymentsService.uploadManualReceipt — ownership + state guard + atomicity', () => {
+  it('owner upload: status-guarded CAS + outbox event in one transaction', async () => {
     const { service, prisma, tx } = build();
 
-    const result = await service.uploadManualReceipt('pay-1', DTO);
+    const result = await service.uploadManualReceipt('pay-1', USER, DTO);
 
-    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
-    expect(tx.payment.update).toHaveBeenCalledWith({
-      where: { id: 'pay-1' },
-      data: {
-        status: 'WAITING_VERIFICATION',
-        manualReceiptUrl: DTO.receiptUrl,
-        manualBankName: DTO.bankName,
-        manualAccountName: DTO.accountName,
-      },
+    // B1: ownership scoped to the caller (and soft-delete excluded)
+    expect(prisma.payment.findFirst).toHaveBeenCalledWith({
+      where: { id: 'pay-1', deletedAt: null, order: { userId: USER } },
+      select: { id: true },
+    });
+    // B2: only PENDING/WAITING_VERIFICATION can receive a receipt
+    expect(tx.payment.updateMany).toHaveBeenCalledWith({
+      where: { id: 'pay-1', status: { in: ['PENDING', 'WAITING_VERIFICATION'] } },
+      data: expect.objectContaining({ status: 'WAITING_VERIFICATION', manualReceiptUrl: DTO.receiptUrl }),
     });
     expect(tx.outboxEvent.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        id: expect.any(String),
-        aggregateType: 'payment',
-        aggregateId: 'pay-1',
         eventName: 'payment.receipt_uploaded',
-        eventVersion: 1,
-        exchange: 'payments',
-        routingKey: 'payment.receipt_uploaded',
         payload: { paymentId: 'pay-1', orderId: 'order-1' },
+        metadata: expect.objectContaining({ source: 'payments.uploadManualReceipt' }),
       }),
     });
-    expect(result).toBe(PAYMENT); // API contract / return value preserved
+    expect(result).toBe(PAYMENT);
   });
 
-  it('emits the outbox event AFTER the payment update', async () => {
+  it('B1: IDOR — a payment not owned by the caller is a 404 before any transaction', async () => {
+    const { service, prisma, tx } = build({ owned: false });
+
+    await expect(service.uploadManualReceipt('pay-1', 'attacker', DTO)).rejects.toBeInstanceOf(NotFoundException);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(tx.payment.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('B2: terminal payment cannot be reverted — CAS count 0 → 409, no event', async () => {
+    const { service, tx } = build({ flip: 0 });
+
+    await expect(service.uploadManualReceipt('pay-1', USER, DTO)).rejects.toBeInstanceOf(ConflictException);
+    expect(tx.outboxEvent.create).not.toHaveBeenCalled();
+  });
+
+  it('emits the outbox event after the payment update', async () => {
     const { service, tx } = build();
-
-    await service.uploadManualReceipt('pay-1', DTO);
-
-    expect(tx.payment.update.mock.invocationCallOrder[0]).toBeLessThan(
+    await service.uploadManualReceipt('pay-1', USER, DTO);
+    expect(tx.payment.updateMany.mock.invocationCallOrder[0]).toBeLessThan(
       tx.outboxEvent.create.mock.invocationCallOrder[0],
     );
   });
 
-  it('preserves P2025 behavior and writes no event when the payment is missing', async () => {
-    const { service, tx } = build('payment');
-
-    await expect(service.uploadManualReceipt('pay-x', DTO)).rejects.toThrow('P2025');
-    expect(tx.outboxEvent.create).not.toHaveBeenCalled();
-  });
-
   it('rolls back (rejects) when the outbox insert fails', async () => {
-    const { service, tx } = build('outbox');
-
-    await expect(service.uploadManualReceipt('pay-1', DTO)).rejects.toThrow('outbox insert failed');
+    const { service, tx } = build({ fail: 'outbox' });
+    await expect(service.uploadManualReceipt('pay-1', USER, DTO)).rejects.toThrow('outbox insert failed');
     expect(tx.outboxEvent.create).toHaveBeenCalledTimes(1);
   });
 });

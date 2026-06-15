@@ -38,6 +38,14 @@ export class TemplateRenderer {
             `Hi ${payload.customerName ?? 'there'}, we could not verify your payment for order ` +
             `${payload.orderNumber ?? ''}. Please contact us or try paying again.`,
         };
+      case 'payment.receipt_uploaded':
+        // Admin-facing: a customer submitted proof that needs verification.
+        return {
+          subject: `New payment proof for order ${payload.orderNumber ?? ''}`,
+          body:
+            `${payload.customerName ?? 'A customer'} uploaded a payment receipt for order ` +
+            `${payload.orderNumber ?? ''}. Please review and verify it in the admin dashboard.`,
+        };
       case 'payment.expired':
         return {
           subject: `Order ${payload.orderNumber ?? ''} payment expired`,

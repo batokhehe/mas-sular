@@ -29,11 +29,11 @@ function buildMetrics() {
   };
 }
 
-function build(prisma = buildPrisma()) {
+function build(prisma = buildPrisma(), config = CONFIG) {
   const rabbit = { createConsumerChannel: jest.fn() };
   const metrics = buildMetrics();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const consumer = new PaymentNotificationConsumer(prisma as any, rabbit as any, metrics as any, CONFIG);
+  const consumer = new PaymentNotificationConsumer(prisma as any, rabbit as any, metrics as any, config);
   return { consumer, prisma, metrics };
 }
 
@@ -72,6 +72,21 @@ describe('PaymentNotificationConsumer', () => {
     expect(prisma.__tx.notificationOutbox.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ template: 'payment.expired', recipient: 'jane@example.com', sourceMessageId: 'evt-3' }),
     });
+  });
+
+  it('payment.receipt_uploaded → notifies the configured admin inbox (not the customer)', async () => {
+    const { consumer, prisma } = build(buildPrisma(), { ...CONFIG, adminNotificationEmail: 'ops@masular.test' });
+    const outcome = await consumer.process('evt-4', { name: 'payment.receipt_uploaded', payload: { paymentId: 'pay-1', orderId: 'order-1' } });
+    expect(outcome).toBe('enqueued');
+    expect(prisma.__tx.notificationOutbox.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ template: 'payment.receipt_uploaded', recipient: 'ops@masular.test', sourceMessageId: 'evt-4' }),
+    });
+  });
+
+  it('payment.receipt_uploaded → skips when no admin email is configured', async () => {
+    const { consumer, prisma } = build(); // CONFIG has no adminNotificationEmail
+    expect(await consumer.process('evt-5', { name: 'payment.receipt_uploaded', payload: { orderId: 'order-1' } })).toBe('skipped');
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
   it('fast-path duplicate → no work', async () => {

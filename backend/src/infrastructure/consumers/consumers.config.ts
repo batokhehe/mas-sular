@@ -11,6 +11,8 @@ export interface ConsumersConfig {
   maxAttempts: number;
   /** TTL (ms) of the retry queue — the backoff before a failed message is redelivered. */
   retryDelayMs: number;
+  /** Recipient for admin-facing notifications (e.g. a new payment receipt to verify). */
+  adminNotificationEmail?: string;
 }
 
 function positiveInt(value: string | undefined, fallback: number): number {
@@ -25,5 +27,6 @@ export function loadConsumersConfig(env: NodeJS.ProcessEnv = process.env): Consu
     prefetch: positiveInt(env.CONSUMER_PREFETCH, 10),
     maxAttempts: positiveInt(env.CONSUMER_MAX_ATTEMPTS, 5),
     retryDelayMs: positiveInt(env.CONSUMER_RETRY_DELAY_MS, 30_000),
+    adminNotificationEmail: env.ADMIN_NOTIFICATION_EMAIL,
   };
 }
