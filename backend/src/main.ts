@@ -26,17 +26,18 @@ async function bootstrap(): Promise<void> {
     .map((origin) => origin.trim())
     .filter(Boolean);
 
+  // Explicit allowlist only — never reflect arbitrary origins back with credentials.
+  // A request with no Origin header (same-origin, curl, server-to-server) is allowed;
+  // a cross-origin request is allowed only if its origin is in CORS_ORIGINS. The env
+  // validation requires a non-empty, wildcard-free CORS_ORIGINS in staging/production.
   app.enableCors({
-    origin:
-      allowedOrigins.length === 0
-        ? true
-        : (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-          if (!origin || allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
-            callback(null, true);
-          } else {
-            callback(new Error('Not allowed by CORS'));
-          }
-        },
+    origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
     credentials: true,
   });
   app.use(

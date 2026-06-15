@@ -19,10 +19,14 @@ export class AdminJwtStrategy extends PassportStrategy(Strategy, 'admin-jwt') {
     config: ConfigService,
     private readonly prisma: PrismaService,
   ) {
+    const secret = config.get<string>('jwt.adminAccessSecret');
+    if (!secret) {
+      throw new Error('JWT_ADMIN_ACCESS_SECRET is not configured'); // no insecure fallback
+    }
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: config.get<string>('jwt.adminAccessSecret') ?? 'development-only-admin-secret',
+      secretOrKey: secret,
     });
   }
 

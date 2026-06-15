@@ -66,6 +66,11 @@ export class HealthController {
       checks.redis = 'failed';
     }
 
+    // RabbitMQ is required whenever the relay or consumers are enabled. When it is
+    // required but unreachable (or unset), readiness fails — we never report ready
+    // while the async infrastructure is broken. When not required, it is skipped.
+    const rabbitRequired =
+      process.env.OUTBOX_RELAY_ENABLED === 'true' || process.env.CONSUMERS_ENABLED === 'true';
     if (process.env.RABBITMQ_URL) {
       try {
         const connection = await amqp.connect(process.env.RABBITMQ_URL);
@@ -75,7 +80,7 @@ export class HealthController {
         checks.rabbitmq = 'failed';
       }
     } else {
-      checks.rabbitmq = 'skipped';
+      checks.rabbitmq = rabbitRequired ? 'failed' : 'skipped';
     }
 
     const status = Object.values(checks).every((value) => value === 'ok' || value === 'skipped') ? 'ready' : 'not_ready';

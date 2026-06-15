@@ -4,6 +4,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { LoggerModule } from 'nestjs-pino';
 import { appConfig } from './common/config/app.config';
+import { validateEnv } from './common/config/env.validation';
 import { redactSensitivePath } from './common/logging/redact';
 import { DatabaseModule } from './database/database.module';
 import { CacheInfrastructureModule } from './infrastructure/cache/cache.module';
@@ -30,7 +31,7 @@ import { UploadModule } from './modules/upload/upload.module';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true, load: [appConfig] }),
+    ConfigModule.forRoot({ isGlobal: true, load: [appConfig], validate: validateEnv }),
     LoggerModule.forRoot({
       pinoHttp: {
         level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
