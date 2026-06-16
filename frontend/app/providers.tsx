@@ -1,26 +1,16 @@
 'use client'
 
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { ReactNode } from 'react'
+import { type ReactNode } from 'react'
+import { QueryProvider } from '@/providers/query-provider'
+import { AuthProvider } from '@/lib/auth/auth-context'
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 60 * 1000, // 1 minute
-      gcTime: 5 * 60 * 1000, // 5 minutes (formerly cacheTime)
-      retry: 1,
-      refetchOnWindowFocus: false,
-    },
-    mutations: {
-      retry: 1,
-    },
-  },
-})
-
+// Foundation provider stack (Phase 9A): TanStack Query with global error
+// handling + customer AuthProvider. The Toaster + ThemeProvider stay in the
+// root layout.
 export function Providers({ children }: { children: ReactNode }) {
   return (
-    <QueryClientProvider client={queryClient}>
-      {children}
-    </QueryClientProvider>
+    <QueryProvider>
+      <AuthProvider>{children}</AuthProvider>
+    </QueryProvider>
   )
 }

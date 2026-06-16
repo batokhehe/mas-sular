@@ -6,10 +6,13 @@ import { ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ProductCard } from './product-card'
 import { type Product } from '@/lib/types'
+import { products, type Product as DataProduct } from '@/lib/data'
 
 interface ProductGridProps {
   title?: string
-  products: Product[]
+  // Accept either Product shape (the static data set uses its own interface),
+  // mirroring what ProductCard already accepts.
+  products: (Product | DataProduct)[]
   showViewAll?: boolean
   viewAllHref?: string
   columns?: 2 | 3 | 4
