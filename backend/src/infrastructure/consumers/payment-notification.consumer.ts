@@ -12,7 +12,7 @@ import { countDeaths, isInfraError } from './order-created-notification.consumer
 //   main --nack(requeue=false)--> default exchange --> payment.notifications.retry (TTL) --> back to main
 //   poison / unrecoverable --> payment.notifications.dlq (terminal, confirmed handoff)
 const EXCHANGE = 'payments';
-const ROUTING_KEYS = ['payment.paid', 'payment.failed', 'payment.expired', 'payment.receipt_uploaded'] as const;
+const ROUTING_KEYS = ['payment.paid', 'payment.failed', 'payment.expired', 'payment.receipt_uploaded', 'payment.reminder'] as const;
 const QUEUE = 'payment.notifications';
 const RETRY_QUEUE = 'payment.notifications.retry';
 const DLQ = 'payment.notifications.dlq';
@@ -24,6 +24,7 @@ const TEMPLATE_BY_EVENT: Record<string, string> = {
   'payment.failed': 'payment.rejected',
   'payment.expired': 'payment.expired',
   'payment.receipt_uploaded': 'payment.receipt_uploaded',
+  'payment.reminder': 'payment.reminder',
 };
 
 // Events whose notification targets the admin team rather than the customer.
@@ -223,6 +224,10 @@ export class PaymentNotificationConsumer implements OnApplicationBootstrap, OnMo
               orderNumber: order.orderNumber,
               customerName: order.user!.name,
               amount: (event.payload?.amount as number | undefined) ?? null,
+              // Present for payment.reminder; null/ignored for other events.
+              paymentMethod: (event.payload?.paymentMethod as string | undefined) ?? null,
+              uploadUrl: (event.payload?.uploadUrl as string | undefined) ?? null,
+              stage: (event.payload?.stage as string | undefined) ?? null,
             },
             sourceMessageId: messageId,
           },

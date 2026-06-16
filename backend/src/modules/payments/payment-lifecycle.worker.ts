@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
-import { NotificationChannel, Payment, PaymentMethod, PaymentStatus } from '@prisma/client';
+import { Payment, PaymentMethod, PaymentStatus } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../database/prisma.service';
 import { OrderCancellationService } from '../orders/order-cancellation.service';
@@ -201,23 +201,14 @@ export class PaymentLifecycleWorker implements OnApplicationBootstrap, OnModuleD
     return sent;
   }
 
-  async sendReminder(payment: Payment, which: 'first' | 'second'): Promise<boolean> {
-    // Resolve the recipient before claiming the slot: if there is no email we
-    // cannot send, so we skip without consuming the reminder slot.
-    const order = await this.prisma.order.findUnique({
-      where: { id: payment.orderId },
-      include: { user: { select: { email: true, name: true } } },
-    });
-    if (!order || !order.user?.email) {
-      this.logger.warn(`reminder skipped: order/recipient missing for payment ${payment.id}`);
-      return false;
-    }
-
+  async sendReminder(payment: Payment, stage: 'first' | 'second'): Promise<boolean> {
     try {
       const claimed = await this.prisma.$transaction(async (tx) => {
         // CAS-claim the reminder slot. Exactly one caller flips the timestamp,
-        // status-guarded so a paid/expired payment is never reminded.
-        const cas = which === 'first'
+        // status-guarded so a paid/failed/expired payment is never reminded.
+        // One send per stage; the token + event are emitted in the SAME tx, so a
+        // payment.reminder event is produced at most once per stage.
+        const cas = stage === 'first'
           ? await tx.payment.updateMany({
               where: { id: payment.id, status: { in: ELIGIBLE_STATUSES }, firstReminderAt: null },
               data: { firstReminderAt: new Date(this.nowMs()) },
@@ -232,29 +223,34 @@ export class PaymentLifecycleWorker implements OnApplicationBootstrap, OnModuleD
         // cannot be recovered — always mint a fresh single-use token for the link.
         const issued = await this.uploadTokens.issue(tx, payment.id);
 
-        await tx.notificationOutbox.create({
+        await tx.outboxEvent.create({
           data: {
-            channel: NotificationChannel.EMAIL,
-            recipient: order.user!.email,
-            template: which === 'first' ? 'payment.reminder.first' : 'payment.reminder.second',
+            id: randomUUID(),
+            aggregateType: 'payment',
+            aggregateId: payment.id,
+            eventName: 'payment.reminder',
+            eventVersion: 1,
+            exchange: 'payments',
+            routingKey: 'payment.reminder',
             payload: {
+              paymentId: payment.id,
               orderId: payment.orderId,
-              orderNumber: order.orderNumber,
-              customerName: order.user!.name,
+              stage,
               paymentMethod: payment.method,
               amount: payment.amount,
               uploadUrl: issued.uploadUrl,
             },
-            sourceMessageId: `reminder:${which}:${payment.id}`,
+            metadata: { source: 'payment.lifecycle.reminder' },
+            occurredAt: new Date(this.nowMs()),
           },
         });
         return true;
       }, { timeout: 10000 });
 
-      if (claimed) this.metrics.reminder(which);
+      if (claimed) this.metrics.reminder(stage);
       return claimed;
     } catch (err) {
-      this.logger.error(`send ${which} reminder for payment ${payment.id} failed: ${err instanceof Error ? err.message : String(err)}`);
+      this.logger.error(`send ${stage} reminder for payment ${payment.id} failed: ${err instanceof Error ? err.message : String(err)}`);
       return false;
     }
   }

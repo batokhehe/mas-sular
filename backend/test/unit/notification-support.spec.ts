@@ -76,12 +76,12 @@ describe('TemplateRenderer', () => {
     expect(out.body).toContain('verify');
   });
 
-  it('renders payment.reminder.first and .second with the upload link', () => {
-    const payload = { orderNumber: 'BN-1', customerName: 'Jane', paymentMethod: 'BANK_TRANSFER', amount: 50000, uploadUrl: 'https://app/payments/upload/raw' };
-    const first = renderer.render('payment.reminder.first', payload);
+  it('renders payment.reminder with the upload link and stage-based tone', () => {
+    const base = { orderNumber: 'BN-1', customerName: 'Jane', paymentMethod: 'BANK_TRANSFER', amount: 50000, uploadUrl: 'https://app/payments/upload/raw' };
+    const first = renderer.render('payment.reminder', { ...base, stage: 'first' });
     expect(first.subject).toContain('BN-1');
     expect(first.body).toContain('https://app/payments/upload/raw');
-    const second = renderer.render('payment.reminder.second', payload);
+    const second = renderer.render('payment.reminder', { ...base, stage: 'second' });
     expect(second.body).toContain('final reminder');
   });
 

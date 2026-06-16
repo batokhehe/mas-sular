@@ -65,6 +65,23 @@ describe('PaymentNotificationConsumer', () => {
     });
   });
 
+  it('payment.reminder → enqueues a payment.reminder NotificationOutbox to the customer with the upload link', async () => {
+    const { consumer, prisma } = build();
+    const outcome = await consumer.process('evt-r', {
+      name: 'payment.reminder',
+      payload: { paymentId: 'pay-1', orderId: 'order-1', stage: 'first', paymentMethod: 'BANK_TRANSFER', amount: 50000, uploadUrl: 'https://app/payments/upload/raw' },
+    })
+    expect(outcome).toBe('enqueued')
+    expect(prisma.__tx.notificationOutbox.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        template: 'payment.reminder',
+        recipient: 'jane@example.com',
+        sourceMessageId: 'evt-r',
+        payload: expect.objectContaining({ uploadUrl: 'https://app/payments/upload/raw', stage: 'first', paymentMethod: 'BANK_TRANSFER' }),
+      }),
+    })
+  });
+
   it('payment.expired → enqueues a payment.expired NotificationOutbox', async () => {
     const { consumer, prisma } = build();
     const outcome = await consumer.process('evt-3', { name: 'payment.expired', payload: { paymentId: 'pay-1', orderId: 'order-1' } });

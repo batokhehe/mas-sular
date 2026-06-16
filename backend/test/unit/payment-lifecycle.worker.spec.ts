@@ -12,10 +12,10 @@ function cfg(over: Partial<PaymentLifecycleConfig> = {}): PaymentLifecycleConfig
     pollIntervalMs: 300_000,
     initialDelayMs: 60_000,
     batchSize: 100,
-    firstReminderAfterMs: 24 * HOUR,
-    secondReminderAfterMs: 48 * HOUR,
-    expiryAfterMs: 72 * HOUR,
-    gatewayExpiryAfterMs: 72 * HOUR,
+    firstReminderAfterMs: 12 * HOUR,
+    secondReminderAfterMs: 20 * HOUR,
+    expiryAfterMs: 24 * HOUR,
+    gatewayExpiryAfterMs: 24 * HOUR,
     ...over,
   };
 }
@@ -103,7 +103,7 @@ describe('PaymentLifecycleWorker — expiry', () => {
 });
 
 describe('PaymentLifecycleWorker — reminders', () => {
-  it('first reminder: claims the slot, mints a fresh token, enqueues payment.reminder.first', async () => {
+  it('first reminder: claims the slot, mints a fresh token, emits a payment.reminder event', async () => {
     const { worker, tx, uploadTokens, metrics } = build();
 
     const result = await worker.sendReminder(payment() as any, 'first');
@@ -114,69 +114,65 @@ describe('PaymentLifecycleWorker — reminders', () => {
       data: { firstReminderAt: expect.any(Date) },
     });
     expect(uploadTokens.issue).toHaveBeenCalledWith(tx, 'pay-1'); // fresh token reissue
-    expect(tx.notificationOutbox.create).toHaveBeenCalledWith({
+    expect(tx.outboxEvent.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        channel: 'EMAIL',
-        recipient: 'jane@example.com',
-        template: 'payment.reminder.first',
-        sourceMessageId: 'reminder:first:pay-1',
+        eventName: 'payment.reminder',
+        routingKey: 'payment.reminder',
         payload: expect.objectContaining({
-          orderNumber: 'BN-1',
+          paymentId: 'pay-1',
+          orderId: 'order-1',
+          stage: 'first',
           paymentMethod: 'BANK_TRANSFER',
           amount: 50000,
           uploadUrl: 'https://app/payments/upload/raw',
         }),
+        metadata: expect.objectContaining({ source: 'payment.lifecycle.reminder' }),
       }),
     });
     expect(metrics.reminder).toHaveBeenCalledWith('first');
   });
 
-  it('second reminder: claims secondReminderAt and enqueues payment.reminder.second', async () => {
+  it('second reminder: claims secondReminderAt and emits a stage=second event', async () => {
     const { worker, tx, metrics } = build();
 
-    await worker.sendReminder(payment({ firstReminderAt: new Date(NOW - 24 * HOUR) }) as any, 'second');
+    await worker.sendReminder(payment({ firstReminderAt: new Date(NOW - 12 * HOUR) }) as any, 'second');
 
     expect(tx.payment.updateMany).toHaveBeenCalledWith({
       where: { id: 'pay-1', status: { in: ['PENDING', 'WAITING_VERIFICATION'] }, secondReminderAt: null },
       data: { secondReminderAt: expect.any(Date) },
     });
-    expect(tx.notificationOutbox.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ template: 'payment.reminder.second' }),
+    expect(tx.outboxEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        eventName: 'payment.reminder',
+        payload: expect.objectContaining({ stage: 'second' }),
+      }),
     });
     expect(metrics.reminder).toHaveBeenCalledWith('second');
   });
 
-  it('dedup/concurrency: a lost reminder CAS (count 0) issues no token and enqueues nothing', async () => {
+  it('dedup/concurrency: a lost reminder CAS (count 0) issues no token and emits no event', async () => {
     const { worker, tx, uploadTokens, metrics } = build();
     tx.payment.updateMany.mockResolvedValue({ count: 0 });
 
     expect(await worker.sendReminder(payment() as any, 'first')).toBe(false);
     expect(uploadTokens.issue).not.toHaveBeenCalled();
-    expect(tx.notificationOutbox.create).not.toHaveBeenCalled();
+    expect(tx.outboxEvent.create).not.toHaveBeenCalled();
     expect(metrics.reminder).not.toHaveBeenCalled();
   });
 
-  it('skips (no claim) when the order/recipient is missing', async () => {
-    const { worker, prisma } = build();
-    prisma.order.findUnique.mockResolvedValue(null);
-
-    expect(await worker.sendReminder(payment() as any, 'first')).toBe(false);
-    expect(prisma.$transaction).not.toHaveBeenCalled();
-  });
-
-  it('runReminders queries first-due (firstReminderAt null, +24h) and second-due (+48h) slices', async () => {
+  it('runReminders queries first-due (firstReminderAt null, +12h) and second-due (+20h) slices', async () => {
     const { worker, prisma } = build();
     await worker.runReminders();
 
     const firstWhere = prisma.payment.findMany.mock.calls[0][0].where;
     expect(firstWhere.firstReminderAt).toBeNull();
     expect(firstWhere.method).toEqual({ in: ['BANK_TRANSFER', 'QRIS'] });
-    expect((firstWhere.createdAt.lte as Date).getTime()).toBe(NOW - 24 * HOUR);
+    expect((firstWhere.createdAt.lte as Date).getTime()).toBe(NOW - 12 * HOUR);
 
     const secondWhere = prisma.payment.findMany.mock.calls[1][0].where;
     expect(secondWhere.firstReminderAt).toEqual({ not: null });
     expect(secondWhere.secondReminderAt).toBeNull();
-    expect((secondWhere.createdAt.lte as Date).getTime()).toBe(NOW - 48 * HOUR);
+    expect((secondWhere.createdAt.lte as Date).getTime()).toBe(NOW - 20 * HOUR);
   });
 });
 
@@ -189,13 +185,13 @@ describe('PaymentLifecycleWorker — lifecycle gating', () => {
 });
 
 describe('loadPaymentLifecycleConfig', () => {
-  it('defaults disabled with 24h/48h reminders and 72h expiry', () => {
+  it('defaults disabled with 12h/20h reminders and 24h expiry', () => {
     const c = loadPaymentLifecycleConfig({});
     expect(c.enabled).toBe(false);
-    expect(c.firstReminderAfterMs).toBe(24 * HOUR);
-    expect(c.secondReminderAfterMs).toBe(48 * HOUR);
-    expect(c.expiryAfterMs).toBe(72 * HOUR);
-    expect(c.gatewayExpiryAfterMs).toBe(72 * HOUR);
+    expect(c.firstReminderAfterMs).toBe(12 * HOUR);
+    expect(c.secondReminderAfterMs).toBe(20 * HOUR);
+    expect(c.expiryAfterMs).toBe(24 * HOUR);
+    expect(c.gatewayExpiryAfterMs).toBe(24 * HOUR);
   });
 
   it('parses overrides and allows gateway expiry to be disabled with 0', () => {

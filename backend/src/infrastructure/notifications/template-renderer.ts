@@ -53,9 +53,8 @@ export class TemplateRenderer {
             `Hi ${payload.customerName ?? 'there'}, the payment window for order ${payload.orderNumber ?? ''} ` +
             `has expired and the order was cancelled. You are welcome to place a new order.`,
         };
-      case 'payment.reminder.first':
-      case 'payment.reminder.second': {
-        const tone = template === 'payment.reminder.first' ? 'a friendly reminder' : 'a final reminder';
+      case 'payment.reminder': {
+        const tone = payload.stage === 'second' ? 'a final reminder' : 'a friendly reminder';
         return {
           subject: `Reminder: complete payment for order ${payload.orderNumber ?? ''}`,
           body:

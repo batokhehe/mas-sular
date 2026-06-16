@@ -77,9 +77,10 @@ export const envSchema = baseSchema.superRefine((env, ctx) => {
   }
 
   // Payment timing must be strictly increasing so reminders precede expiry.
-  const first = env.PAYMENT_FIRST_REMINDER_MS ?? 24 * HOUR_MS;
-  const second = env.PAYMENT_SECOND_REMINDER_MS ?? 48 * HOUR_MS;
-  const expiry = env.PAYMENT_EXPIRY_MS ?? 72 * HOUR_MS;
+  // Defaults mirror payment-lifecycle.config (12h / 20h / 24h).
+  const first = env.PAYMENT_FIRST_REMINDER_MS ?? 12 * HOUR_MS;
+  const second = env.PAYMENT_SECOND_REMINDER_MS ?? 20 * HOUR_MS;
+  const expiry = env.PAYMENT_EXPIRY_MS ?? 24 * HOUR_MS;
   if (!(first < second && second < expiry)) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,

@@ -6,11 +6,11 @@ export interface PaymentLifecycleConfig {
   pollIntervalMs: number;
   initialDelayMs: number;
   batchSize: number;
-  /** 1st reminder, measured from payment.createdAt (checkout). Default 24h. */
+  /** 1st reminder, measured from payment.createdAt (checkout). Default 12h. */
   firstReminderAfterMs: number;
-  /** 2nd reminder. Default 48h. */
+  /** 2nd reminder. Default 20h. */
   secondReminderAfterMs: number;
-  /** BANK_TRANSFER / QRIS expiry window. Default 72h. */
+  /** BANK_TRANSFER / QRIS expiry window. Default 24h. */
   expiryAfterMs: number;
   /** GATEWAY expiry window; 0 disables gateway expiry (treated as never). */
   gatewayExpiryAfterMs: number;
@@ -34,9 +34,9 @@ export function loadPaymentLifecycleConfig(env: NodeJS.ProcessEnv = process.env)
     pollIntervalMs: positiveInt(env.PAYMENT_LIFECYCLE_POLL_MS, 5 * 60 * 1000),
     initialDelayMs: positiveInt(env.PAYMENT_LIFECYCLE_INITIAL_DELAY_MS, 60 * 1000),
     batchSize: positiveInt(env.PAYMENT_LIFECYCLE_BATCH_SIZE, 100),
-    firstReminderAfterMs: positiveInt(env.PAYMENT_FIRST_REMINDER_MS, 24 * HOUR),
-    secondReminderAfterMs: positiveInt(env.PAYMENT_SECOND_REMINDER_MS, 48 * HOUR),
-    expiryAfterMs: positiveInt(env.PAYMENT_EXPIRY_MS, 72 * HOUR),
-    gatewayExpiryAfterMs: nonNegativeInt(env.PAYMENT_GATEWAY_EXPIRY_MS, 72 * HOUR),
+    firstReminderAfterMs: positiveInt(env.PAYMENT_FIRST_REMINDER_MS, 12 * HOUR),
+    secondReminderAfterMs: positiveInt(env.PAYMENT_SECOND_REMINDER_MS, 20 * HOUR),
+    expiryAfterMs: positiveInt(env.PAYMENT_EXPIRY_MS, 24 * HOUR),
+    gatewayExpiryAfterMs: nonNegativeInt(env.PAYMENT_GATEWAY_EXPIRY_MS, 24 * HOUR),
   };
 }
