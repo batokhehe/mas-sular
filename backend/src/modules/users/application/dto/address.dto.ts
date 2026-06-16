@@ -29,3 +29,40 @@ export class CreateAddressDto {
   @IsBoolean()
   isDefault!: boolean;
 }
+
+export class UpdateAddressDto {
+  @IsOptional()
+  @IsString()
+  label?: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  recipientName?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(10, 15)
+  phone?: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(10)
+  fullAddress?: string;
+
+  @IsOptional()
+  @IsString()
+  notes?: string;
+
+  @IsOptional()
+  @IsNumber()
+  latitude?: number;
+
+  @IsOptional()
+  @IsNumber()
+  longitude?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  isDefault?: boolean;
+}

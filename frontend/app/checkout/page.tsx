@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useForm, Controller } from 'react-hook-form'
@@ -53,6 +53,8 @@ export default function CheckoutPage() {
     control,
     register,
     handleSubmit,
+    setValue,
+    getValues,
     formState: { errors },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -61,6 +63,15 @@ export default function CheckoutPage() {
 
   const addresses = me?.addresses ?? []
   const subtotal = cartSubtotal(lines)
+
+  // Preselect the default (or only) address once it loads; don't override a later
+  // manual choice.
+  useEffect(() => {
+    if (addresses.length > 0 && !getValues('address_id')) {
+      const preselect = addresses.find((a) => a.isDefault) ?? addresses[0]
+      setValue('address_id', preselect.id)
+    }
+  }, [addresses, getValues, setValue])
 
   const onSubmit = (values: FormValues) => {
     setConflict(null)
@@ -139,13 +150,12 @@ export default function CheckoutPage() {
           <Card className="space-y-2 p-4">
             <Label>Delivery address</Label>
             {addresses.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No address yet.{' '}
-                <Link href="/profile" className="underline">
-                  Add one
-                </Link>
-                .
-              </p>
+              <div className="space-y-2">
+                <p className="text-sm text-muted-foreground">You need a delivery address to check out.</p>
+                <Button asChild variant="outline" size="sm">
+                  <Link href="/account/addresses">Add address first</Link>
+                </Button>
+              </div>
             ) : (
               <Controller
                 control={control}

@@ -4,6 +4,7 @@ import type { ProductQuery } from '@/lib/api/products.api'
 // invalidation stays consistent.
 export const qk = {
   me: ['me'] as const,
+  addresses: ['addresses'] as const,
 
   catalog: {
     products: (q: ProductQuery) => ['catalog', 'products', q] as const,

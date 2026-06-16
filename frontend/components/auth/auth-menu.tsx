@@ -47,6 +47,9 @@ export function AuthMenu() {
         <DropdownMenuLabel className="truncate font-normal text-muted-foreground">{user.email}</DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
+          <Link href="/account/addresses">Addresses</Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
           <Link href="/orders">My orders</Link>
         </DropdownMenuItem>
         <DropdownMenuSeparator />

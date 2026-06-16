@@ -1,9 +1,9 @@
-import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { PrismaService } from '../../../database/prisma.service';
 import { CurrentUser, AuthUser } from '../../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
-import { CreateAddressDto } from '../application/dto/address.dto';
+import { CreateAddressDto, UpdateAddressDto } from '../application/dto/address.dto';
 
 @ApiTags('users')
 @ApiBearerAuth()
@@ -55,5 +55,40 @@ export class UsersController {
 
       return address;
     });
+  }
+
+  @Patch('me/addresses/:id')
+  async updateAddress(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateAddressDto,
+  ) {
+    // Ownership check (generic 404 — never reveals other users' addresses).
+    const owned = await this.prisma.address.findFirst({
+      where: { id, userId: user.sub, deletedAt: null },
+      select: { id: true },
+    });
+    if (!owned) throw new NotFoundException('Address not found');
+
+    return this.prisma.$transaction(async (prisma) => {
+      if (dto.isDefault) {
+        await prisma.address.updateMany({
+          where: { userId: user.sub, isDefault: true },
+          data: { isDefault: false },
+        });
+      }
+      return prisma.address.update({ where: { id }, data: { ...dto } });
+    });
+  }
+
+  @Delete('me/addresses/:id')
+  async deleteAddress(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    // Ownership-scoped soft delete.
+    const result = await this.prisma.address.updateMany({
+      where: { id, userId: user.sub, deletedAt: null },
+      data: { deletedAt: new Date() },
+    });
+    if (result.count === 0) throw new NotFoundException('Address not found');
+    return { success: true };
   }
 }
