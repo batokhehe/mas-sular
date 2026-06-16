@@ -3,7 +3,7 @@
 import { type ComponentType } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, CreditCard } from 'lucide-react'
+import { LayoutDashboard, CreditCard, ClipboardList } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { usePermissions } from '@/lib/auth/use-permissions'
 import type { AdminPermission } from '@/lib/types/enums'
@@ -17,6 +17,7 @@ export interface AdminNavItem {
 
 export const ADMIN_NAV: AdminNavItem[] = [
   { label: 'Dashboard', href: '/admin', icon: LayoutDashboard, permission: 'Dashboard.read' },
+  { label: 'Orders', href: '/admin/orders', icon: ClipboardList, permission: 'Order.read' },
   { label: 'Payments', href: '/admin/payments', icon: CreditCard, permission: 'Payment.read' },
 ]
 

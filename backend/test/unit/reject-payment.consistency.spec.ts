@@ -60,7 +60,7 @@ describe('AdminService.rejectPayment — cancellation + restock', () => {
     });
     // order CAS over the active-status whitelist (NOT status != CANCELLED)
     expect(tx.order.updateMany).toHaveBeenCalledWith({
-      where: { id: 'order-1', deletedAt: null, status: { in: ['PENDING', 'PROCESSING', 'DELIVERING'] } },
+      where: { id: 'order-1', deletedAt: null, status: { in: ['PENDING', 'PROCESSING', 'PACKING', 'SHIPPED', 'DELIVERING'] } },
       data: { status: 'CANCELLED' },
     });
     // restock aggregated per product (p1: 2+1=3, p2: 3)

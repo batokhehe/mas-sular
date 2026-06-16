@@ -50,7 +50,7 @@ describe('AdminService.updateOrderStatus(CANCELLED) — cancellation + restock',
     const result = await service.updateOrderStatus('order-1', { status: 'CANCELLED', note: 'admin cancel' } as any);
 
     expect(tx.order.updateMany).toHaveBeenCalledWith({
-      where: { id: 'order-1', deletedAt: null, status: { in: ['PENDING', 'PROCESSING', 'DELIVERING'] } },
+      where: { id: 'order-1', deletedAt: null, status: { in: ['PENDING', 'PROCESSING', 'PACKING', 'SHIPPED', 'DELIVERING'] } },
       data: { status: 'CANCELLED' },
     });
     expect(tx.product.updateMany).toHaveBeenCalledWith({ where: { id: 'p1' }, data: { stock: { increment: 2 } } });

@@ -19,6 +19,9 @@ enum OrderStatus {
   DELIVERING
   COMPLETED
   CANCELLED
+  PACKING
+  SHIPPED
+  DELIVERED
 }
 
 enum PaymentMethod {

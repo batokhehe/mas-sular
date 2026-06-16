@@ -20,7 +20,16 @@ export class OrderCancellationService {
       where: {
         id: orderId,
         deletedAt: null,
-        status: { in: [OrderStatus.PENDING, OrderStatus.PROCESSING, OrderStatus.DELIVERING] },
+        // Cancellable while active (pre-delivery); DELIVERED/COMPLETED are terminal.
+        status: {
+          in: [
+            OrderStatus.PENDING,
+            OrderStatus.PROCESSING,
+            OrderStatus.PACKING,
+            OrderStatus.SHIPPED,
+            OrderStatus.DELIVERING,
+          ],
+        },
       },
       data: { status: OrderStatus.CANCELLED },
     });

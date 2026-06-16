@@ -3,7 +3,7 @@
 import { type ReactNode } from 'react'
 import Link from 'next/link'
 import { useQuery } from '@tanstack/react-query'
-import { ClipboardList, CreditCard, Clock, TimerOff, AlarmClock } from 'lucide-react'
+import { ClipboardList, CreditCard, Clock, TimerOff, AlarmClock, Package, Truck, PackageCheck } from 'lucide-react'
 import { adminApi } from '@/lib/api/admin.api'
 import { qk } from '@/lib/query/keys'
 import { useAdminPayments } from '@/lib/query/hooks/use-admin-payments'
@@ -50,7 +50,9 @@ export default function AdminDashboardPage() {
     enabled: canOrders,
   })
 
-  const recentOrders = (ordersQuery.data ?? []).slice(0, 5)
+  const allOrders = ordersQuery.data ?? []
+  const recentOrders = allOrders.slice(0, 5)
+  const orderCount = (s: string) => allOrders.filter((o) => o.status === s).length
 
   // "Expiring soon": still-open payments created past the 2nd reminder (>20h),
   // i.e. within ~4h of the 24h expiry window.
@@ -93,6 +95,14 @@ export default function AdminDashboardPage() {
             loading={expired.isLoading}
             icon={<TimerOff className="size-5" />}
           />
+        </div>
+      ) : null}
+
+      {canOrders ? (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <StatCard label="Processing" value={orderCount('PROCESSING')} loading={ordersQuery.isLoading} icon={<Package className="size-5" />} />
+          <StatCard label="Shipped" value={orderCount('SHIPPED')} loading={ordersQuery.isLoading} icon={<Truck className="size-5" />} />
+          <StatCard label="Delivered" value={orderCount('DELIVERED')} loading={ordersQuery.isLoading} icon={<PackageCheck className="size-5" />} />
         </div>
       ) : null}
 
