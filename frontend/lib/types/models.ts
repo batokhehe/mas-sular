@@ -37,6 +37,12 @@ export interface User {
   createdAt: string
 }
 
+export interface AddressRegionRef {
+  id: string
+  code: string
+  name: string
+}
+
 export interface Address {
   id: string
   userId: string
@@ -48,6 +54,17 @@ export interface Address {
   latitude: string
   longitude: string
   isDefault: boolean
+  // Indonesian administrative hierarchy (nullable — legacy addresses omit these).
+  addressDetail?: string | null
+  provinceId?: string | null
+  cityId?: string | null
+  districtId?: string | null
+  villageId?: string | null
+  postalCode?: string | null
+  province?: AddressRegionRef | null
+  city?: (AddressRegionRef & { type: 'CITY' | 'REGENCY' }) | null
+  district?: AddressRegionRef | null
+  village?: (AddressRegionRef & { postalCode: string | null }) | null
 }
 
 export interface Product {
@@ -67,6 +84,7 @@ export interface Product {
   status: ProductStatus
   stock: number
   categoryId: string
+  category?: Category // included by the catalog list/detail endpoints
 }
 
 export interface Category {
@@ -94,6 +112,20 @@ export interface Promo {
   discountAmount?: number | null
   minimumOrderAmount: number
   isActive: boolean
+}
+
+// Mirrors the backend Banner model returned by GET /cms/banners.
+export interface Banner {
+  id: string
+  title: string
+  description?: string | null
+  imageUrl: string
+  href?: string | null
+  placement: string
+  isActive: boolean
+  startsAt?: string | null
+  endsAt?: string | null
+  sortOrder: number
 }
 
 export interface CheckoutItem {

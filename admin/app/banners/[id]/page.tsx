@@ -8,6 +8,7 @@ import { AdminShell } from '@/components/layout/admin-shell';
 import { BannerForm, BannerFormValues } from '@/app/banners/components/banner-form';
 import { ROUTE_PERMISSIONS } from '@/lib/access';
 import { deleteAdminBanner, fetchAdminBanner, updateAdminBanner } from '@/lib/admin';
+import { ADMIN_LOADING_MESSAGES, ADMIN_SUCCESS_MESSAGES, confirmDelete, runWithFeedback } from '@/lib/admin-alert';
 
 export default function BannerDetailPage() {
   const params = useParams();
@@ -80,10 +81,19 @@ export default function BannerDetailPage() {
           initialValues={bannerQuery.data}
           onSubmit={async (values) => {
             if (!bannerId) return;
-            await updateBanner.mutateAsync({ id: bannerId, input: values });
+            await runWithFeedback({
+              loading: ADMIN_LOADING_MESSAGES.update,
+              success: ADMIN_SUCCESS_MESSAGES.updated,
+              action: () => updateBanner.mutateAsync({ id: bannerId, input: values }),
+            });
           }}
           onDelete={async () => {
-            await deleteBanner.mutateAsync();
+            await runWithFeedback({
+              confirm: () => confirmDelete('Banner'),
+              loading: ADMIN_LOADING_MESSAGES.delete,
+              success: ADMIN_SUCCESS_MESSAGES.deleted('Banner'),
+              action: () => deleteBanner.mutateAsync(),
+            });
           }}
           submitLabel={updateBanner.isPending ? 'Saving...' : 'Save Banner'}
           isSubmitting={updateBanner.isPending}

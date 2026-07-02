@@ -3,7 +3,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { uploadApi } from '@/lib/api/upload.api'
 import { paymentsApi } from '@/lib/api/payments.api'
-import { qk } from '@/lib/query/keys'
 
 type Mode = 'token' | 'auth'
 
@@ -33,7 +32,9 @@ export function useUploadReceipt(mode: Mode, ref: string) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['orders'] })
-      if (mode === 'token') qc.invalidateQueries({ queryKey: qk.uploadPage(ref) })
+      // Note: for token uploads we intentionally do NOT invalidate qk.uploadPage(ref).
+      // The token is now consumed; the page navigates to /payment/success on success,
+      // so re-fetching would only flash the "Link unavailable" error.
     },
   })
 }

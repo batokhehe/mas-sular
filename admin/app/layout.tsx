@@ -3,7 +3,7 @@ import './globals.css';
 import { Providers } from './providers';
 
 export const metadata: Metadata = {
-  title: 'Baso Nusantara Admin',
+  title: 'Bakso Mas Sular Admin',
   description: 'Admin CMS for ecommerce operations',
 };
 

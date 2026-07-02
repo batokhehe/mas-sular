@@ -10,6 +10,13 @@ export interface AddressInput {
   latitude: number
   longitude: number
   isDefault: boolean
+  // Indonesian administrative hierarchy (optional — backward compatible).
+  addressDetail?: string
+  provinceId?: string
+  cityId?: string
+  districtId?: string
+  villageId?: string
+  postalCode?: string
 }
 
 export type AddressUpdate = Partial<AddressInput>

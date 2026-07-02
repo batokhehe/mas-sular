@@ -7,6 +7,7 @@ import { AdminShell } from '@/components/layout/admin-shell';
 import { PromoForm, PromoFormValues } from '@/app/promos/components/promo-form';
 import { ROUTE_PERMISSIONS } from '@/lib/access';
 import { fetchAdminPromo, updateAdminPromo, deleteAdminPromo } from '@/lib/admin';
+import { ADMIN_LOADING_MESSAGES, ADMIN_SUCCESS_MESSAGES, confirmDelete, runWithFeedback } from '@/lib/admin-alert';
 
 export default function PromoDetailPage() {
   const router = useRouter();
@@ -74,12 +75,19 @@ export default function PromoDetailPage() {
         initialValues={promoQuery.data}
         onSubmit={async (values) => {
           if (!promoId) return;
-          await updatePromo.mutateAsync({ id: promoId, input: values });
-          return;
+          await runWithFeedback({
+            loading: ADMIN_LOADING_MESSAGES.update,
+            success: ADMIN_SUCCESS_MESSAGES.updated,
+            action: () => updatePromo.mutateAsync({ id: promoId, input: values }),
+          });
         }}
         onDelete={async () => {
-          await deletePromo.mutateAsync();
-          return;
+          await runWithFeedback({
+            confirm: () => confirmDelete('Voucher'),
+            loading: ADMIN_LOADING_MESSAGES.delete,
+            success: ADMIN_SUCCESS_MESSAGES.deleted('Voucher'),
+            action: () => deletePromo.mutateAsync(),
+          });
         }}
         submitLabel={updatePromo.isPending ? 'Save changes' : 'Save voucher'}
         isSubmitting={updatePromo.isPending}

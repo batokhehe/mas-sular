@@ -6,6 +6,7 @@ import { AdminShell } from '@/components/layout/admin-shell';
 import { BannerForm, BannerFormValues } from '@/app/banners/components/banner-form';
 import { ROUTE_PERMISSIONS } from '@/lib/access';
 import { createAdminBanner } from '@/lib/admin';
+import { ADMIN_LOADING_MESSAGES, ADMIN_SUCCESS_MESSAGES, runWithFeedback } from '@/lib/admin-alert';
 
 export default function NewBannerPage() {
   const router = useRouter();
@@ -27,7 +28,11 @@ export default function NewBannerPage() {
       </div>
       <BannerForm
         onSubmit={async (values) => {
-          await createBanner.mutateAsync(values);
+          await runWithFeedback({
+            loading: ADMIN_LOADING_MESSAGES.create,
+            success: ADMIN_SUCCESS_MESSAGES.created('Banner'),
+            action: () => createBanner.mutateAsync(values),
+          });
         }}
         submitLabel={createBanner.isPending ? 'Creating...' : 'Create Banner'}
         isSubmitting={createBanner.isPending}

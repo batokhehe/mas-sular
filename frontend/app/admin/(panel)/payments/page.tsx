@@ -7,16 +7,21 @@ import { useVerifyPayment } from '@/lib/query/hooks/use-verify-payment'
 import { useRejectPayment } from '@/lib/query/hooks/use-reject-payment'
 import { usePermissions } from '@/lib/auth/use-permissions'
 import { formatIDR } from '@/lib/utils/format'
+import {
+  confirmVerifyPayment,
+  confirmRejectPayment,
+  showLoading,
+  showSuccess,
+  showError,
+} from '@/lib/utils/admin-alert'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Textarea } from '@/components/ui/textarea'
 import { Empty } from '@/components/common/empty'
 import { ErrorState } from '@/components/common/error-state'
 import {
   Dialog,
   DialogContent,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -67,53 +72,6 @@ function ReceiptDialog({ url, orderNumber }: { url: string; orderNumber: string 
   )
 }
 
-function RejectDialog({
-  paymentId,
-  onReject,
-  pending,
-}: {
-  paymentId: string
-  onReject: (id: string, note?: string) => void
-  pending: boolean
-}) {
-  const [open, setOpen] = useState(false)
-  const [note, setNote] = useState('')
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button variant="destructive" size="sm" disabled={pending}>
-          <X className="mr-1 size-4" /> Reject
-        </Button>
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Reject payment</DialogTitle>
-        </DialogHeader>
-        <p className="text-sm text-muted-foreground">
-          This cancels the order and restores stock. Add an optional reason.
-        </p>
-        <Textarea placeholder="Reason (optional)" value={note} onChange={(e) => setNote(e.target.value)} />
-        <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)}>
-            Cancel
-          </Button>
-          <Button
-            variant="destructive"
-            disabled={pending}
-            onClick={() => {
-              onReject(paymentId, note || undefined)
-              setOpen(false)
-            }}
-          >
-            {pending ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
-            Confirm reject
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
 export default function AdminPaymentsPage() {
   const { can } = usePermissions()
   const [status, setStatus] = useState<PaymentStatus>('WAITING_VERIFICATION')
@@ -128,6 +86,29 @@ export default function AdminPaymentsPage() {
   const payments: Payment[] = data ?? []
   const isVerifying = (id: string) => verify.isPending && verify.variables?.id === id
   const isRejecting = (id: string) => reject.isPending && reject.variables?.id === id
+
+  async function handleVerify(id: string) {
+    if (!(await confirmVerifyPayment())) return
+    showLoading()
+    try {
+      await verify.mutateAsync({ id })
+      await showSuccess('Payment Verified', 'Order has moved to PROCESSING.')
+    } catch (error) {
+      await showError(error)
+    }
+  }
+
+  async function handleReject(id: string) {
+    const { confirmed, note } = await confirmRejectPayment()
+    if (!confirmed) return
+    showLoading()
+    try {
+      await reject.mutateAsync({ id, note })
+      await showSuccess('Payment Rejected', 'Inventory has been restored.')
+    } catch (error) {
+      await showError(error)
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -189,11 +170,7 @@ export default function AdminPaymentsPage() {
                         <ReceiptDialog url={p.manualReceiptUrl} orderNumber={p.order?.orderNumber ?? p.id} />
                       ) : null}
                       {UPLOADABLE.has(p.status) && can('Payment.verify') ? (
-                        <Button
-                          size="sm"
-                          disabled={isVerifying(p.id)}
-                          onClick={() => verify.mutate({ id: p.id })}
-                        >
+                        <Button size="sm" disabled={isVerifying(p.id)} onClick={() => handleVerify(p.id)}>
                           {isVerifying(p.id) ? (
                             <Loader2 className="mr-1 size-4 animate-spin" />
                           ) : (
@@ -203,11 +180,19 @@ export default function AdminPaymentsPage() {
                         </Button>
                       ) : null}
                       {UPLOADABLE.has(p.status) && can('Payment.reject') ? (
-                        <RejectDialog
-                          paymentId={p.id}
-                          pending={isRejecting(p.id)}
-                          onReject={(id, note) => reject.mutate({ id, note })}
-                        />
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          disabled={isRejecting(p.id)}
+                          onClick={() => handleReject(p.id)}
+                        >
+                          {isRejecting(p.id) ? (
+                            <Loader2 className="mr-1 size-4 animate-spin" />
+                          ) : (
+                            <X className="mr-1 size-4" />
+                          )}
+                          Reject
+                        </Button>
                       ) : null}
                     </div>
                   </TableCell>

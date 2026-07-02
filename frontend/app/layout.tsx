@@ -17,11 +17,11 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'Baso Nusantara - Premium Indonesian Meatballs',
+  title: 'Bakso Mas Sular - Premium Indonesian Meatballs',
   description: 'Order delicious premium Indonesian meatballs online. Fresh bakso urat, bakso mercon, bakso keju delivered to your door.',
   keywords: ['bakso', 'meatball', 'indonesian food', 'baso urat', 'delivery'],
   openGraph: {
-    title: 'Baso Nusantara - Premium Indonesian Meatballs',
+    title: 'Bakso Mas Sular - Premium Indonesian Meatballs',
     description: 'Order delicious premium Indonesian meatballs online.',
     type: 'website',
   },

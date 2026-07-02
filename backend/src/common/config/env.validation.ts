@@ -50,6 +50,28 @@ const baseSchema = z
     PAYMENT_SECOND_REMINDER_MS: z.coerce.number().int().positive().optional(),
     PAYMENT_EXPIRY_MS: z.coerce.number().int().positive().optional(),
     PAYMENT_GATEWAY_EXPIRY_MS: z.coerce.number().int().nonnegative().optional(),
+
+    // Phase 13A — httpOnly auth cookies. All optional; cookie behavior is env-driven.
+    COOKIE_DOMAIN: z.string().optional(),
+    COOKIE_SECURE: z.enum(['true', 'false']).optional(),
+    COOKIE_SAMESITE: z.enum(['lax', 'strict', 'none']).optional(),
+    // Phase 13A.4 — gates the JWT cookie extractors. Default false → behavior is
+    // identical to pre-13A.4 production (Bearer-only). Flip to true to accept cookies.
+    AUTH_COOKIE_EXTRACTOR_ENABLED: boolFlag,
+    // Phase 13A.6 — stateless double-submit CSRF rollout. off (default) → no
+    // validation, report → log-only, enforce → 403 on mismatch.
+    CSRF_MODE: z.enum(['off', 'report', 'enforce']).default('off'),
+
+    // WhatsApp (Mekari Qontak) notifications. Required (cross-field below) only when
+    // the sender is enabled and the provider routes WhatsApp. No bank data in env.
+    NOTIFICATION_PROVIDER: z.enum(['multi', 'email', 'qontak']).default('multi'),
+    QONTAK_API_TOKEN: z.string().optional(),
+    QONTAK_CHANNEL_INTEGRATION_ID: z.string().optional(),
+    QONTAK_ORDER_TEMPLATE_ID: z.string().optional(),
+    QONTAK_COD_TEMPLATE_ID: z.string().optional(),
+    QONTAK_BASE_URL: z.string().url('QONTAK_BASE_URL must be a valid URL').optional(),
+    QONTAK_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
+    QONTAK_MAX_RETRY: z.coerce.number().int().nonnegative().optional(),
   })
   .passthrough(); // tolerate the many optional tuning vars (OUTBOX_*, NOTIFICATION_SENDER_*, RETENTION_*, ...)
 
@@ -74,6 +96,21 @@ export const envSchema = baseSchema.superRefine((env, ctx) => {
   if (env.NOTIFICATION_SENDER_ENABLED === 'true') {
     if (!env.RESEND_API_KEY) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['RESEND_API_KEY'], message: 'RESEND_API_KEY is required when NOTIFICATION_SENDER_ENABLED=true' });
     if (!env.EMAIL_FROM) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['EMAIL_FROM'], message: 'EMAIL_FROM is required when NOTIFICATION_SENDER_ENABLED=true' });
+
+    // Qontak credentials required when WhatsApp is routable (provider multi|qontak).
+    const provider = (env.NOTIFICATION_PROVIDER as string | undefined) ?? 'multi';
+    if (provider !== 'email') {
+      for (const key of ['QONTAK_API_TOKEN', 'QONTAK_CHANNEL_INTEGRATION_ID', 'QONTAK_ORDER_TEMPLATE_ID', 'QONTAK_COD_TEMPLATE_ID'] as const) {
+        if (!env[key]) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: `${key} is required when NOTIFICATION_SENDER_ENABLED=true and NOTIFICATION_PROVIDER=${provider}` });
+        }
+      }
+    }
+  }
+
+  // Browsers reject SameSite=None cookies unless they are also Secure.
+  if (env.COOKIE_SAMESITE === 'none' && env.COOKIE_SECURE !== 'true') {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['COOKIE_SECURE'], message: 'COOKIE_SECURE must be "true" when COOKIE_SAMESITE=none' });
   }
 
   // Payment timing must be strictly increasing so reminders precede expiry.

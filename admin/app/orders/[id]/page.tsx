@@ -10,6 +10,8 @@ import { Button } from '@/components/ui/button';
 import { Card, CardTitle } from '@/components/ui/card';
 import { ROUTE_PERMISSIONS } from '@/lib/access';
 import { fetchAdminOrder, updateAdminOrderStatus, AdminOrderDetail } from '@/lib/admin';
+import { formatAdminAddressLine } from '@/lib/format-address';
+import { ADMIN_LOADING_MESSAGES, ADMIN_SUCCESS_MESSAGES, confirmStatusChange, runWithFeedback } from '@/lib/admin-alert';
 
 const orderStatusOptions = ['PROCESSING', 'DELIVERING', 'COMPLETED', 'CANCELLED'] as const;
 
@@ -113,6 +115,19 @@ export default function OrderDetailPage() {
                 ) : null}
               </div>
             ) : null}
+
+            {order.address ? (
+              <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                <p className="text-xs uppercase text-gray-400">Delivery Address</p>
+                <p className="mt-2 font-medium text-gray-900">
+                  {order.address.recipientName} • {order.address.phone}
+                </p>
+                <p className="text-sm text-gray-500">{formatAdminAddressLine(order.address)}</p>
+                {order.address.notes ? (
+                  <p className="mt-1 text-sm text-gray-500">Notes: {order.address.notes}</p>
+                ) : null}
+              </div>
+            ) : null}
           </div>
 
           <div className="mt-8">
@@ -173,16 +188,19 @@ export default function OrderDetailPage() {
               </div>
 
               <Button
-                onClick={() => statusMutation.mutate()}
+                onClick={() => {
+                  void runWithFeedback({
+                    confirm: () => confirmStatusChange(order.status, nextStatus, { title: 'Update Order Status?' }),
+                    loading: ADMIN_LOADING_MESSAGES.statusUpdate,
+                    success: ADMIN_SUCCESS_MESSAGES.orderStatusUpdated,
+                    action: () => statusMutation.mutateAsync(),
+                  });
+                }}
                 disabled={statusMutation.isPending}
                 className="w-full"
               >
                 {statusMutation.isPending ? 'Updating...' : 'Update Order Status'}
               </Button>
-
-              {statusMutation.isError ? (
-                <p className="text-sm text-red-600">Unable to update order status. Please try again.</p>
-              ) : null}
             </PermissionGate>
           </div>
 

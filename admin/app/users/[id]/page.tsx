@@ -9,6 +9,8 @@ import { Button } from '@/components/ui/button';
 import { Card, CardTitle } from '@/components/ui/card';
 import { ROUTE_PERMISSIONS } from '@/lib/access';
 import { fetchAdminRoles, fetchAdminUser, updateAdminUser, AdminRole, AdminUserDetail } from '@/lib/admin';
+import { formatAdminAddressLine } from '@/lib/format-address';
+import { ADMIN_LOADING_MESSAGES, ADMIN_SUCCESS_MESSAGES, confirmStatusChange, confirmUpdate, runWithFeedback } from '@/lib/admin-alert';
 
 export default function UserDetailPage() {
   const params = useParams();
@@ -56,7 +58,20 @@ export default function UserDetailPage() {
 
   const handleSave = async () => {
     if (!userId) return;
-    await updateUser.mutateAsync({ id: userId, input: { isActive, roleIds: selectedRoleIds } });
+    // Activate/Deactivate confirm shows the status transition; pure role edits use a generic save confirm.
+    const wasActive = data?.isActive;
+    const activeChanged = wasActive !== undefined && wasActive !== isActive;
+    await runWithFeedback({
+      confirm: () =>
+        activeChanged
+          ? confirmStatusChange(wasActive ? 'Active' : 'Disabled', isActive ? 'Active' : 'Disabled', {
+              title: isActive ? 'Activate User?' : 'Deactivate User?',
+            })
+          : confirmUpdate({ title: 'Save changes?' }),
+      loading: ADMIN_LOADING_MESSAGES.update,
+      success: ADMIN_SUCCESS_MESSAGES.updated,
+      action: () => updateUser.mutateAsync({ id: userId, input: { isActive, roleIds: selectedRoleIds } }),
+    });
   };
 
   if (isLoading || rolesQuery.isLoading) {
@@ -166,12 +181,31 @@ export default function UserDetailPage() {
             <Button onClick={handleSave} disabled={updateUser.isPending} className="w-full">
               {updateUser.isPending ? 'Saving...' : 'Save Changes'}
             </Button>
-            {updateUser.isError ? (
-              <p className="text-sm text-red-600">Unable to update user. Please try again.</p>
-            ) : null}
           </div>
         </Card>
       </div>
+
+      <Card className="mt-6">
+        <CardTitle>Saved Addresses</CardTitle>
+        <div className="mt-4 space-y-3">
+          {data.addresses.length === 0 ? (
+            <p className="p-6 text-sm text-gray-500">This user has no saved addresses.</p>
+          ) : (
+            data.addresses.map((address) => (
+              <div key={address.id} className="rounded-2xl border border-gray-200 p-4">
+                <div className="flex items-center gap-2">
+                  <p className="font-medium text-gray-900">{address.label}</p>
+                  <span className="text-sm text-gray-500">
+                    {address.recipientName} • {address.phone}
+                  </span>
+                </div>
+                <p className="mt-1 text-sm text-gray-500">{formatAdminAddressLine(address)}</p>
+                {address.notes ? <p className="mt-1 text-xs text-gray-400">Notes: {address.notes}</p> : null}
+              </div>
+            ))
+          )}
+        </div>
+      </Card>
 
       <Card className="mt-6">
         <CardTitle>Order History</CardTitle>

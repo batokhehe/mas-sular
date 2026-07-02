@@ -1,0 +1,11 @@
+node_modules/
+reports/html/
+reports/results.json
+artifacts/test-output/
+artifacts/.auth/
+artifacts/screenshots/*
+artifacts/traces/*
+artifacts/videos/*
+artifacts/logs/*
+!artifacts/**/.gitkeep
+test-results/

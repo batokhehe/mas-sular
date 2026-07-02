@@ -5,6 +5,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { AdminShell } from '@/components/layout/admin-shell';
 import { ROUTE_PERMISSIONS } from '@/lib/access';
 import { fetchAdminPermissions, createAdminRole } from '@/lib/admin';
+import { ADMIN_LOADING_MESSAGES, ADMIN_SUCCESS_MESSAGES, runWithFeedback } from '@/lib/admin-alert';
 import { RoleForm } from '../components/role-form';
 
 export default function NewRolePage() {
@@ -41,7 +42,11 @@ export default function NewRolePage() {
           submitLabel="Create Role"
           isSubmitting={createRole.isPending}
           onSubmit={async (values) => {
-            await createRole.mutateAsync({ name: values.name, description: values.description, permissionIds: values.permissionIds });
+            await runWithFeedback({
+              loading: ADMIN_LOADING_MESSAGES.create,
+              success: ADMIN_SUCCESS_MESSAGES.created('Role'),
+              action: () => createRole.mutateAsync({ name: values.name, description: values.description, permissionIds: values.permissionIds }),
+            });
           }}
         />
       )}

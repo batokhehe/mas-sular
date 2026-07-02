@@ -4,7 +4,7 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  /* Baso Nusantara Theme - Red, Cream, White */
+  /* Bakso Mas Sular Theme - Red, Cream, White */
   --background: oklch(0.98 0.005 60);
   --foreground: oklch(0.18 0.02 30);
   --card: oklch(1 0 0);

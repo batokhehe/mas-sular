@@ -24,6 +24,7 @@ import {
   useDeleteAddress,
 } from '@/lib/query/hooks/use-addresses'
 import type { Address } from '@/lib/types/models'
+import { formatAddressLine } from '@/lib/address/format-address'
 
 export default function AddressBookPage() {
   const { data, isLoading, isError, refetch } = useAddresses()
@@ -95,7 +96,7 @@ export default function AddressBookPage() {
                   <p className="text-sm">
                     {address.recipientName} · {address.phone}
                   </p>
-                  <p className="text-sm text-muted-foreground">{address.fullAddress}</p>
+                  <p className="text-sm text-muted-foreground">{formatAddressLine(address)}</p>
                   {address.notes ? <p className="text-xs text-muted-foreground">Notes: {address.notes}</p> : null}
                 </div>
                 <div className="flex shrink-0 items-center gap-1">

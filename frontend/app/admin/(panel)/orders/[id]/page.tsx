@@ -3,7 +3,6 @@
 import { useState } from 'react'
 import { useParams } from 'next/navigation'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
 import { Loader2 } from 'lucide-react'
 import { adminApi } from '@/lib/api/admin.api'
 import { qk } from '@/lib/query/keys'
@@ -17,6 +16,7 @@ import {
   paymentStatusVariant,
   shipmentStatusVariant,
 } from '@/lib/utils/status'
+import { confirmStatusChange, confirmCreate, confirmUpdate, showLoading, showSuccess, showError } from '@/lib/utils/admin-alert'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -54,10 +54,8 @@ export default function AdminOrderDetailPage() {
 
   const setStatus = useMutation({
     mutationFn: (status: OrderStatus) => adminApi.updateOrderStatus(id, { status }),
-    onSuccess: () => {
-      toast.success('Order status updated')
-      invalidate()
-    },
+    meta: { suppressGlobalError: true },
+    onSuccess: invalidate,
   })
 
   if (!can('Order.read')) return <ErrorState title="No access" description="You cannot view orders." />
@@ -66,6 +64,18 @@ export default function AdminOrderDetailPage() {
 
   const nextStatuses = NEXT_ORDER_STATUS[order.status] ?? []
   const canCancel = CANCELLABLE_ORDER_STATUS.has(order.status)
+
+  async function changeStatus(next: OrderStatus, opts?: { title?: string }) {
+    if (!order) return
+    if (!(await confirmStatusChange(order.status, next, { title: opts?.title }))) return
+    showLoading()
+    try {
+      await setStatus.mutateAsync(next)
+      await showSuccess('Success', 'Order updated successfully')
+    } catch (error) {
+      await showError(error)
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -84,7 +94,7 @@ export default function AdminOrderDetailPage() {
         {can('Order.update') ? (
           <div className="flex flex-wrap gap-2">
             {nextStatuses.map((next) => (
-              <Button key={next} size="sm" disabled={setStatus.isPending} onClick={() => setStatus.mutate(next)}>
+              <Button key={next} size="sm" disabled={setStatus.isPending} onClick={() => changeStatus(next)}>
                 {setStatus.isPending ? <Loader2 className="mr-1 size-4 animate-spin" /> : null}
                 Mark as {next}
               </Button>
@@ -94,7 +104,7 @@ export default function AdminOrderDetailPage() {
                 size="sm"
                 variant="destructive"
                 disabled={setStatus.isPending}
-                onClick={() => setStatus.mutate('CANCELLED')}
+                onClick={() => changeStatus('CANCELLED', { title: 'Cancel Order?' })}
               >
                 Cancel order
               </Button>
@@ -187,23 +197,59 @@ function ShipmentSection({
 }) {
   const create = useMutation({
     mutationFn: (body: Record<string, unknown>) => adminApi.createShipment(body),
-    onSuccess: () => {
-      toast.success('Shipment created')
-      onChange()
-    },
+    meta: { suppressGlobalError: true },
+    onSuccess: onChange,
   })
   const update = useMutation({
     mutationFn: (body: Record<string, unknown>) => adminApi.updateShipment(shipment!.id, body),
-    onSuccess: () => {
-      toast.success('Shipment updated')
-      onChange()
-    },
+    meta: { suppressGlobalError: true },
+    onSuccess: onChange,
   })
 
   const [provider, setProvider] = useState('')
   const [service, setService] = useState('')
   const [cost, setCost] = useState('')
   const [tracking, setTracking] = useState(shipment?.trackingNumber ?? '')
+
+  async function handleCreate() {
+    if (!(await confirmCreate())) return
+    showLoading()
+    try {
+      await create.mutateAsync({
+        orderId,
+        provider,
+        service,
+        cost: Number(cost) || 0,
+        trackingNumber: tracking || undefined,
+      })
+      await showSuccess('Success', 'Shipment created successfully')
+    } catch (error) {
+      await showError(error)
+    }
+  }
+
+  async function handleSaveTracking() {
+    if (!(await confirmUpdate())) return
+    showLoading()
+    try {
+      await update.mutateAsync({ trackingNumber: tracking || undefined })
+      await showSuccess('Success', 'Shipment updated successfully')
+    } catch (error) {
+      await showError(error)
+    }
+  }
+
+  async function handleStatusChange(next: ShipmentStatus) {
+    if (!shipment || next === shipment.status) return
+    if (!(await confirmStatusChange(shipment.status, next, { title: 'Update Shipment Status?' }))) return
+    showLoading()
+    try {
+      await update.mutateAsync({ status: next })
+      await showSuccess('Success', 'Shipment updated successfully')
+    } catch (error) {
+      await showError(error)
+    }
+  }
 
   return (
     <Card className="space-y-3 p-5">
@@ -224,16 +270,12 @@ function ShipmentSection({
                 <Label htmlFor="tracking">Tracking number</Label>
                 <Input id="tracking" value={tracking} onChange={(e) => setTracking(e.target.value)} />
               </div>
-              <Button
-                variant="outline"
-                disabled={update.isPending}
-                onClick={() => update.mutate({ trackingNumber: tracking || undefined })}
-              >
+              <Button variant="outline" disabled={update.isPending} onClick={handleSaveTracking}>
                 Save tracking
               </Button>
               <div className="space-y-1.5">
                 <Label>Status</Label>
-                <Select value={shipment.status} onValueChange={(v) => update.mutate({ status: v as ShipmentStatus })}>
+                <Select value={shipment.status} onValueChange={(v) => handleStatusChange(v as ShipmentStatus)}>
                   <SelectTrigger className="w-44">
                     <SelectValue />
                   </SelectTrigger>
@@ -268,18 +310,7 @@ function ShipmentSection({
             <Input id="ctracking" value={tracking} onChange={(e) => setTracking(e.target.value)} />
           </div>
           <div className="sm:col-span-2">
-            <Button
-              disabled={create.isPending || !provider || !service}
-              onClick={() =>
-                create.mutate({
-                  orderId,
-                  provider,
-                  service,
-                  cost: Number(cost) || 0,
-                  trackingNumber: tracking || undefined,
-                })
-              }
-            >
+            <Button disabled={create.isPending || !provider || !service} onClick={handleCreate}>
               {create.isPending ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
               Create shipment
             </Button>

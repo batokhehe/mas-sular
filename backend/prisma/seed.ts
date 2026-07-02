@@ -55,7 +55,7 @@ async function main(): Promise<void> {
         slug,
         sku: slug.toUpperCase().replaceAll('-', '_'),
         name,
-        description: `${name} premium Baso Nusantara dengan bahan berkualitas dan rasa autentik.`,
+        description: `${name} premium Bakso Mas Sular dengan bahan berkualitas dan rasa autentik.`,
         price,
         originalPrice,
         imageUrl,
@@ -152,6 +152,10 @@ async function main(): Promise<void> {
     { subject: 'Role', action: 'create' },
     { subject: 'Role', action: 'update' },
     { subject: 'Role', action: 'delete' },
+    { subject: 'DeliveryCoverage', action: 'read' },
+    { subject: 'DeliveryCoverage', action: 'create' },
+    { subject: 'DeliveryCoverage', action: 'update' },
+    { subject: 'DeliveryCoverage', action: 'delete' },
     { subject: 'dashboard', action: 'view' },
     { subject: 'products', action: 'view' },
     { subject: 'products', action: 'create' },
@@ -168,7 +172,27 @@ async function main(): Promise<void> {
     { subject: 'roles', action: 'create' },
     { subject: 'roles', action: 'update' },
     { subject: 'roles', action: 'delete' },
+    { subject: 'paymentAccounts', action: 'view' },
+    { subject: 'paymentAccounts', action: 'create' },
+    { subject: 'paymentAccounts', action: 'update' },
+    { subject: 'paymentAccounts', action: 'delete' },
+    { subject: 'paymentAccounts', action: 'activate' },
   ];
+
+  // One active, visible payment account so checkout WhatsApp notifications resolve.
+  await prisma.paymentAccount.upsert({
+    where: { accountNumber: '1234567890' },
+    update: {},
+    create: {
+      bankName: 'BCA',
+      bankCode: '014',
+      accountName: 'Bakso Mas Sular',
+      accountNumber: '1234567890',
+      isActive: true,
+      isVisible: true,
+      displayOrder: 0,
+    },
+  });
 
   const dbPermissions = [];
   for (const perm of permissionsList) {

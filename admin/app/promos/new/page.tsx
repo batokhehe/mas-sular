@@ -6,6 +6,7 @@ import { AdminShell } from '@/components/layout/admin-shell';
 import { PromoForm, PromoFormValues } from '@/app/promos/components/promo-form';
 import { ROUTE_PERMISSIONS } from '@/lib/access';
 import { createAdminPromo } from '@/lib/admin';
+import { ADMIN_LOADING_MESSAGES, ADMIN_SUCCESS_MESSAGES, runWithFeedback } from '@/lib/admin-alert';
 
 export default function NewPromoPage() {
   const router = useRouter();
@@ -27,7 +28,11 @@ export default function NewPromoPage() {
       </div>
       <PromoForm
         onSubmit={async (values) => {
-          await createPromo.mutateAsync(values);
+          await runWithFeedback({
+            loading: ADMIN_LOADING_MESSAGES.create,
+            success: ADMIN_SUCCESS_MESSAGES.created('Voucher'),
+            action: () => createPromo.mutateAsync(values),
+          });
         }}
         submitLabel={createPromo.isPending ? 'Creating...' : 'Create Voucher'}
         isSubmitting={createPromo.isPending}

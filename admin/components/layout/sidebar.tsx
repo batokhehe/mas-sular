@@ -10,6 +10,7 @@ import {
   Image,
   LayoutDashboard,
   Layers,
+  MapPinned,
   Shield,
   Truck,
   Users,
@@ -29,6 +30,7 @@ const sections = [
       { href: '/orders', label: 'Orders', icon: ClipboardList, permissions: ROUTE_PERMISSIONS.orders },
       { href: '/payments', label: 'Order Verification', icon: CreditCard, permissions: ROUTE_PERMISSIONS.payments },
       { href: '/shipping', label: 'Shipping', icon: Truck, permissions: ROUTE_PERMISSIONS.shipments },
+      { href: '/delivery-coverage', label: 'Delivery Coverage', icon: MapPinned, permissions: ROUTE_PERMISSIONS.deliveryCoverage },
       { href: '/promos', label: 'Voucher', icon: Gift, permissions: ROUTE_PERMISSIONS.promos },
     ],
   },
@@ -37,6 +39,7 @@ const sections = [
     items: [
       { href: '/users', label: 'Users', icon: Users, permissions: ROUTE_PERMISSIONS.users },
       { href: '/roles', label: 'Roles & Permissions', icon: Shield, permissions: ROUTE_PERMISSIONS.roles },
+      { href: '/payment-accounts', label: 'Payment Accounts', icon: CreditCard, permissions: ROUTE_PERMISSIONS.paymentAccounts },
     ],
   },
 ];
@@ -55,9 +58,9 @@ export function Sidebar() {
   return (
     <aside className="fixed inset-y-0 left-0 hidden w-[290px] border-r border-gray-200 bg-white md:block">
       <div className="flex h-16 items-center border-b border-gray-200 px-6">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#465fff] font-bold text-white">BN</div>
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#465fff] font-bold text-white">BMS</div>
         <div className="ml-3">
-          <span className="block font-semibold text-gray-900">Baso Nusantara</span>
+          <span className="block font-semibold text-gray-900">Bakso Mas Sular</span>
           <span className="text-xs text-gray-500">Admin CMS</span>
         </div>
       </div>

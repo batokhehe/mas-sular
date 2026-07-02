@@ -25,5 +25,14 @@ export const ROUTE_PERMISSIONS = {
   roles: ['Role.read'],
   roleCreate: ['Role.create'],
   roleUpdate: ['Role.update'],
+  paymentAccounts: ['PaymentAccount.read'],
+  paymentAccountCreate: ['PaymentAccount.create'],
+  paymentAccountUpdate: ['PaymentAccount.update'],
+  paymentAccountDelete: ['PaymentAccount.delete'],
+  paymentAccountActivate: ['PaymentAccount.activate'],
+  deliveryCoverage: ['DeliveryCoverage.read'],
+  deliveryCoverageCreate: ['DeliveryCoverage.create'],
+  deliveryCoverageUpdate: ['DeliveryCoverage.update'],
+  deliveryCoverageDelete: ['DeliveryCoverage.delete'],
 } as const;
 

@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardTitle } from '@/components/ui/card';
 import Image from 'next/image';
 import { uploadImage } from '@/lib/upload';
+import { showError } from '@/lib/admin-alert';
 
 interface ProductFormProps {
   categories: AdminCategory[];
@@ -109,7 +110,7 @@ export function ProductForm({
       setImagePreview(response.url);
     } catch (error) {
       console.error(error);
-      alert('Failed to upload image');
+      void showError(error);
     } finally {
       setIsUploading(false);
     }
@@ -121,7 +122,7 @@ export function ProductForm({
     event.preventDefault();
 
     if (!values.imageUrl) {
-      alert('Please upload an image first');
+      void showError(new Error('Please upload an image first'));
       return;
     }
 
@@ -307,12 +308,7 @@ export function ProductForm({
     focus:ring-red-500
   "
               onClick={async () => {
-                const confirmed = window.confirm(
-                  'Are you sure you want to delete this product? This action cannot be undone.'
-                );
-
-                if (!confirmed) return;
-
+                // Confirmation is handled by the page's onDelete (SweetAlert confirmDelete).
                 await onDelete?.();
               }}
             >

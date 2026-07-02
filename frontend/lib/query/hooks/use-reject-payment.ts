@@ -1,16 +1,18 @@
 'use client'
 
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
 import { adminApi } from '@/lib/api/admin.api'
 import { qk } from '@/lib/query/keys'
 
+// Feedback (success/error) is presented by the calling admin page via SweetAlert,
+// so this hook only performs the mutation + cache invalidation and opts out of the
+// global error toast.
 export function useRejectPayment() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ id, note }: { id: string; note?: string }) => adminApi.rejectPayment(id, note),
+    meta: { suppressGlobalError: true },
     onSuccess: (_data, { id }) => {
-      toast.success('Payment rejected')
       qc.invalidateQueries({ queryKey: ['admin', 'payments'] })
       qc.invalidateQueries({ queryKey: qk.admin.order(id) })
     },

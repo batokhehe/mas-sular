@@ -56,24 +56,24 @@ enum VoucherType {
 }
 
 model User {
-  id                 String         @id @default(uuid())
-  googleId           String?        @unique
-  email              String         @unique
-  name               String
-  avatarUrl          String?
-  phone              String?
-  isOnboarded        Boolean        @default(false)
-  isActive           Boolean        @default(true)
-  roles              UserRole[]
-  addresses          Address[]
-  orders             Order[]
-  refreshTokens      RefreshToken[]
-  favorites          Favorite[]
-  auditLogs          AuditLog[]     @relation("AuditActor")
-  voucherUsages      VoucherUsage[]
-  createdAt          DateTime       @default(now())
-  updatedAt          DateTime       @updatedAt
-  deletedAt          DateTime?
+  id            String         @id @default(uuid())
+  googleId      String?        @unique
+  email         String         @unique
+  name          String
+  avatarUrl     String?
+  phone         String?
+  isOnboarded   Boolean        @default(false)
+  isActive      Boolean        @default(true)
+  roles         UserRole[]
+  addresses     Address[]
+  orders        Order[]
+  refreshTokens RefreshToken[]
+  favorites     Favorite[]
+  auditLogs     AuditLog[]     @relation("AuditActor")
+  voucherUsages VoucherUsage[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  deletedAt     DateTime?
 
   @@index([email])
   @@index([deletedAt])
@@ -92,7 +92,7 @@ model Admin {
 
 model Role {
   id          String           @id @default(uuid())
-  name        String         @unique
+  name        String           @unique
   description String?
   users       UserRole[]
   admins      AdminRole[]
@@ -139,38 +139,160 @@ model RolePermission {
 }
 
 model RefreshToken {
-  id          String    @id @default(uuid())
-  userId      String
-  tokenHash   String    @db.VarChar(255)
-  familyId    String
-  revokedAt   DateTime?
-  expiresAt   DateTime
-  createdAt   DateTime  @default(now())
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String    @db.VarChar(255)
+  familyId  String
+  revokedAt DateTime?
+  expiresAt DateTime
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, familyId])
   @@index([expiresAt])
 }
 
 model Address {
-  id            String    @id @default(uuid())
+  id            String  @id @default(uuid())
   userId        String
   label         String
   recipientName String
   phone         String
-  fullAddress   String    @db.Text
+  fullAddress   String  @db.Text
   notes         String?
-  latitude      Decimal   @db.Decimal(10, 7)
-  longitude     Decimal   @db.Decimal(10, 7)
-  isDefault     Boolean   @default(false)
-  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  latitude      Decimal @db.Decimal(10, 7)
+  longitude     Decimal @db.Decimal(10, 7)
+  isDefault     Boolean @default(false)
+  user          User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   orders        Order[]
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  deletedAt     DateTime?
+
+  // --- Indonesian administrative hierarchy (additive; all nullable for backward
+  // compatibility — legacy addresses keep fullAddress and leave these null). ---
+  addressDetail String?   @db.Text
+  provinceId    String?
+  cityId        String?
+  districtId    String?
+  villageId     String?
+  postalCode    String?   @db.VarChar(5)
+  province      Province? @relation(fields: [provinceId], references: [id])
+  city          City?     @relation(fields: [cityId], references: [id])
+  district      District? @relation(fields: [districtId], references: [id])
+  village       Village?  @relation(fields: [villageId], references: [id])
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
   @@index([userId, isDefault])
   @@index([deletedAt])
+  @@index([provinceId])
+  @@index([cityId])
+  @@index([districtId])
+  @@index([villageId])
+}
+
+// ---------------- Indonesian administrative master data ----------------
+
+enum CityType {
+  CITY
+  REGENCY
+}
+
+model Province {
+  id                String             @id @default(uuid())
+  code              String             @unique
+  name              String
+  isActive          Boolean            @default(true)
+  cities            City[]
+  addresses         Address[]
+  deliveryCoverages DeliveryCoverage[]
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  @@index([name])
+}
+
+model City {
+  id                String             @id @default(uuid())
+  provinceId        String
+  code              String             @unique
+  name              String
+  type              CityType           @default(CITY)
+  isActive          Boolean            @default(true)
+  province          Province           @relation(fields: [provinceId], references: [id], onDelete: Cascade)
+  districts         District[]
+  addresses         Address[]
+  deliveryCoverages DeliveryCoverage[]
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  @@index([provinceId])
+  @@index([name])
+}
+
+model District {
+  id                String             @id @default(uuid())
+  cityId            String
+  code              String             @unique
+  name              String
+  isActive          Boolean            @default(true)
+  city              City               @relation(fields: [cityId], references: [id], onDelete: Cascade)
+  villages          Village[]
+  addresses         Address[]
+  deliveryCoverages DeliveryCoverage[]
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  @@index([cityId])
+  @@index([name])
+}
+
+model Village {
+  id                String             @id @default(uuid())
+  districtId        String
+  code              String             @unique
+  name              String
+  postalCode        String?            @db.VarChar(5)
+  isActive          Boolean            @default(true)
+  district          District           @relation(fields: [districtId], references: [id], onDelete: Cascade)
+  addresses         Address[]
+  deliveryCoverages DeliveryCoverage[]
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  @@index([districtId])
+  @@index([name])
+  @@index([postalCode])
+}
+
+enum CoverageType {
+  DELIVERY
+  PICKUP_ONLY
+  DISABLED
+}
+
+model DeliveryCoverage {
+  id               String       @id @default(uuid())
+  provinceId       String
+  cityId           String
+  districtId       String?
+  villageId        String?
+  coverageType     CoverageType @default(DELIVERY)
+  deliveryFee      Int          @default(0)
+  minimumOrder     Int          @default(0)
+  estimatedMinutes Int          @default(60)
+  isActive         Boolean      @default(true)
+  province         Province     @relation(fields: [provinceId], references: [id])
+  city             City         @relation(fields: [cityId], references: [id])
+  district         District?    @relation(fields: [districtId], references: [id])
+  village          Village?     @relation(fields: [villageId], references: [id])
+  orders           Order[]
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  // Lookup index for the village→district→city resolution walk.
+  @@index([provinceId, cityId, districtId, villageId])
+  @@index([isActive])
 }
 
 model Category {
@@ -215,48 +337,48 @@ model Product {
 }
 
 model Topping {
-  id        String             @id @default(uuid())
-  name      String
-  price     Int
-  isActive  Boolean            @default(true)
+  id         String             @id @default(uuid())
+  name       String
+  price      Int
+  isActive   Boolean            @default(true)
   orderItems OrderItemTopping[]
-  createdAt DateTime           @default(now())
-  updatedAt DateTime           @updatedAt
-  deletedAt DateTime?
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+  deletedAt  DateTime?
 }
 
 model Favorite {
   userId    String
   productId String
-  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
 
   @@id([userId, productId])
 }
 
 model Promo {
-  id                    String       @id @default(uuid())
-  code                  String       @unique
+  id                    String         @id @default(uuid())
+  code                  String         @unique
   title                 String
-  description           String       @db.Text
+  description           String         @db.Text
   imageUrl              String?
-  voucherType           VoucherType  @default(PERCENTAGE_DISCOUNT)
-  discountPercentage    Int?         @db.UnsignedInt
-  discountAmount        Int?         @db.UnsignedInt
-  maxDiscountAmount     Int?         @db.UnsignedInt
-  freeShippingMaxAmount Int?         @db.UnsignedInt
-  minimumOrderAmount    Int          @default(0)
-  maxUsageCount         Int?         @db.UnsignedInt
-  currentUsageCount     Int          @default(0)
-  isNewUserOnly         Boolean      @default(false)
-  isActive              Boolean      @default(true)
+  voucherType           VoucherType    @default(PERCENTAGE_DISCOUNT)
+  discountPercentage    Int?           @db.UnsignedInt
+  discountAmount        Int?           @db.UnsignedInt
+  maxDiscountAmount     Int?           @db.UnsignedInt
+  freeShippingMaxAmount Int?           @db.UnsignedInt
+  minimumOrderAmount    Int            @default(0)
+  maxUsageCount         Int?           @db.UnsignedInt
+  currentUsageCount     Int            @default(0)
+  isNewUserOnly         Boolean        @default(false)
+  isActive              Boolean        @default(true)
   startDate             DateTime?
   endDate               DateTime?
   usages                VoucherUsage[]
   orders                Order[]
-  createdAt             DateTime     @default(now())
-  updatedAt             DateTime     @updatedAt
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
   deletedAt             DateTime?
 
   @@index([code])
@@ -293,35 +415,40 @@ model CartSession {
 }
 
 model Order {
-  id                   String         @id @default(uuid())
-  orderNumber          String         @unique
-  userId               String
-  addressId            String
-  voucherId            String?
-  voucherCode          String?
-  voucherType          VoucherType?
-  status               OrderStatus    @default(PENDING)
-  subtotal             Int
-  voucherDiscountAmount Int           @default(0)
-  deliveryFee          Int
-  totalPrice           Int
-  paymentMethod        PaymentMethod
-  notes                String?
-  estimatedDelivery    DateTime?
-  user                 User           @relation(fields: [userId], references: [id])
-  address              Address        @relation(fields: [addressId], references: [id])
-  voucher              Promo?         @relation(fields: [voucherId], references: [id])
-  items                OrderItem[]
-  payment              Payment?
-  shipment             Shipment?
-  events               OrderEvent[]
-  voucherUsage         VoucherUsage?
-  createdAt            DateTime       @default(now())
-  updatedAt            DateTime       @updatedAt
-  deletedAt            DateTime?
+  id                       String            @id @default(uuid())
+  orderNumber              String            @unique
+  userId                   String
+  addressId                String
+  voucherId                String?
+  voucherCode              String?
+  voucherType              VoucherType?
+  status                   OrderStatus       @default(PENDING)
+  subtotal                 Int
+  voucherDiscountAmount    Int               @default(0)
+  deliveryFee              Int
+  totalPrice               Int
+  paymentMethod            PaymentMethod
+  notes                    String?
+  estimatedDelivery        DateTime?
+  // Delivery-coverage snapshot (nullable — legacy orders predate coverage).
+  coverageId               String?
+  estimatedDeliveryMinutes Int?
+  user                     User              @relation(fields: [userId], references: [id])
+  address                  Address           @relation(fields: [addressId], references: [id])
+  voucher                  Promo?            @relation(fields: [voucherId], references: [id])
+  coverage                 DeliveryCoverage? @relation(fields: [coverageId], references: [id])
+  items                    OrderItem[]
+  payment                  Payment?
+  shipment                 Shipment?
+  events                   OrderEvent[]
+  voucherUsage             VoucherUsage?
+  createdAt                DateTime          @default(now())
+  updatedAt                DateTime          @updatedAt
+  deletedAt                DateTime?
 
   @@index([userId, status])
   @@index([createdAt])
+  @@index([coverageId])
 }
 
 model OrderItem {
@@ -360,27 +487,27 @@ model OrderEvent {
 }
 
 model Payment {
-  id                  String        @id @default(uuid())
-  orderId             String        @unique
-  method              PaymentMethod
-  status              PaymentStatus @default(PENDING)
-  amount              Int
-  provider            String?
-  providerReference   String?
-  manualBankName      String?
-  manualAccountName   String?
-  manualReceiptUrl    String?
-  verifiedByUserId    String?
-  verifiedAt          DateTime?
-  firstReminderAt     DateTime?
-  secondReminderAt    DateTime?
-  webhookPayload      Json?
-  order               Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  transactions        Transaction[]
-  uploadTokens        PaymentUploadToken[]
-  createdAt           DateTime      @default(now())
-  updatedAt           DateTime      @updatedAt
-  deletedAt           DateTime?
+  id                String               @id @default(uuid())
+  orderId           String               @unique
+  method            PaymentMethod
+  status            PaymentStatus        @default(PENDING)
+  amount            Int
+  provider          String?
+  providerReference String?
+  manualBankName    String?
+  manualAccountName String?
+  manualReceiptUrl  String?
+  verifiedByUserId  String?
+  verifiedAt        DateTime?
+  firstReminderAt   DateTime?
+  secondReminderAt  DateTime?
+  webhookPayload    Json?
+  order             Order                @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  transactions      Transaction[]
+  uploadTokens      PaymentUploadToken[]
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  deletedAt         DateTime?
 
   @@index([status, method])
   @@index([status, method, createdAt])
@@ -402,15 +529,34 @@ model PaymentUploadToken {
   @@index([expiresAt])
 }
 
+model PaymentAccount {
+  id            String   @id @default(uuid())
+  bankName      String
+  bankCode      String?
+  accountName   String
+  accountNumber String   @unique
+  logoUrl       String?
+  notes         String?  @db.Text
+  isActive      Boolean  @default(false)
+  isVisible     Boolean  @default(true)
+  displayOrder  Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([isActive])
+  @@index([isVisible])
+  @@index([displayOrder])
+}
+
 model Transaction {
   id                String        @id @default(uuid())
   paymentId         String
   status            PaymentStatus
   amount            Int
   providerReference String?
-  rawPayload         Json?
-  payment            Payment       @relation(fields: [paymentId], references: [id], onDelete: Cascade)
-  createdAt          DateTime      @default(now())
+  rawPayload        Json?
+  payment           Payment       @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  createdAt         DateTime      @default(now())
 
   @@index([paymentId, createdAt])
 }
@@ -504,24 +650,24 @@ enum IdempotencyStatus {
 }
 
 model IdempotencyKey {
-  id                 String            @id @default(uuid())
-  userId             String            @db.VarChar(36)
-  idempotencyKey     String            @db.VarChar(255)
-  requestMethod      String            @db.VarChar(8)
-  endpoint           String            @db.VarChar(128)
-  requestFingerprint String            @db.VarChar(64)
-  status             IdempotencyStatus @default(PROCESSING)
-  fenceToken          Int              @default(1) @db.UnsignedInt
-  ownerId             String?          @db.VarChar(64)
+  id                  String            @id @default(uuid())
+  userId              String            @db.VarChar(36)
+  idempotencyKey      String            @db.VarChar(255)
+  requestMethod       String            @db.VarChar(8)
+  endpoint            String            @db.VarChar(128)
+  requestFingerprint  String            @db.VarChar(64)
+  status              IdempotencyStatus @default(PROCESSING)
+  fenceToken          Int               @default(1) @db.UnsignedInt
+  ownerId             String?           @db.VarChar(64)
   ownershipAcquiredAt DateTime?
-  responseStatusCode Int?
-  responseBody       Json?
-  resourceType       String?           @db.VarChar(64)
-  resourceId         String?           @db.VarChar(36)
-  lastError          String?           @db.Text
-  createdAt          DateTime          @default(now())
-  updatedAt          DateTime          @updatedAt
-  expiresAt          DateTime
+  responseStatusCode  Int?
+  responseBody        Json?
+  resourceType        String?           @db.VarChar(64)
+  resourceId          String?           @db.VarChar(36)
+  lastError           String?           @db.Text
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  expiresAt           DateTime
 
   @@unique([userId, idempotencyKey])
   @@index([expiresAt])
@@ -553,12 +699,12 @@ enum NotificationStatus {
 }
 
 model NotificationOutbox {
-  id              String              @id @default(uuid())
-  channel         NotificationChannel
-  recipient       String              @db.VarChar(255)
-  template        String              @db.VarChar(128)
-  payload         Json
-  status          NotificationStatus  @default(PENDING)
+  id                String              @id @default(uuid())
+  channel           NotificationChannel
+  recipient         String              @db.VarChar(255)
+  template          String              @db.VarChar(128)
+  payload           Json
+  status            NotificationStatus  @default(PENDING)
   attempts          Int                 @default(0) @db.UnsignedInt
   nextAttemptAt     DateTime            @default(now())
   lockedUntil       DateTime?

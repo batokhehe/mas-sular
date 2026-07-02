@@ -1,10 +1,11 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
-import { OrderStatus, PaymentMethod, PaymentStatus, Prisma, Product, Promo, Topping, VoucherType } from '@prisma/client';
+import { BadRequestException, Injectable, Optional } from '@nestjs/common';
+import { CoverageType, OrderStatus, PaymentMethod, PaymentStatus, Prisma, Product, Promo, Topping, VoucherType } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../database/prisma.service';
 import { IdempotencyService, SupersededError } from '../../infrastructure/idempotency/idempotency.service';
 import { PaymentUploadTokenService } from '../payments/payment-upload-token.service';
 import { ShippingService } from '../shipping/shipping.service';
+import { DeliveryCoverageService } from '../delivery-coverage/delivery-coverage.service';
 import { CheckoutItemDto, CheckoutSummaryDto, CreateOrderDto, ShippingCostDto, ValidateVoucherDto } from './application/dto/create-order.dto';
 import { generateOrderNumber, isOrderNumberConflict } from './order-number.util';
 
@@ -51,7 +52,44 @@ export class OrdersService {
     private readonly shipping: ShippingService,
     private readonly idempotency: IdempotencyService,
     private readonly uploadTokens: PaymentUploadTokenService,
+    // Optional so existing unit tests that construct OrdersService with 4 args keep
+    // working; when absent (tests), coverage enforcement is skipped (legacy flow).
+    @Optional() private readonly coverage?: DeliveryCoverageService,
   ) {}
+
+  /**
+   * Resolve delivery coverage for an address and translate it into a fee/estimate,
+   * or block the order. Returns null when coverage is unconfigured for the location
+   * (or the address predates the region hierarchy) → caller keeps the legacy
+   * courier-based delivery fee. Pickup is never affected here (delivery-only).
+   */
+  private async resolveCoverage(address: {
+    provinceId: string | null;
+    cityId: string | null;
+    districtId: string | null;
+    villageId: string | null;
+  }): Promise<{ coverageId: string; deliveryFee: number; minimumOrder: number; estimatedMinutes: number } | null> {
+    if (!this.coverage || !address.provinceId || !address.cityId) return null;
+    const match = await this.coverage.resolve({
+      provinceId: address.provinceId,
+      cityId: address.cityId,
+      districtId: address.districtId,
+      villageId: address.villageId,
+    });
+    if (!match) return null;
+    if (match.coverageType === CoverageType.DISABLED) {
+      throw new BadRequestException('Sorry, we do not currently deliver to your location.');
+    }
+    if (match.coverageType === CoverageType.PICKUP_ONLY) {
+      throw new BadRequestException('This area is only available for Pickup.');
+    }
+    return {
+      coverageId: match.id,
+      deliveryFee: match.deliveryFee,
+      minimumOrder: match.minimumOrder,
+      estimatedMinutes: match.estimatedMinutes,
+    };
+  }
 
   private normalizeItems(items: CheckoutItemDto[]): NormalizedCheckoutItem[] {
     if (!items.length) throw new BadRequestException('Cart is empty');
@@ -237,15 +275,40 @@ export class OrdersService {
   }
 
   async getSummary(userId: string, dto: CheckoutSummaryDto) {
-    await this.assertAddress(userId, dto.address_id);
+    const address = await this.assertAddress(userId, dto.address_id);
     const items = this.normalizeItems(dto.items);
     const { products, subtotal, totalItems } = await this.getCartPricing(items);
     this.assertStock(items, products);
-    const shipping = await this.calculateShippingCost(userId, {
-      address_id: dto.address_id,
-      courier: dto.courier,
-      items: dto.items,
-    });
+
+    // Delivery coverage takes precedence over the courier rate when configured for
+    // this location: it sets the fee/estimate and can block delivery (DISABLED /
+    // PICKUP_ONLY throw). Unconfigured locations fall back to the courier rate.
+    const coverage = await this.resolveCoverage(address);
+
+    let deliveryFee: number;
+    let estimatedDays: string | null;
+    let estimatedMinutes: number | null = null;
+    let coverageId: string | null = null;
+
+    if (coverage) {
+      if (subtotal < coverage.minimumOrder) {
+        throw new BadRequestException(
+          `Minimum order for delivery to this area is Rp ${coverage.minimumOrder.toLocaleString('id-ID')}`,
+        );
+      }
+      deliveryFee = coverage.deliveryFee;
+      estimatedMinutes = coverage.estimatedMinutes;
+      coverageId = coverage.coverageId;
+      estimatedDays = null;
+    } else {
+      const shipping = await this.calculateShippingCost(userId, {
+        address_id: dto.address_id,
+        courier: dto.courier,
+        items: dto.items,
+      });
+      deliveryFee = shipping.shipping_cost;
+      estimatedDays = shipping.estimated_days;
+    }
 
     let voucher: Promo | null = null;
     let discount = 0;
@@ -253,16 +316,19 @@ export class OrdersService {
     if (dto.voucher_code) {
       voucher = await this.findVoucherByCode(dto.voucher_code.trim().toUpperCase());
       await this.assertVoucherAvailability(voucher, userId, subtotal);
-      discount = this.calculateVoucherDiscount(voucher, subtotal, shipping.shipping_cost);
+      discount = this.calculateVoucherDiscount(voucher, subtotal, deliveryFee);
     }
 
     return {
       subtotal,
-      shipping_cost: shipping.shipping_cost,
+      shipping_cost: deliveryFee,
+      delivery_fee: deliveryFee,
       discount,
-      grand_total: subtotal + shipping.shipping_cost - discount,
+      grand_total: subtotal + deliveryFee - discount,
       total_items: totalItems,
-      estimated_days: shipping.estimated_days,
+      estimated_days: estimatedDays,
+      estimated_minutes: estimatedMinutes,
+      coverage_id: coverageId,
       voucher,
     };
   }
@@ -426,6 +492,8 @@ export class OrdersService {
           deliveryFee: summary.shipping_cost,
           voucherDiscountAmount: summary.discount,
           totalPrice: summary.grand_total,
+          coverageId: summary.coverage_id ?? undefined,
+          estimatedDeliveryMinutes: summary.estimated_minutes ?? undefined,
           voucherId: voucher?.id,
           voucherCode: voucher?.code,
           voucherType: voucher?.voucherType,

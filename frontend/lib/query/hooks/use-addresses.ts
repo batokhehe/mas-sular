@@ -7,11 +7,17 @@ import { qk } from '@/lib/query/keys'
 import { hasCustomerSession } from '@/lib/auth/tokens'
 
 export function useAddresses() {
-  return useQuery({
+  const q = useQuery({
     queryKey: qk.addresses,
     queryFn: addressesApi.list,
     enabled: hasCustomerSession(),
   })
+  // ── TEMP RCA instrumentation — remove after verification ───────────────────
+  if (typeof window !== 'undefined') {
+    console.debug('[RCA useAddresses]', { enabled: hasCustomerSession(), status: q.status, fetchStatus: q.fetchStatus, length: q.data?.length })
+  }
+  // ───────────────────────────────────────────────────────────────────────────
+  return q
 }
 
 function useAddressInvalidate() {

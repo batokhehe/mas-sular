@@ -125,7 +125,24 @@ export type AdminShipment = {
   cost: number;
   trackingNumber?: string | null;
   trackingUrl?: string | null;
-  order: AdminOrder;
+  order: AdminOrder & { address?: AdminAddress | null };
+};
+
+type AdminRegionRef = { id: string; code: string; name: string };
+
+export type AdminAddress = {
+  id: string;
+  label: string;
+  recipientName: string;
+  phone: string;
+  fullAddress: string;
+  notes?: string | null;
+  addressDetail?: string | null;
+  postalCode?: string | null;
+  province?: AdminRegionRef | null;
+  city?: (AdminRegionRef & { type: 'CITY' | 'REGENCY' }) | null;
+  district?: AdminRegionRef | null;
+  village?: (AdminRegionRef & { postalCode: string | null }) | null;
 };
 
 export type AdminUser = {
@@ -139,13 +156,7 @@ export type AdminUser = {
 };
 
 export type AdminUserDetail = AdminUser & {
-  addresses: Array<{
-    id: string;
-    label: string;
-    recipientName: string;
-    phone: string;
-    fullAddress: string;
-  }>;
+  addresses: AdminAddress[];
   orders: Array<{
     id: string;
     orderNumber: string;
@@ -298,13 +309,7 @@ export function fetchAdminShipments() {
 }
 
 export type AdminOrderDetail = AdminOrder & {
-  address?: {
-    id: string;
-    label: string;
-    recipientName: string;
-    phone: string;
-    fullAddress: string;
-  };
+  address?: AdminAddress | null;
   items: Array<{
     id: string;
     productId: string;
@@ -424,6 +429,145 @@ export function updateAdminShipment(id: string, input: Partial<AdminShipmentCrea
 
 export function deleteAdminShipment(id: string) {
   return api<void>(`/admin/shipments/${id}`, {
+    method: 'DELETE',
+  });
+}
+
+export type AdminPaymentAccount = {
+  id: string;
+  bankName: string;
+  bankCode?: string | null;
+  accountName: string;
+  accountNumber: string;
+  logoUrl?: string | null;
+  notes?: string | null;
+  isActive: boolean;
+  isVisible: boolean;
+  displayOrder: number;
+  createdAt: string;
+};
+
+export type PaymentAccountInput = {
+  bankName: string;
+  bankCode?: string;
+  accountName: string;
+  accountNumber: string;
+  logoUrl?: string;
+  notes?: string;
+  isVisible?: boolean;
+  displayOrder?: number;
+};
+
+export function fetchPaymentAccounts() {
+  return api<AdminPaymentAccount[]>('/admin/payment-accounts');
+}
+
+export function fetchPaymentAccount(id: string) {
+  return api<AdminPaymentAccount>(`/admin/payment-accounts/${id}`);
+}
+
+export function createPaymentAccount(input: PaymentAccountInput) {
+  return api<AdminPaymentAccount>('/admin/payment-accounts', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function updatePaymentAccount(id: string, input: Partial<PaymentAccountInput>) {
+  return api<AdminPaymentAccount>(`/admin/payment-accounts/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+}
+
+export function activatePaymentAccount(id: string) {
+  return api<AdminPaymentAccount>(`/admin/payment-accounts/${id}/activate`, {
+    method: 'PATCH',
+  });
+}
+
+export function deletePaymentAccount(id: string) {
+  return api<void>(`/admin/payment-accounts/${id}`, {
+    method: 'DELETE',
+  });
+}
+
+// ---------------- Delivery Coverage ----------------
+
+export type CoverageType = 'DELIVERY' | 'PICKUP_ONLY' | 'DISABLED';
+
+export type AdminDeliveryCoverage = {
+  id: string;
+  provinceId: string;
+  cityId: string;
+  districtId?: string | null;
+  villageId?: string | null;
+  coverageType: CoverageType;
+  deliveryFee: number;
+  minimumOrder: number;
+  estimatedMinutes: number;
+  isActive: boolean;
+  createdAt: string;
+  province?: { id: string; name: string } | null;
+  city?: { id: string; name: string; type: 'CITY' | 'REGENCY' } | null;
+  district?: { id: string; name: string } | null;
+  village?: { id: string; name: string } | null;
+};
+
+export type DeliveryCoverageInput = {
+  provinceId: string;
+  cityId: string;
+  districtId?: string | null;
+  villageId?: string | null;
+  coverageType: CoverageType;
+  deliveryFee: number;
+  minimumOrder: number;
+  estimatedMinutes: number;
+  isActive?: boolean;
+};
+
+export type DeliveryCoverageFilters = {
+  search?: string;
+  coverageType?: CoverageType | '';
+  isActive?: 'true' | 'false' | '';
+};
+
+export function fetchDeliveryCoverages(filters: DeliveryCoverageFilters = {}) {
+  const params = new URLSearchParams();
+  if (filters.search) params.set('search', filters.search);
+  if (filters.coverageType) params.set('coverageType', filters.coverageType);
+  if (filters.isActive) params.set('isActive', filters.isActive);
+  const query = params.toString();
+  return api<AdminDeliveryCoverage[]>(`/admin/delivery-coverage${query ? `?${query}` : ''}`);
+}
+
+export function fetchDeliveryCoverage(id: string) {
+  return api<AdminDeliveryCoverage>(`/admin/delivery-coverage/${id}`);
+}
+
+export function createDeliveryCoverage(input: DeliveryCoverageInput) {
+  return api<AdminDeliveryCoverage>('/admin/delivery-coverage', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateDeliveryCoverage(id: string, input: Partial<DeliveryCoverageInput>) {
+  return api<AdminDeliveryCoverage>(`/admin/delivery-coverage/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+}
+
+export function setDeliveryCoverageActive(id: string, isActive: boolean) {
+  return api<AdminDeliveryCoverage>(`/admin/delivery-coverage/${id}/active`, {
+    method: 'PATCH',
+    body: JSON.stringify({ isActive }),
+  });
+}
+
+export function deleteDeliveryCoverage(id: string) {
+  return api<void>(`/admin/delivery-coverage/${id}`, {
     method: 'DELETE',
   });
 }

@@ -11,22 +11,13 @@ const nextConfig = {
         hostname: 'lh3.googleusercontent.com',
       },
       {
-        protocol: 'http',
-        hostname: 'localhost',
-        port: '3001',
-        pathname: '/uploads/**',
-      },
-      {
-        protocol: 'http',
-        hostname: 'localhost',
-        port: '3333',
+        protocol: 'https',
+        hostname: 'staging-api.baksomassular.com',
         pathname: '/uploads/**',
       },
     ],
   },
-  allowedDevOrigins: [
-    '*',
-  ],
+  allowedDevOrigins: ['*'],
 }
 
 export default nextConfig

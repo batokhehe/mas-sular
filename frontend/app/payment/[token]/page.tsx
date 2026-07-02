@@ -1,6 +1,6 @@
 'use client'
 
-import { useParams } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 import { useQuery } from '@tanstack/react-query'
 import { paymentsApi } from '@/lib/api/payments.api'
 import { qk } from '@/lib/query/keys'
@@ -12,6 +12,7 @@ import { formatIDR } from '@/lib/utils/format'
 
 export default function PaymentUploadPage() {
   const params = useParams<{ token: string }>()
+  const router = useRouter()
   const token = params?.token
 
   const { data, isLoading, isError, refetch } = useQuery({
@@ -62,7 +63,13 @@ export default function PaymentUploadPage() {
               </div>
             ) : null}
           </div>
-          <UploadReceipt mode="token" reference={token as string} />
+          <UploadReceipt
+            mode="token"
+            reference={token as string}
+            onUploaded={() =>
+              router.replace(`/payment/success?order=${encodeURIComponent(data.orderNumber)}`)
+            }
+          />
         </Card>
       )}
     </div>

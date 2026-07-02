@@ -1,4 +1,4 @@
-# Baso Nusantara Platform
+# Bakso Mas Sular Platform
 
 Production-ready modular-monolith ecommerce architecture for the existing `frontend/` storefront, with a NestJS backend and a separate Next.js admin CMS.
 

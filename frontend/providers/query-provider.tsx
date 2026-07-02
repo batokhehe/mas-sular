@@ -43,7 +43,12 @@ export function makeQueryClient(): QueryClient {
       onError: (error) => toast.error(messageFor(error)),
     }),
     mutationCache: new MutationCache({
-      onError: (error) => toast.error(messageFor(error)),
+      // Admin flows that present their own SweetAlert error opt out via
+      // `meta: { suppressGlobalError: true }` so the user never sees two errors.
+      onError: (error, _variables, _context, mutation) => {
+        if (mutation.meta?.suppressGlobalError) return
+        toast.error(messageFor(error))
+      },
     }),
   })
 }

@@ -1,13 +1,16 @@
-import { Controller, Get, Inject } from '@nestjs/common';
+import { Controller, Get, Inject, Logger } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { ApiTags } from '@nestjs/swagger';
 import { Cache } from 'cache-manager';
 import amqp from 'amqplib';
 import { PrismaService } from './database/prisma.service';
+import { amqpErrorInfo, describeAmqpTarget } from './common/diagnostics/amqp-redact';
 
 @ApiTags('health')
 @Controller({ path: 'health', version: '1' })
 export class HealthController {
+  private readonly logger = new Logger(HealthController.name);
+
   constructor(
     private readonly prisma: PrismaService,
     @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
@@ -20,29 +23,6 @@ export class HealthController {
       uptime: process.uptime(),
       timestamp: new Date().toISOString(),
     };
-  }
-
-  @Get('redis')
-  async redisTest() {
-    try {
-      console.log('SET');
-
-      await this.cacheManager.set('test', 'hello');
-
-      console.log('GET');
-
-      const value = await this.cacheManager.get('test');
-
-      console.log('VALUE', value);
-
-      return { value };
-    } catch (e) {
-      console.error('CACHE ERROR', e);
-
-      return {
-        error: String(e),
-      };
-    }
   }
 
   @Get('ready')
@@ -61,8 +41,7 @@ export class HealthController {
       const value = await this.cacheManager.get<string>('health-check');
       checks.redis = value === 'ok' ? 'ok' : 'failed';
     } catch (error) {
-      console.error(error);
-
+      this.logger.error(`Redis readiness check failed: ${error instanceof Error ? error.message : String(error)}`);
       checks.redis = 'failed';
     }
 
@@ -72,11 +51,17 @@ export class HealthController {
     const rabbitRequired =
       process.env.OUTBOX_RELAY_ENABLED === 'true' || process.env.CONSUMERS_ENABLED === 'true';
     if (process.env.RABBITMQ_URL) {
+      // TEMP DIAGNOSTICS (remove once staging RabbitMQ is confirmed): log the
+      // credential-free target and the exact error. Status logic is unchanged.
+      const target = describeAmqpTarget(process.env.RABBITMQ_URL);
       try {
+        this.logger.log(`RabbitMQ readiness probe -> ${target}`);
         const connection = await amqp.connect(process.env.RABBITMQ_URL);
         await connection.close();
+        this.logger.log(`RabbitMQ readiness OK -> ${target}`);
         checks.rabbitmq = 'ok';
       } catch (error) {
+        this.logger.error(`RabbitMQ readiness FAILED -> ${target} ${amqpErrorInfo(error)}`);
         checks.rabbitmq = 'failed';
       }
     } else {

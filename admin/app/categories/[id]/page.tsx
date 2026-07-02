@@ -7,6 +7,7 @@ import { AdminShell } from '@/components/layout/admin-shell';
 import { CategoryForm, CategoryFormValues } from '@/app/categories/components/category-form';
 import { ROUTE_PERMISSIONS } from '@/lib/access';
 import { deleteAdminCategory, fetchAdminCategory, updateAdminCategory } from '@/lib/admin';
+import { ADMIN_LOADING_MESSAGES, ADMIN_SUCCESS_MESSAGES, confirmDelete, runWithFeedback } from '@/lib/admin-alert';
 
 export default function CategoryDetailPage() {
   const params = useParams();
@@ -78,10 +79,19 @@ export default function CategoryDetailPage() {
         initialValues={categoryQuery.data}
         onSubmit={async (values) => {
           if (!categoryId) return;
-          await updateCategory.mutateAsync({ id: categoryId, input: values });
+          await runWithFeedback({
+            loading: ADMIN_LOADING_MESSAGES.update,
+            success: ADMIN_SUCCESS_MESSAGES.updated,
+            action: () => updateCategory.mutateAsync({ id: categoryId, input: values }),
+          });
         }}
         onDelete={async () => {
-          await deleteCategory.mutateAsync();
+          await runWithFeedback({
+            confirm: () => confirmDelete('Category'),
+            loading: ADMIN_LOADING_MESSAGES.delete,
+            success: ADMIN_SUCCESS_MESSAGES.deleted('Category'),
+            action: () => deleteCategory.mutateAsync(),
+          });
         }}
         submitLabel={updateCategory.isPending ? 'Saving...' : 'Save Category'}
         isSubmitting={updateCategory.isPending}

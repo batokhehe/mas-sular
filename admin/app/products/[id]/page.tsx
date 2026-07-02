@@ -7,6 +7,7 @@ import { AdminShell } from '@/components/layout/admin-shell';
 import { ProductForm, ProductFormValues } from '@/app/products/components/product-form';
 import { ROUTE_PERMISSIONS } from '@/lib/access';
 import { fetchAdminCategories, fetchAdminProduct, updateAdminProduct, deleteAdminProduct } from '@/lib/admin';
+import { ADMIN_LOADING_MESSAGES, ADMIN_SUCCESS_MESSAGES, confirmDelete, runWithFeedback } from '@/lib/admin-alert';
 
 export default function ProductDetailPage() {
   const router = useRouter();
@@ -79,10 +80,19 @@ export default function ProductDetailPage() {
         categories={categoriesQuery.data}
         initialValues={productQuery.data}
         onSubmit={async (values) => {
-          await updateProduct.mutateAsync({ id: productId, input: values });
+          await runWithFeedback({
+            loading: ADMIN_LOADING_MESSAGES.update,
+            success: ADMIN_SUCCESS_MESSAGES.updated,
+            action: () => updateProduct.mutateAsync({ id: productId, input: values }),
+          });
         }}
         onDelete={async () => {
-          await deleteProduct.mutateAsync();
+          await runWithFeedback({
+            confirm: () => confirmDelete('Product'),
+            loading: ADMIN_LOADING_MESSAGES.delete,
+            success: ADMIN_SUCCESS_MESSAGES.deleted('Product'),
+            action: () => deleteProduct.mutateAsync(),
+          });
         }}
         submitLabel={updateProduct.isPending ? 'Saving...' : 'Save Changes'}
         isSubmitting={updateProduct.isPending}

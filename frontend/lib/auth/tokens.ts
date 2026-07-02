@@ -7,6 +7,14 @@ const KEYS = {
   adminAccess: 'ms_admin_access',
 } as const
 
+// Phase 13B.2: JS-readable session-presence markers issued by the backend
+// (Phase 13A.7). Non-httpOnly, value "true", carry no token — used purely for
+// "is there a session" detection so session gates survive httpOnly token cutover.
+const SESSION_KEYS = {
+  customer: 'ms_session',
+  admin: 'ms_admin_session',
+} as const
+
 const COOKIE_OPTS: Cookies.CookieAttributes = {
   sameSite: 'lax',
   secure: typeof window !== 'undefined' && window.location.protocol === 'https:',
@@ -50,8 +58,19 @@ export function clearAllTokens(): void {
   clearAdminToken()
 }
 
-export const hasCustomerSession = (): boolean => !!Cookies.get(KEYS.access)
-export const hasAdminSession = (): boolean => !!Cookies.get(KEYS.adminAccess)
+// Phase 13B.3: one-shot hygiene to delete the legacy host-only customer token
+// cookies (pre-13B writers). Customer auth is now httpOnly-cookie based, so these
+// must be removed to avoid duplicate same-named cookies (host-only vs Domain=).
+// Distinct from clearCustomerTokens() which was the old js-cookie "logout".
+export function removeLegacyCustomerCookies(): void {
+  Cookies.remove(KEYS.access)
+  Cookies.remove(KEYS.refresh)
+}
+
+// Phase 13B.2: session presence now reads the non-httpOnly marker cookies, not
+// the token cookies (which become httpOnly/unreadable after the 13B.3 cutover).
+export const hasCustomerSession = (): boolean => Cookies.get(SESSION_KEYS.customer) === 'true'
+export const hasAdminSession = (): boolean => Cookies.get(SESSION_KEYS.admin) === 'true'
 
 // Hardening note: cookies set from JS are not httpOnly. For production, proxy
 // auth through Next Route Handlers (BFF) that set httpOnly cookies.

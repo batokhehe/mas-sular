@@ -1,0 +1,23 @@
+{
+  "name": "mas-sular-e2e",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Playwright UAT automation harness for Bakso Mas Sular (storefront + admin).",
+  "scripts": {
+    "test": "playwright test",
+    "test:public": "playwright test --grep @public",
+    "test:headed": "playwright test --headed",
+    "list": "playwright test --list",
+    "report": "playwright show-report reports/html",
+    "update-excel": "python scripts/update_excel.py",
+    "gen-reports": "python scripts/gen_reports.py"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "jsonwebtoken": "^9.0.3"
+  },
+  "dependencies": {
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^26.0.1"
+  }
+}

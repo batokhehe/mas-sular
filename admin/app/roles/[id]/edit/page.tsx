@@ -5,6 +5,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { AdminShell } from '@/components/layout/admin-shell';
 import { ROUTE_PERMISSIONS } from '@/lib/access';
 import { fetchAdminRole, fetchAdminPermissions, updateAdminRole } from '@/lib/admin';
+import { ADMIN_LOADING_MESSAGES, ADMIN_SUCCESS_MESSAGES, runWithFeedback } from '@/lib/admin-alert';
 import { RoleForm } from '../../components/role-form';
 
 export default function EditRolePage() {
@@ -64,7 +65,11 @@ export default function EditRolePage() {
         submitLabel="Update Role"
         isSubmitting={updateRole.isPending}
         onSubmit={async (values) => {
-          await updateRole.mutateAsync({ name: values.name, description: values.description, permissionIds: values.permissionIds });
+          await runWithFeedback({
+            loading: ADMIN_LOADING_MESSAGES.update,
+            success: ADMIN_SUCCESS_MESSAGES.updated,
+            action: () => updateRole.mutateAsync({ name: values.name, description: values.description, permissionIds: values.permissionIds }),
+          });
         }}
       />
     </AdminShell>

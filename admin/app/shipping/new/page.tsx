@@ -6,6 +6,7 @@ import { AdminShell } from '@/components/layout/admin-shell';
 import { ShipmentForm, ShipmentFormValues } from '@/app/shipping/components/shipment-form';
 import { ROUTE_PERMISSIONS } from '@/lib/access';
 import { fetchAdminOrders, createAdminShipment } from '@/lib/admin';
+import { ADMIN_LOADING_MESSAGES, ADMIN_SUCCESS_MESSAGES, runWithFeedback } from '@/lib/admin-alert';
 
 export default function NewShipmentPage() {
   const router = useRouter();
@@ -50,7 +51,11 @@ export default function NewShipmentPage() {
       <ShipmentForm
         orders={ordersQuery.data}
         onSubmit={async (values) => {
-          await createShipment.mutateAsync(values);
+          await runWithFeedback({
+            loading: ADMIN_LOADING_MESSAGES.create,
+            success: ADMIN_SUCCESS_MESSAGES.created('Shipment'),
+            action: () => createShipment.mutateAsync(values),
+          });
         }}
         submitLabel={createShipment.isPending ? 'Creating...' : 'Create Shipment'}
         isSubmitting={createShipment.isPending}

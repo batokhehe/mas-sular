@@ -6,6 +6,7 @@ import { AdminShell } from '@/components/layout/admin-shell';
 import { ProductForm, ProductFormValues } from '@/app/products/components/product-form';
 import { ROUTE_PERMISSIONS } from '@/lib/access';
 import { fetchAdminCategories, createAdminProduct } from '@/lib/admin';
+import { ADMIN_LOADING_MESSAGES, ADMIN_SUCCESS_MESSAGES, runWithFeedback } from '@/lib/admin-alert';
 
 export default function NewProductPage() {
   const router = useRouter();
@@ -49,7 +50,11 @@ export default function NewProductPage() {
       <ProductForm
         categories={categories}
         onSubmit={async (values) => {
-          await createProduct.mutateAsync(values);
+          await runWithFeedback({
+            loading: ADMIN_LOADING_MESSAGES.create,
+            success: ADMIN_SUCCESS_MESSAGES.created('Product'),
+            action: () => createProduct.mutateAsync(values),
+          });
         }}
         submitLabel={createProduct.isPending ? 'Creating...' : 'Create Product'}
         isSubmitting={createProduct.isPending}

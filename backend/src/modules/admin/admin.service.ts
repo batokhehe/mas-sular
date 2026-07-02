@@ -38,12 +38,24 @@ function isTerminalPaymentStatus(status: PaymentStatus): boolean {
   return TERMINAL_PAYMENT_STATUSES.includes(status);
 }
 
+// Embed region names on address reads so admin Order/Customer/Shipping detail can
+// render the full hierarchy. Legacy addresses (null region ids) return null here
+// and the UI falls back to `fullAddress`.
+const ADDRESS_WITH_REGIONS = {
+  include: {
+    province: { select: { id: true, code: true, name: true } },
+    city: { select: { id: true, code: true, name: true, type: true } },
+    district: { select: { id: true, code: true, name: true } },
+    village: { select: { id: true, code: true, name: true, postalCode: true } },
+  },
+} as const;
+
 @Injectable()
 export class AdminService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly cancellation: OrderCancellationService,
-  ) {}
+  ) { }
 
   async getDashboard() {
     const startOfToday = new Date();
@@ -166,7 +178,13 @@ export class AdminService {
   }
 
   async createPromo(dto: CreatePromoDto) {
-    return this.prisma.promo.create({ data: { ...dto } });
+    const data = {
+      ...dto,
+      startDate: dto.startDate ? new Date(dto.startDate) : null,
+      endDate: dto.endDate ? new Date(dto.endDate) : null,
+    };
+
+    return this.prisma.promo.create({ data });
   }
 
   listPromos() {
@@ -222,7 +240,7 @@ export class AdminService {
       },
       include: {
         user: { select: { id: true, name: true, email: true, phone: true } },
-        address: true,
+        address: ADDRESS_WITH_REGIONS,
         items: { include: { toppings: true } },
         payment: true,
         shipment: true,
@@ -236,7 +254,7 @@ export class AdminService {
       where: { id },
       include: {
         user: { select: { id: true, name: true, email: true, phone: true } },
-        address: true,
+        address: ADDRESS_WITH_REGIONS,
         items: { include: { toppings: true } },
         payment: { include: { transactions: true } },
         shipment: true,
@@ -461,7 +479,14 @@ export class AdminService {
   listShipments(query: ListAdminShipmentsQueryDto) {
     return this.prisma.shipment.findMany({
       where: { status: query.status },
-      include: { order: { include: { user: { select: { id: true, name: true, email: true, phone: true } } } } },
+      include: {
+        order: {
+          include: {
+            user: { select: { id: true, name: true, email: true, phone: true } },
+            address: ADDRESS_WITH_REGIONS,
+          },
+        },
+      },
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -469,7 +494,14 @@ export class AdminService {
   async getShipment(id: string) {
     const shipment = await this.prisma.shipment.findUnique({
       where: { id },
-      include: { order: { include: { user: { select: { id: true, name: true, email: true, phone: true } } } } },
+      include: {
+        order: {
+          include: {
+            user: { select: { id: true, name: true, email: true, phone: true } },
+            address: ADDRESS_WITH_REGIONS,
+          },
+        },
+      },
     });
     if (!shipment) throw new NotFoundException('Shipment not found');
     return shipment;
@@ -508,7 +540,11 @@ export class AdminService {
   async getUser(id: string) {
     const user = await this.prisma.user.findUnique({
       where: { id },
-      include: { roles: { include: { role: true } }, addresses: true, orders: true },
+      include: {
+        roles: { include: { role: true } },
+        addresses: ADDRESS_WITH_REGIONS,
+        orders: true,
+      },
     });
     if (!user || user.deletedAt) throw new NotFoundException('User not found');
     return user;
@@ -552,7 +588,7 @@ export class AdminService {
     };
 
     if (dto.permissionIds) {
-      const [ , role ] = await this.prisma.$transaction([
+      const [, role] = await this.prisma.$transaction([
         this.prisma.rolePermission.deleteMany({ where: { roleId: id } }),
         this.prisma.role.update({
           where: { id },
@@ -583,7 +619,7 @@ export class AdminService {
     };
 
     if (dto.roleIds) {
-      const [ , user ] = await this.prisma.$transaction([
+      const [, user] = await this.prisma.$transaction([
         this.prisma.userRole.deleteMany({ where: { userId: id } }),
         this.prisma.user.update({
           where: { id },
@@ -593,7 +629,7 @@ export class AdminService {
               create: dto.roleIds.map((roleId) => ({ roleId })),
             },
           },
-          include: { roles: { include: { role: true } }, addresses: true, orders: true },
+          include: { roles: { include: { role: true } }, addresses: ADDRESS_WITH_REGIONS, orders: true },
         }),
       ]);
       return user;
@@ -602,7 +638,7 @@ export class AdminService {
     return this.prisma.user.update({
       where: { id },
       data: updateData,
-      include: { roles: { include: { role: true } }, addresses: true, orders: true },
+      include: { roles: { include: { role: true } }, addresses: ADDRESS_WITH_REGIONS, orders: true },
     });
   }
 
