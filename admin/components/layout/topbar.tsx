@@ -1,7 +1,8 @@
 'use client';
 
-import { Bell, LogOut, Search, SlidersHorizontal } from 'lucide-react';
+import { LogOut, Search, SlidersHorizontal } from 'lucide-react';
 import { useAdminLogout, useAdminProfile } from '@/lib/auth';
+import { NotificationBell } from '@/components/notifications/notification-bell';
 
 export function Topbar() {
   const profileQuery = useAdminProfile();
@@ -29,10 +30,7 @@ export function Topbar() {
         <button className="flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 text-gray-500 hover:bg-gray-50">
           <SlidersHorizontal className="h-4 w-4" />
         </button>
-        <button className="relative flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 text-gray-500 hover:bg-gray-50">
-          <Bell className="h-4 w-4" />
-          <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-red-500" />
-        </button>
+        <NotificationBell />
 
         <div className="flex items-center gap-3 rounded-full border border-gray-200 py-1 pl-1 pr-3">
           <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#465fff] text-xs font-semibold text-white">

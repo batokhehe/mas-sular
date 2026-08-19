@@ -10,6 +10,8 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { formatIDR } from '@/lib/utils/format'
+import { paymentBreakdownFromOrder } from '@/lib/checkout/summary'
+import { PaymentBreakdown } from '@/components/storefront/payment-breakdown'
 import { useLastOrderStore } from '@/lib/stores/last-order-store'
 
 const NEEDS_RECEIPT = new Set(['BANK_TRANSFER', 'QRIS'])
@@ -48,7 +50,14 @@ export default function CheckoutSuccessPage() {
         <Card className="space-y-3 p-5">
           <Row label="Order number" value={order.orderNumber} />
           <Row label="Payment method" value={order.paymentMethod} />
-          <Row label="Total" value={formatIDR(order.totalPrice)} />
+          {order.paymentMethod === 'BANK_TRANSFER' ? (
+            // Manual transfer: show the full breakdown (backend values only). The
+            // unique-code row hides itself when the code is null (same value shown
+            // for Business Total and Transfer Exactly).
+            <PaymentBreakdown {...paymentBreakdownFromOrder(order)} />
+          ) : (
+            <Row label="Total" value={formatIDR(order.totalPrice)} />
+          )}
           <Separator />
           {needsReceipt ? (
             <div className="space-y-3">

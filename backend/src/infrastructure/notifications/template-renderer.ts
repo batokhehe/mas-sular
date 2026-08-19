@@ -65,6 +65,8 @@ export class TemplateRenderer {
       }
       case 'order.transfer':
         // Email rendering of the transfer order (WhatsApp uses structured variables, not this text).
+        // totalPrice is the final transfer amount (unique code already folded in) — shown as-is,
+        // with no separate unique-code line.
         return {
           subject: `Pesanan ${payload.orderNumber ?? ''} — selesaikan pembayaran`,
           body:
@@ -78,6 +80,47 @@ export class TemplateRenderer {
           body:
             `Halo ${payload.customerName ?? 'Pelanggan'}, pesanan COD Anda ${payload.orderNumber ?? ''} ` +
             `(total Rp ${payload.totalPrice ?? ''}) telah dikonfirmasi. ${payload.deliveryInfo ?? ''}`,
+        };
+      case 'order.shipped':
+        return {
+          subject: `Pesanan ${payload.orderNumber ?? ''} telah dikirim`,
+          body:
+            `Pesanan Anda telah dikirim.\n\nKurir: ${payload.shippingProvider ?? ''}\n` +
+            `Layanan: ${payload.shippingService ?? ''}\nNomor Resi: ${payload.trackingNumber ?? ''}`,
+        };
+      case 'order.delivered':
+        return {
+          subject: `Pesanan ${payload.orderNumber ?? ''} telah sampai`,
+          body:
+            `Pesanan Anda telah sampai di tujuan.\n\nKurir: ${payload.shippingProvider ?? ''}\n` +
+            `Nomor Resi: ${payload.trackingNumber ?? ''}. Terima kasih telah berbelanja!`,
+        };
+      case 'shipment.status':
+        return {
+          subject: `Update pengiriman pesanan ${payload.orderNumber ?? ''}`,
+          body:
+            `Pengiriman pesanan ${payload.orderNumber ?? ''} ${payload.statusLabel ?? ''}.\n\n` +
+            `Kurir: ${payload.shippingProvider ?? ''}\nNomor Resi: ${payload.trackingNumber ?? ''}`,
+        };
+      // ---- Manual (admin-composed) templates — Customer Communication Center ----
+      case 'manual.order-update':
+        return {
+          subject: `Update pesanan ${payload.orderNumber ?? ''}`,
+          body:
+            `Halo ${payload.customerName ?? 'Pelanggan'}, ada pembaruan untuk pesanan ` +
+            `${payload.orderNumber ?? ''}:\n\n${payload.message ?? ''}`,
+        };
+      case 'manual.shipment-update':
+        return {
+          subject: `Update pengiriman pesanan ${payload.orderNumber ?? ''}`,
+          body:
+            `Halo ${payload.customerName ?? 'Pelanggan'}, update pengiriman untuk pesanan ` +
+            `${payload.orderNumber ?? ''}:\n\n${payload.message ?? ''}`,
+        };
+      case 'manual.custom':
+        return {
+          subject: String(payload.subject ?? 'Informasi dari Bakso Mas Sular'),
+          body: `Halo ${payload.customerName ?? 'Pelanggan'},\n\n${payload.message ?? ''}`,
         };
       default:
         throw new PermanentSendError(`Unknown notification template: ${template}`);

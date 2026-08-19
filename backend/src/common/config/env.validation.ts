@@ -51,6 +51,17 @@ const baseSchema = z
     PAYMENT_EXPIRY_MS: z.coerce.number().int().positive().optional(),
     PAYMENT_GATEWAY_EXPIRY_MS: z.coerce.number().int().nonnegative().optional(),
 
+    // Midtrans payment gateway (Phase 3). All optional: with MIDTRANS_ENABLED
+    // unset/false the provider is not registered and no key is required. The
+    // enabled+serverKey pairing is enforced by assertMidtransConfigured() at boot.
+    MIDTRANS_ENABLED: boolFlag,
+    MIDTRANS_SERVER_KEY: z.string().optional(),
+    MIDTRANS_CLIENT_KEY: z.string().optional(),
+    MIDTRANS_IS_PRODUCTION: boolFlag,
+    MIDTRANS_BASE_URL: z.string().url('MIDTRANS_BASE_URL must be a valid URL').optional(),
+    MIDTRANS_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
+    MIDTRANS_MAX_RETRY: z.coerce.number().int().nonnegative().optional(),
+
     // Phase 13A — httpOnly auth cookies. All optional; cookie behavior is env-driven.
     COOKIE_DOMAIN: z.string().optional(),
     COOKIE_SECURE: z.enum(['true', 'false']).optional(),
@@ -72,6 +83,38 @@ const baseSchema = z
     QONTAK_BASE_URL: z.string().url('QONTAK_BASE_URL must be a valid URL').optional(),
     QONTAK_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
     QONTAK_MAX_RETRY: z.coerce.number().int().nonnegative().optional(),
+
+    // Shipping providers (Paxel / JNE). Disabled by default; credentials are
+    // required (cross-field below) only when the provider is enabled.
+    SHIPPING_ORIGIN_POSTAL_CODE: z.string().optional(),
+    PAXEL_ENABLED: boolFlag,
+    PAXEL_BASE_URL: z.string().optional(),
+    PAXEL_API_KEY: z.string().optional(),
+    PAXEL_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
+    PAXEL_MAX_RETRY: z.coerce.number().int().nonnegative().optional(),
+    JNE_ENABLED: boolFlag,
+    JNE_BASE_URL: z.string().optional(),
+    JNE_API_KEY: z.string().optional(),
+    JNE_USERNAME: z.string().optional(),
+    JNE_ORIGIN_CODE: z.string().optional(),
+    JNE_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
+    JNE_MAX_RETRY: z.coerce.number().int().nonnegative().optional(),
+
+    // Checkout idempotency. Optional locally; MUST be true in staging/production
+    // (cross-field below) so duplicate checkout requests can never double-create.
+    CHECKOUT_IDEMPOTENCY_ENABLED: boolFlag,
+
+    // Manual BANK_TRANSFER unique code. Disabled by default → behavior identical to
+    // before. Range invariants (min >= 0, max <= 999, max > min) checked cross-field.
+    PAYMENT_UNIQUE_CODE_ENABLED: boolFlag,
+    PAYMENT_UNIQUE_CODE_MIN: z.coerce.number().int().optional(),
+    PAYMENT_UNIQUE_CODE_MAX: z.coerce.number().int().optional(),
+
+    // Enterprise logging center (additive). All optional; persistence + retention
+    // default on with a 90-day window.
+    SYSTEM_LOG_ENABLED: boolFlag.optional(),
+    SYSTEM_LOG_RETENTION_ENABLED: boolFlag.optional(),
+    LOG_RETENTION_DAYS: z.coerce.number().int().positive().optional(),
   })
   .passthrough(); // tolerate the many optional tuning vars (OUTBOX_*, NOTIFICATION_SENDER_*, RETENTION_*, ...)
 
@@ -85,6 +128,17 @@ export const envSchema = baseSchema.superRefine((env, ctx) => {
   }
   if (corsList.includes('*')) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['CORS_ORIGINS'], message: 'wildcard "*" origin is not allowed with credentialed CORS' });
+  }
+
+  // M5: checkout idempotency must be enabled outside local (staging/production), so a
+  // duplicate/retried checkout can never create duplicate orders/payments/reservations.
+  // Development and test may disable it; staging follows production.
+  if (!isLocal && env.CHECKOUT_IDEMPOTENCY_ENABLED !== 'true') {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['CHECKOUT_IDEMPOTENCY_ENABLED'],
+      message: 'CHECKOUT_IDEMPOTENCY_ENABLED must be "true" in staging/production',
+    });
   }
 
   // RabbitMQ required whenever the relay or consumers are enabled.
@@ -108,9 +162,35 @@ export const envSchema = baseSchema.superRefine((env, ctx) => {
     }
   }
 
+  // Shipping providers: credentials are required when the provider is enabled.
+  if (env.PAXEL_ENABLED === 'true' && !env.PAXEL_API_KEY) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['PAXEL_API_KEY'], message: 'PAXEL_API_KEY is required when PAXEL_ENABLED=true' });
+  }
+  if (env.JNE_ENABLED === 'true') {
+    for (const key of ['JNE_API_KEY', 'JNE_USERNAME', 'JNE_ORIGIN_CODE'] as const) {
+      if (!env[key]) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: `${key} is required when JNE_ENABLED=true` });
+      }
+    }
+  }
+
   // Browsers reject SameSite=None cookies unless they are also Secure.
   if (env.COOKIE_SAMESITE === 'none' && env.COOKIE_SECURE !== 'true') {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['COOKIE_SECURE'], message: 'COOKIE_SECURE must be "true" when COOKIE_SAMESITE=none' });
+  }
+
+  // Unique-code range invariants (only meaningful when the feature is enabled, but
+  // validated whenever provided so a bad range never reaches the generator).
+  const codeMin = env.PAYMENT_UNIQUE_CODE_MIN ?? 100;
+  const codeMax = env.PAYMENT_UNIQUE_CODE_MAX ?? 999;
+  if (codeMin < 0) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['PAYMENT_UNIQUE_CODE_MIN'], message: 'PAYMENT_UNIQUE_CODE_MIN must be >= 0' });
+  }
+  if (codeMax > 999) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['PAYMENT_UNIQUE_CODE_MAX'], message: 'PAYMENT_UNIQUE_CODE_MAX must be <= 999' });
+  }
+  if (!(codeMax > codeMin)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['PAYMENT_UNIQUE_CODE_MAX'], message: 'PAYMENT_UNIQUE_CODE_MAX must be greater than PAYMENT_UNIQUE_CODE_MIN' });
   }
 
   // Payment timing must be strictly increasing so reminders precede expiry.

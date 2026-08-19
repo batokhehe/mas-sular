@@ -2,10 +2,11 @@
 
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { AdminShell } from '@/components/layout/admin-shell';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardTitle } from '@/components/ui/card';
+import { Pagination } from '@/components/ui/pagination';
 import { ROUTE_PERMISSIONS } from '@/lib/access';
 import { fetchAdminOrders, AdminOrder } from '@/lib/admin';
 
@@ -14,23 +15,26 @@ const statusOptions = ['ALL', 'PENDING', 'PROCESSING', 'DELIVERING', 'COMPLETED'
 export default function OrdersPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<typeof statusOptions[number]>('ALL');
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(20);
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['admin-orders'],
-    queryFn: fetchAdminOrders,
+    queryKey: ['admin-orders', statusFilter, page, limit],
+    queryFn: () => fetchAdminOrders({ status: statusFilter === 'ALL' ? undefined : statusFilter, page, limit }),
+    placeholderData: keepPreviousData,
     retry: false,
   });
 
+  // Free-text search stays client-side over the current page; status filtering
+  // and paging are handled server-side.
   const orders = useMemo(() => {
     if (!data) return [];
-
-    return data.filter((order: AdminOrder) => {
-      const matchesSearch = [order.orderNumber, order.user?.name ?? '', order.user?.email ?? '']
-        .some((field) => field.toLowerCase().includes(search.toLowerCase()));
-      const matchesStatus = statusFilter === 'ALL' || order.status === statusFilter;
-      return matchesSearch && matchesStatus;
-    });
-  }, [data, search, statusFilter]);
+    return data.items.filter((order: AdminOrder) =>
+      [order.orderNumber, order.user?.name ?? '', order.user?.email ?? ''].some((field) =>
+        field.toLowerCase().includes(search.toLowerCase()),
+      ),
+    );
+  }, [data, search]);
 
   return (
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.orders}>
@@ -50,7 +54,10 @@ export default function OrdersPage() {
           </div>
           <select
             value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value as typeof statusOptions[number])}
+            onChange={(event) => {
+              setStatusFilter(event.target.value as typeof statusOptions[number]);
+              setPage(1);
+            }}
             className="h-11 rounded-xl border border-gray-200 bg-white px-4 text-sm outline-none focus:border-[#465fff]"
           >
             {statusOptions.map((status) => (
@@ -104,6 +111,19 @@ export default function OrdersPage() {
             </table>
           )}
         </div>
+        {data && data.total > 0 ? (
+          <Pagination
+            page={data.page}
+            limit={data.limit}
+            total={data.total}
+            totalPages={data.totalPages}
+            onPageChange={setPage}
+            onLimitChange={(l) => {
+              setLimit(l);
+              setPage(1);
+            }}
+          />
+        ) : null}
       </Card>
     </AdminShell>
   );

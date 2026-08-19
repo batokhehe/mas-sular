@@ -12,7 +12,9 @@ const DTO: CreateOrderDto = {
 };
 
 const PRODUCT = { id: 'p1', name: 'Bakso', price: 20000, stock: 10, status: 'ACTIVE', deletedAt: null };
-const CREATED_ORDER = { id: 'order-1', orderNumber: 'BMS-20260611-12345', totalPrice: 30000, items: [], payment: {} };
+// payment.amount is the transfer total the order.created event carries (business
+// total here since there is no unique code in this suite).
+const CREATED_ORDER = { id: 'order-1', orderNumber: 'BMS-20260611-12345', totalPrice: 30000, items: [], payment: { amount: 30000 } };
 
 function buildTx() {
   return {
@@ -28,7 +30,29 @@ function buildPrisma(tx = buildTx()) {
   return {
     product: { findMany: jest.fn().mockResolvedValue([PRODUCT]) },
     topping: { findMany: jest.fn().mockResolvedValue([]) },
-    address: { findFirst: jest.fn().mockResolvedValue({ id: 'addr-1', userId: USER, deletedAt: null }) },
+    address: {
+      findFirst: jest.fn().mockResolvedValue({
+        id: 'addr-1',
+        userId: USER,
+        deletedAt: null,
+        provinceId: 'prov-1',
+        cityId: 'city-1',
+        districtId: 'dist-1',
+        villageId: 'vill-1',
+        postalCode: '40131',
+        latitude: -6.9,
+        longitude: 107.6,
+      }),
+    },
+    outlet: {
+      findFirst: jest.fn().mockResolvedValue({
+        id: 'outlet-1',
+        name: 'Bakso Mas Sular Pusat',
+        postalCode: '40111',
+        latitude: -6.9147,
+        longitude: 107.6098,
+      }),
+    },
     order: { count: jest.fn().mockResolvedValue(0), findUnique: jest.fn() },
     voucherUsage: { findFirst: jest.fn().mockResolvedValue(null) },
     promo: { findFirst: jest.fn().mockResolvedValue(null) },
@@ -53,7 +77,8 @@ const PROCEED = { kind: 'proceed', record: { id: 'rec-1', fenceToken: 1 } };
 
 function build(prisma = buildPrisma(), idempotency = buildIdempotency()) {
   const shipping = { calculateRateForCourier: jest.fn().mockResolvedValue({ cost: 10000, etd: '2 days' }) };
-  const uploadTokens = { issue: jest.fn() }; // COD checkout → no token issued
+  // Phase 4A: an omitted method now defaults to BANK_TRANSFER, which issues a token.
+  const uploadTokens = { issue: jest.fn().mockResolvedValue({ uploadUrl: 'https://app/payments/upload/raw' }) };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = new OrdersService(prisma as any, shipping as any, idempotency as any, uploadTokens as any);
   return { service, prisma, idempotency };
@@ -109,7 +134,8 @@ describe('Checkout idempotency orchestration', () => {
         eventVersion: 1,
         exchange: 'orders',
         routingKey: 'order.created',
-        payload: { orderId: 'order-1', orderNumber: 'BMS-20260611-12345', totalPrice: 30000 },
+        // Phase 4A: the default method is BANK_TRANSFER, so a receipt-upload link rides along.
+        payload: { orderId: 'order-1', orderNumber: 'BMS-20260611-12345', totalPrice: 30000, uploadUrl: 'https://app/payments/upload/raw' },
       }),
     });
     expect(outcome).toEqual({ kind: 'result', statusCode: 201, replayed: false, body: CREATED_ORDER });

@@ -1,0 +1,208 @@
+# Mas Sular — production application topology.
+#
+# Scope of this file: the APPLICATION tier only. TLS termination, DNS and the
+# reverse proxy are deliberately left out (a later phase owns them); the three
+# web services are attached to an `edge` network so a proxy can be added in
+# front without touching this file.
+#
+# NETWORK RULE — the whole point of the two-network split:
+#   edge     : frontend, admin, backend        (a future proxy joins here)
+#   internal : backend, mysql, redis, rabbitmq (internal: true — no egress)
+# MySQL/Redis/RabbitMQ publish NO host ports. They are reachable only by
+# Docker DNS names (mysql, redis, rabbitmq) from services on `internal`.
+#
+# Secrets come from an env file that is NEVER committed:
+#   docker compose --env-file ./production.env -f docker-compose.production.yml up -d
+#
+# Database: MySQL 8.4 — the version the integration suite validates.
+# RabbitMQ: see OPTION A / OPTION B below before deploying.
+
+name: mas-sular
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-hardening: &hardening
+  security_opt:
+    - no-new-privileges:true
+
+services:
+  # ------------------------------------------------------------- database ---
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    <<: *hardening
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:?set MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER:?set MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks: [internal]
+    # NO ports: — 3306 must never reach the host.
+    healthcheck:
+      # CMD-SHELL, not CMD: the exec form would pass the literal string
+      # "$MYSQL_ROOT_PASSWORD" instead of expanding it inside the container.
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits: { cpus: "2.0", memory: 2G }
+        reservations: { memory: 512M }
+
+  # ---------------------------------------------------------------- cache ---
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    <<: *hardening
+    # Cache only — the application treats Redis as non-authoritative, so no
+    # AOF/RDB persistence is configured. Eviction beats OOM for a cache.
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "192mb", "--maxmemory-policy", "allkeys-lru"]
+    networks: [internal]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 256M }
+
+  # ------------------------------------------------------------- messaging --
+  # OPTION B (self-hosted) — active here so the stack is self-contained.
+  # OPTION A (external CloudAMQP, which staging uses today): delete this
+  # service, drop `rabbitmq` from the backend's depends_on, and point
+  # RABBITMQ_URL at the managed amqps:// endpoint. Nothing else changes.
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    restart: unless-stopped
+    <<: *hardening
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?set RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks: [internal]
+    # NO ports: — neither 5672 nor the 15672 management UI is published.
+    # Reach the UI with: ssh -L 15672:localhost:15672 <vps> then docker exec.
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 6
+      start_period: 45s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 512M }
+
+  # ------------------------------------------------------------ migration ---
+  # Runs to completion BEFORE the API starts. `migrate deploy` only applies
+  # committed migrations — it never generates or resets, unlike `migrate dev`.
+  backend-migrate:
+    build:
+      context: ./backend
+      target: migrator
+    restart: "no"
+    <<: *hardening
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
+    networks: [internal]
+    depends_on:
+      mysql: { condition: service_healthy }
+    logging: *default-logging
+
+  # ------------------------------------------------------------------ API ---
+  backend:
+    build:
+      context: ./backend
+      target: runner
+    restart: unless-stopped
+    <<: *hardening
+    env_file: [./production.env]
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+    volumes:
+      # Receipt uploads must outlive the container. Named volume, not a bind:
+      # Docker owns the permissions, which matters because the process is
+      # non-root (uid 1000).
+      - uploads_data:/app/uploads
+    networks: [edge, internal]
+    # Not published: the reverse proxy reaches it over `edge` by DNS name.
+    depends_on:
+      mysql: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+      backend-migrate: { condition: service_completed_successfully }
+    logging: *default-logging
+    deploy:
+      resources:
+        limits: { cpus: "2.0", memory: 1536M }
+        reservations: { memory: 512M }
+
+  # ----------------------------------------------------------- storefront ---
+  frontend:
+    build:
+      context: ./frontend
+      target: runner
+      args:
+        # Inlined into the client bundle at BUILD time — a change needs a rebuild.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?set NEXT_PUBLIC_API_URL}
+        NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${NEXT_PUBLIC_GOOGLE_CLIENT_ID:-}
+        NEXT_PUBLIC_SUPPORT_URL: ${NEXT_PUBLIC_SUPPORT_URL:-}
+    restart: unless-stopped
+    <<: *hardening
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+    networks: [edge]
+    logging: *default-logging
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 768M }
+
+  # ---------------------------------------------------------------- admin ---
+  admin:
+    build:
+      context: ./admin
+      target: runner
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_ADMIN_API_URL:-${NEXT_PUBLIC_API_URL}}
+    restart: unless-stopped
+    <<: *hardening
+    environment:
+      NODE_ENV: production
+      PORT: 3002
+      HOSTNAME: 0.0.0.0
+    networks: [edge]
+    logging: *default-logging
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 512M }
+
+networks:
+  edge:
+    driver: bridge
+  internal:
+    driver: bridge
+    internal: true   # no route to the outside world
+
+volumes:
+  mysql_data:
+  rabbitmq_data:
+  uploads_data:

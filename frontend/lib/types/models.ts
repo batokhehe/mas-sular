@@ -141,6 +141,15 @@ export interface ShippingQuote {
   estimated_days: string
 }
 
+/** A selectable shipping service returned by /checkout/shipping-options. */
+export interface ShippingOption {
+  provider: string
+  service: string
+  serviceName: string
+  estimatedDays: string
+  shippingCost: number
+}
+
 export interface VoucherPreview {
   valid: boolean
   discount: number
@@ -159,6 +168,10 @@ export interface CheckoutSummary {
 export interface UploadPage {
   orderNumber: string
   amount: number
+  /** Business revenue (Order.totalPrice); equals `amount` when there is no code. */
+  businessTotal?: number | null
+  /** Manual BANK_TRANSFER unique code folded into `amount`; null for QRIS/legacy. */
+  uniqueCode?: number | null
   method: PaymentMethod
   bankName?: string | null
   status: PaymentStatus
@@ -181,6 +194,8 @@ export interface Payment {
   method: PaymentMethod
   status: PaymentStatus
   amount: number
+  /** Manual BANK_TRANSFER unique code folded into `amount`; null for QRIS/COD/legacy. */
+  uniqueCode?: number | null
   manualReceiptUrl?: string | null
   manualBankName?: string | null
   manualAccountName?: string | null
@@ -188,6 +203,12 @@ export interface Payment {
   firstReminderAt?: string | null
   secondReminderAt?: string | null
   createdAt: string
+  /**
+   * Latest gateway attempt, summarised by the order-list endpoint. Null for
+   * manual transfer and for a gateway payment that was never initiated. Carries
+   * the deadline ONLY — no QR payload, VA number, provider id or provider name.
+   */
+  gateway?: { expiryAt: string | null; status: string } | null
   // Included by the admin listPayments endpoint.
   order?: {
     id: string

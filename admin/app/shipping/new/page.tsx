@@ -13,8 +13,8 @@ export default function NewShipmentPage() {
   const queryClient = useQueryClient();
 
   const ordersQuery = useQuery({
-    queryKey: ['admin-orders'],
-    queryFn: fetchAdminOrders,
+    queryKey: ['admin-orders', 'shipment-options'],
+    queryFn: () => fetchAdminOrders({ limit: 100 }),
     retry: false,
   });
 
@@ -49,7 +49,7 @@ export default function NewShipmentPage() {
         <p className="mt-1 text-sm text-gray-500">Create a shipment record for an existing order.</p>
       </div>
       <ShipmentForm
-        orders={ordersQuery.data}
+        orders={ordersQuery.data.items}
         onSubmit={async (values) => {
           await runWithFeedback({
             loading: ADMIN_LOADING_MESSAGES.create,

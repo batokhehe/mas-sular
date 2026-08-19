@@ -12,6 +12,11 @@ const defaultApiUrl =
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || defaultApiUrl;
 
+/** Single source of truth for the API origin (raw fetch/EventSource callers included). */
+export function apiBaseUrl(): string {
+  return API_URL;
+}
+
 export function getAuthToken() {
   if (typeof window === 'undefined') {
     return null;

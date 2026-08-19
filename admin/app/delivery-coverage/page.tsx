@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardTitle } from '@/components/ui/card';
 import { ROUTE_PERMISSIONS } from '@/lib/access';
+import { formatRupiahExact } from '@/lib/utils/number';
 import {
   AdminDeliveryCoverage,
   CoverageType,
@@ -25,7 +26,7 @@ import {
   runWithFeedback,
 } from '@/lib/admin-alert';
 
-const rupiah = (value: number) => `Rp ${value.toLocaleString('id-ID')}`;
+const rupiah = formatRupiahExact;
 
 const coverageBadge = (type: CoverageType) => {
   if (type === 'DELIVERY') return <Badge tone="success">Delivery</Badge>;

@@ -6,6 +6,8 @@ import { CheckCircle2, Headset, Home, Loader2, Package } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { hasCustomerSession } from '@/lib/auth/tokens'
+import { PaymentRedirectResult } from '@/components/storefront/payment-redirect-result'
+import { isMidtransRedirect } from '@/lib/payments/redirect-params'
 
 // Support channel (configurable); safe default. Never a token/ID.
 const SUPPORT_URL = process.env.NEXT_PUBLIC_SUPPORT_URL || 'mailto:cs@baksomassular.com'
@@ -13,6 +15,15 @@ const SUPPORT_URL = process.env.NEXT_PUBLIC_SUPPORT_URL || 'mailto:cs@baksomassu
 function SuccessInner() {
   const router = useRouter()
   const params = useSearchParams()
+
+  // Midtrans's Finish Redirect URL points at this same route, so the two landings
+  // share it. A Midtrans redirect carries `order_id` / `transaction_status` /
+  // `status_code`; the manual receipt-upload flow navigates here with `?order=`.
+  // Discriminating on those params keeps the existing BANK_TRANSFER copy intact.
+  if (isMidtransRedirect(params)) {
+    return <PaymentRedirectResult variant="success" />
+  }
+
   // Order number is a human-facing identifier (shown on orders + WhatsApp) — NOT the
   // upload token. Passed via query on redirect; absent on a direct visit.
   const orderNumber = params.get('order')
