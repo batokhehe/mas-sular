@@ -130,6 +130,11 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+    # Measured peak during a real `migrate deploy`: 55 tasks — node plus the Rust
+    # schema engine, whose Tokio pool is sized to the host's CPU count and will be
+    # HIGHER on a bigger machine than the one this was measured on. 256 keeps ~4.7x
+    # headroom so a migration can never abort on a PID ceiling mid-run (F56).
+    pids_limit: 256
     environment:
       DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
     networks: [internal]
@@ -170,7 +175,12 @@ services:
     logging: *default-logging
     deploy:
       resources:
-        limits: { cpus: "2.0", memory: 1536M }
+        # pids: measured steady state 34 tasks (32 threads in the Node process,
+        # incl. the Prisma query engine). 1200 concurrent requests added none —
+        # Node serves on the event loop, not per-connection threads. ~7.5x
+        # headroom (F56). Set here, not as top-level pids_limit: Compose treats
+        # the two as one setting and rejects declaring both.
+        limits: { cpus: "2.0", memory: 1536M, pids: 256 }
         reservations: { memory: 512M }
 
   # ----------------------------------------------------------- storefront ---
@@ -197,7 +207,9 @@ services:
     logging: *default-logging
     deploy:
       resources:
-        limits: { cpus: "1.0", memory: 768M }
+        # pids: measured peak 13 tasks (next-server holds a fixed 11 threads; 600
+        # concurrent requests added none). No query engine, so lower than the API.
+        limits: { cpus: "1.0", memory: 768M, pids: 128 }
 
   # ---------------------------------------------------------------- admin ---
   admin:
@@ -218,7 +230,8 @@ services:
     logging: *default-logging
     deploy:
       resources:
-        limits: { cpus: "0.5", memory: 512M }
+        # pids: same shape as the storefront — measured peak 13 tasks.
+        limits: { cpus: "0.5", memory: 512M, pids: 128 }
 
 networks:
   edge:
