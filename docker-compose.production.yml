@@ -118,6 +118,12 @@ services:
       target: migrator
     restart: "no"
     <<: *hardening
+    # The process runs as uid 1000, so its effective capability set is already
+    # empty; dropping ALL clears the BOUNDING set too, so nothing can be regained
+    # if a future change adds a setuid binary or switches back to root (F54).
+    cap_drop: [ALL]
+    # read_only is deliberately NOT set here: the Prisma schema-engine's
+    # scratch-space behaviour has not been verified. Left writable until it is.
     environment:
       DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
     networks: [internal]
@@ -132,6 +138,13 @@ services:
       target: runner
     restart: unless-stopped
     <<: *hardening
+    cap_drop: [ALL]
+    # Immutable root filesystem. dist/ and prisma/ are chowned to node so the
+    # process can READ them; the write bit was an unwanted side effect, and this
+    # removes it (F58). Mounts stay writable, so uploads still work.
+    read_only: true
+    tmpfs:
+      - /tmp
     env_file: [./production.env]
     environment:
       NODE_ENV: production
@@ -166,6 +179,10 @@ services:
         NEXT_PUBLIC_SUPPORT_URL: ${NEXT_PUBLIC_SUPPORT_URL:-}
     restart: unless-stopped
     <<: *hardening
+    cap_drop: [ALL]
+    # `output: standalone` with no ISR writes nothing at runtime — verified to
+    # boot and stay healthy with a read-only root and no tmpfs at all.
+    read_only: true
     environment:
       NODE_ENV: production
       PORT: 3000
@@ -185,6 +202,8 @@ services:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_ADMIN_API_URL:-${NEXT_PUBLIC_API_URL}}
     restart: unless-stopped
     <<: *hardening
+    cap_drop: [ALL]
+    read_only: true
     environment:
       NODE_ENV: production
       PORT: 3002
