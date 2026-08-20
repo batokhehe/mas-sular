@@ -122,8 +122,14 @@ services:
     # empty; dropping ALL clears the BOUNDING set too, so nothing can be regained
     # if a future change adds a setuid binary or switches back to root (F54).
     cap_drop: [ALL]
-    # read_only is deliberately NOT set here: the Prisma schema-engine's
-    # scratch-space behaviour has not been verified. Left writable until it is.
+    # `prisma migrate deploy` was verified against a disposable MySQL 8.4 under a
+    # read-only rootfs: all 35 migrations applied, 0 EROFS, 0 EACCES, and /tmp was
+    # still empty afterwards — the schema engine works entirely over the DB
+    # connection. It also passed with no tmpfs at all; /tmp is kept as defensive
+    # scratch space in case a future engine or a larger migration needs to spill.
+    read_only: true
+    tmpfs:
+      - /tmp
     environment:
       DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
     networks: [internal]
