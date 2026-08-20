@@ -66,6 +66,13 @@ ENV NODE_ENV=production
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --chown=node:node prisma ./prisma
 COPY --chown=node:node package.json ./
+# F59 (Option A): the CMD below invokes `node` against the vendored Prisma CLI
+# directly, so no package manager is on the command path. pnpm is present only
+# because this stage inherits `base` (which runs corepack prepare); strip it and
+# the rest so a compromised migrator cannot fetch or execute remote packages.
+# The Prisma CLI, schema engine and @prisma/client all live under
+# /app/node_modules and are untouched.
+RUN rm -rf /pnpm /usr/local/bin/pnpm /usr/local/bin/pnpx /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/yarnpkg /opt/yarn-v* /sbin/apk /etc/apk /lib/apk /usr/share/apk /var/cache/apk
 USER node
 # Invoke the vendored Prisma CLI DIRECTLY. Going through `pnpm` makes corepack
 # try to fetch the package manager from registry.npmjs.org at runtime, which
@@ -92,6 +99,17 @@ COPY --chown=node:node package.json ./
 # Receipt uploads live here (main.ts serves join(process.cwd(), 'uploads')).
 # Created up front so the volume mount inherits the right owner.
 RUN mkdir -p /app/uploads && chown node:node /app/uploads
+
+# F59 (Option A): strip package managers from the RUNTIME image. Nothing here
+# invokes them — the app is `node dist/src/main.js` and the healthcheck is
+# `node -e fetch(...)` — but `npx <anything>` is the most convenient way to run
+# arbitrary remote code after an RCE, and this service has egress via `edge`.
+# Safe because they are self-contained symlink targets: node is a standalone
+# binary at /usr/local/bin/node and is untouched.
+# NOT removed: sh/busybox (CMD-SHELL healthchecks and docker exec depend on it),
+# dumb-init, node. BusyBox therefore still exposes wget/nc as applets — accepted
+# residual risk; removing the /usr/bin/wget symlink would be cosmetic only.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/yarnpkg /opt/yarn-v* /sbin/apk /etc/apk /lib/apk /usr/share/apk /var/cache/apk
 
 USER node
 EXPOSE 3001

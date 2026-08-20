@@ -57,6 +57,17 @@ COPY --from=build --chown=node:node /app/.next/standalone ./
 COPY --from=build --chown=node:node /app/.next/static ./.next/static
 COPY --from=build --chown=node:node /app/public ./public
 
+# F59 (Option A): strip package managers from the RUNTIME image. Nothing here
+# invokes them — the app is `node server.js` and the healthcheck is
+# `node -e fetch(...)` — but `npx <anything>` is the most convenient way to run
+# arbitrary remote code after an RCE, and this service has egress via `edge`.
+# Safe because they are self-contained symlink targets: node is a standalone
+# binary at /usr/local/bin/node and is untouched.
+# NOT removed: sh/busybox (CMD-SHELL healthchecks and docker exec depend on it),
+# dumb-init, node. BusyBox therefore still exposes wget/nc as applets — accepted
+# residual risk; removing the /usr/bin/wget symlink would be cosmetic only.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/yarnpkg /opt/yarn-v* /sbin/apk /etc/apk /lib/apk /usr/share/apk /var/cache/apk
+
 USER node
 EXPOSE 3000
 
