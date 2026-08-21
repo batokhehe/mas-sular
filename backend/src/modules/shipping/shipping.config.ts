@@ -5,6 +5,8 @@ export interface PaxelProviderConfig {
   enabled: boolean;
   baseUrl: string;
   apiKey?: string;
+  /** Signs create/cancel requests (X-Paxel-Signature). Never logged, never returned. */
+  apiSecret?: string;
   timeoutMs: number;
   maxRetry: number;
   /**
@@ -72,6 +74,7 @@ export function loadShippingConfig(env: NodeJS.ProcessEnv = process.env): Shippi
       enabled: bool(env.PAXEL_ENABLED),
       baseUrl: (env.PAXEL_BASE_URL ?? 'https://api.paxel.co').replace(/\/+$/, ''),
       apiKey: env.PAXEL_API_KEY,
+      apiSecret: env.PAXEL_API_SECRET,
       timeoutMs: positiveInt(env.PAXEL_TIMEOUT_MS, 8_000),
       maxRetry: positiveInt(env.PAXEL_MAX_RETRY, 2),
       defaultDimension: env.PAXEL_DEFAULT_DIMENSION ?? '30x35x20',
@@ -96,6 +99,7 @@ export function loadShippingConfig(env: NodeJS.ProcessEnv = process.env): Shippi
 export function assertShippingConfigured(config: ShippingConfig): void {
   const missing: string[] = [];
   if (config.paxel.enabled && !config.paxel.apiKey) missing.push('PAXEL_API_KEY');
+  if (config.paxel.enabled && !config.paxel.apiSecret) missing.push('PAXEL_API_SECRET');
   if (config.paxel.enabled && !isPaxelDimension(config.paxel.defaultDimension)) {
     missing.push('PAXEL_DEFAULT_DIMENSION (expected LxWxH in cm, each side 1-50)');
   }

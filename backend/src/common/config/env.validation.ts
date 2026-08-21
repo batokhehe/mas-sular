@@ -90,6 +90,8 @@ const baseSchema = z
     PAXEL_ENABLED: boolFlag,
     PAXEL_BASE_URL: z.string().optional(),
     PAXEL_API_KEY: z.string().optional(),
+    // Signs X-Paxel-Signature on create/cancel. Required when Paxel is enabled.
+    PAXEL_API_SECRET: z.string().optional(),
     PAXEL_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
     PAXEL_MAX_RETRY: z.coerce.number().int().nonnegative().optional(),
     // Parcel envelope for Paxel's required `dimension` (LxWxH cm, each side 1-50).
@@ -168,6 +170,9 @@ export const envSchema = baseSchema.superRefine((env, ctx) => {
   // Shipping providers: credentials are required when the provider is enabled.
   if (env.PAXEL_ENABLED === 'true' && !env.PAXEL_API_KEY) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['PAXEL_API_KEY'], message: 'PAXEL_API_KEY is required when PAXEL_ENABLED=true' });
+  }
+  if (env.PAXEL_ENABLED === 'true' && !env.PAXEL_API_SECRET) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['PAXEL_API_SECRET'], message: 'PAXEL_API_SECRET is required when PAXEL_ENABLED=true' });
   }
   if (env.PAXEL_ENABLED === 'true' && !env.PAXEL_DEFAULT_DIMENSION) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['PAXEL_DEFAULT_DIMENSION'], message: 'PAXEL_DEFAULT_DIMENSION is required when PAXEL_ENABLED=true' });
