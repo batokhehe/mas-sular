@@ -233,6 +233,8 @@ export type AdminRole = {
   id: string;
   name: string;
   description?: string | null;
+  /** Optimistic-concurrency token (C7b). Send it back as expectedUpdatedAt when editing. */
+  updatedAt: string;
   permissions: Array<{ permission: { id: string; action: string; subject: string } }>;
 };
 
@@ -266,7 +268,15 @@ export function createAdminRole(input: { name: string; description?: string; per
   });
 }
 
-export function updateAdminRole(id: string, input: Partial<{ name: string; description?: string | null; permissionIds: string[] }>) {
+/**
+ * `expectedUpdatedAt` must be the value from the GET that seeded the form (C7b).
+ * The server compares it in the write itself and answers 409 if the role moved on;
+ * re-reading it just before saving would make the check always pass.
+ */
+export function updateAdminRole(
+  id: string,
+  input: Partial<{ name: string; description?: string | null; permissionIds: string[] }> & { expectedUpdatedAt: string },
+) {
   return api<AdminRole>(`/admin/roles/${id}`, {
     method: 'PATCH',
     body: JSON.stringify(input),
