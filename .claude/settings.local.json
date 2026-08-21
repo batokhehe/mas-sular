@@ -66,7 +66,8 @@
       "Bash(grep -nA10 \"export interface Banner\" frontend/lib/types/models.ts)",
       "Bash(grep -nA13 \"model Banner\" backend/prisma/schema.prisma)",
       "Bash(xargs sed -n '14,22p')",
-      "Bash(echo \"tsc total errors: $\\(npx tsc --noEmit 2>&1)"
+      "Bash(echo \"tsc total errors: $\\(npx tsc --noEmit 2>&1)",
+      "Bash(awk '{print $2}')"
     ]
   }
 }
