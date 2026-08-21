@@ -92,6 +92,9 @@ const baseSchema = z
     PAXEL_API_KEY: z.string().optional(),
     PAXEL_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
     PAXEL_MAX_RETRY: z.coerce.number().int().nonnegative().optional(),
+    // Parcel envelope for Paxel's required `dimension` (LxWxH cm, each side 1-50).
+    // Paxel prices from it, so a bad value silently changes what customers pay.
+    PAXEL_DEFAULT_DIMENSION: z.string().regex(/^\d{1,2}x\d{1,2}x\d{1,2}$/, 'PAXEL_DEFAULT_DIMENSION must be LxWxH in cm, e.g. 30x35x20').optional(),
     JNE_ENABLED: boolFlag,
     JNE_BASE_URL: z.string().optional(),
     JNE_API_KEY: z.string().optional(),
@@ -165,6 +168,9 @@ export const envSchema = baseSchema.superRefine((env, ctx) => {
   // Shipping providers: credentials are required when the provider is enabled.
   if (env.PAXEL_ENABLED === 'true' && !env.PAXEL_API_KEY) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['PAXEL_API_KEY'], message: 'PAXEL_API_KEY is required when PAXEL_ENABLED=true' });
+  }
+  if (env.PAXEL_ENABLED === 'true' && !env.PAXEL_DEFAULT_DIMENSION) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['PAXEL_DEFAULT_DIMENSION'], message: 'PAXEL_DEFAULT_DIMENSION is required when PAXEL_ENABLED=true' });
   }
   if (env.JNE_ENABLED === 'true') {
     for (const key of ['JNE_API_KEY', 'JNE_USERNAME', 'JNE_ORIGIN_CODE'] as const) {

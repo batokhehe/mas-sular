@@ -10,7 +10,7 @@ function config(paxelEnabled: boolean, jneEnabled: boolean, maxRetry = 1): Shipp
   return {
     originPostalCode: '40111',
     allowMockRates: false,
-    paxel: { enabled: paxelEnabled, baseUrl: 'https://paxel.test', apiKey: 'secret', timeoutMs: 500, maxRetry },
+    paxel: { enabled: paxelEnabled, baseUrl: 'https://paxel.test', apiKey: 'secret', timeoutMs: 500, maxRetry, defaultDimension: '30x35x20' },
     jne: {
       enabled: jneEnabled,
       baseUrl: 'https://jne.test',
