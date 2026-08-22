@@ -7,6 +7,20 @@ export interface PaxelProviderConfig {
   apiKey?: string;
   /** Signs create/cancel requests (X-Paxel-Signature). Never logged, never returned. */
   apiSecret?: string;
+  /**
+   * Merchant pickup contact, sent as `origin.phone` on shipment creation.
+   * Configured rather than stored on Outlet for now: Outlet has no contact
+   * column, and inventing one per outlet is a schema decision this phase does
+   * not take. Paxel requires 9-13 digits.
+   */
+  originPhone?: string;
+  /**
+   * Pickup instruction for the Paxel driver, sent as `origin.note`. Required by
+   * Paxel and deliberately WITHOUT a default - it is a real instruction about
+   * reaching the pickup point ("side entrance", "ask for the shift lead"), and
+   * a placeholder would be shipped to a courier as if it were true.
+   */
+  originNote?: string;
   timeoutMs: number;
   maxRetry: number;
   /**
@@ -52,6 +66,15 @@ function bool(value: string | undefined): boolean {
 }
 
 /**
+ * Paxel documents origin/destination phone as min:9,max:13. Digits only - the
+ * value goes straight into the shipment request, so a formatted string like
+ * "+62 812-1212" would be rejected at booking rather than at boot.
+ */
+export function isPaxelPhone(value: string | undefined): boolean {
+  return !!value && /^\d{9,13}$/.test(value.trim());
+}
+
+/**
  * Paxel documents `dimension` as max:11 chars, between 1x1x1 and 50x50x50.
  * Validated at boot so a typo surfaces as a config error rather than as a 400
  * on a customer's checkout.
@@ -75,6 +98,8 @@ export function loadShippingConfig(env: NodeJS.ProcessEnv = process.env): Shippi
       baseUrl: (env.PAXEL_BASE_URL ?? 'https://api.paxel.co').replace(/\/+$/, ''),
       apiKey: env.PAXEL_API_KEY,
       apiSecret: env.PAXEL_API_SECRET,
+      originPhone: env.PAXEL_ORIGIN_PHONE,
+      originNote: env.PAXEL_ORIGIN_NOTE,
       timeoutMs: positiveInt(env.PAXEL_TIMEOUT_MS, 8_000),
       maxRetry: positiveInt(env.PAXEL_MAX_RETRY, 2),
       defaultDimension: env.PAXEL_DEFAULT_DIMENSION ?? '30x35x20',
@@ -100,6 +125,12 @@ export function assertShippingConfigured(config: ShippingConfig): void {
   const missing: string[] = [];
   if (config.paxel.enabled && !config.paxel.apiKey) missing.push('PAXEL_API_KEY');
   if (config.paxel.enabled && !config.paxel.apiSecret) missing.push('PAXEL_API_SECRET');
+  if (config.paxel.enabled && !isPaxelPhone(config.paxel.originPhone)) {
+    missing.push('PAXEL_ORIGIN_PHONE (expected 9-13 digits)');
+  }
+  if (config.paxel.enabled && !config.paxel.originNote?.trim()) {
+    missing.push('PAXEL_ORIGIN_NOTE (pickup instruction for the courier)');
+  }
   if (config.paxel.enabled && !isPaxelDimension(config.paxel.defaultDimension)) {
     missing.push('PAXEL_DEFAULT_DIMENSION (expected LxWxH in cm, each side 1-50)');
   }

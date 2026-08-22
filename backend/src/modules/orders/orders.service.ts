@@ -789,6 +789,16 @@ export class OrdersService {
                 productName: product.name,
                 unitPrice: product.price,
                 quantity: item.quantity,
+                // Physical snapshot, taken here for the same reason productName
+                // and unitPrice are: shipment booking happens asynchronously
+                // after payment, so reading Product then would let a later edit
+                // change the parcel of an order that is already paid for.
+                // Null when the product has no measurements yet - never guessed.
+                weightGram: product.weightGram,
+                lengthCm: product.lengthCm,
+                widthCm: product.widthCm,
+                heightCm: product.heightCm,
+                isFragile: product.isFragile,
                 spicyLevel: item.spicyLevel,
                 notes: item.notes,
                 toppings: {

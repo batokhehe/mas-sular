@@ -92,6 +92,11 @@ const baseSchema = z
     PAXEL_API_KEY: z.string().optional(),
     // Signs X-Paxel-Signature on create/cancel. Required when Paxel is enabled.
     PAXEL_API_SECRET: z.string().optional(),
+    // Merchant pickup contact sent as origin.phone (Paxel: 9-13 digits).
+    PAXEL_ORIGIN_PHONE: z.string().regex(/^\d{9,13}$/, 'PAXEL_ORIGIN_PHONE must be 9-13 digits').optional(),
+    // Pickup instruction for the courier, sent as origin.note. No default: it is
+    // a real instruction and a placeholder would be shipped as if it were true.
+    PAXEL_ORIGIN_NOTE: z.string().min(1).optional(),
     PAXEL_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
     PAXEL_MAX_RETRY: z.coerce.number().int().nonnegative().optional(),
     // Parcel envelope for Paxel's required `dimension` (LxWxH cm, each side 1-50).
@@ -173,6 +178,12 @@ export const envSchema = baseSchema.superRefine((env, ctx) => {
   }
   if (env.PAXEL_ENABLED === 'true' && !env.PAXEL_API_SECRET) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['PAXEL_API_SECRET'], message: 'PAXEL_API_SECRET is required when PAXEL_ENABLED=true' });
+  }
+  if (env.PAXEL_ENABLED === 'true' && !env.PAXEL_ORIGIN_PHONE) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['PAXEL_ORIGIN_PHONE'], message: 'PAXEL_ORIGIN_PHONE is required when PAXEL_ENABLED=true' });
+  }
+  if (env.PAXEL_ENABLED === 'true' && !env.PAXEL_ORIGIN_NOTE?.trim()) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['PAXEL_ORIGIN_NOTE'], message: 'PAXEL_ORIGIN_NOTE is required when PAXEL_ENABLED=true' });
   }
   if (env.PAXEL_ENABLED === 'true' && !env.PAXEL_DEFAULT_DIMENSION) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['PAXEL_DEFAULT_DIMENSION'], message: 'PAXEL_DEFAULT_DIMENSION is required when PAXEL_ENABLED=true' });
