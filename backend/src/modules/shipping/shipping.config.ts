@@ -21,6 +21,12 @@ export interface PaxelProviderConfig {
    * a placeholder would be shipped to a courier as if it were true.
    */
   originNote?: string;
+  /**
+   * Paxel's required `need_insurance`. Off unless deliberately switched on:
+   * insurance costs money per shipment, so it is never enabled by accident or
+   * by an absent variable.
+   */
+  needInsurance: boolean;
   timeoutMs: number;
   maxRetry: number;
   /**
@@ -100,6 +106,7 @@ export function loadShippingConfig(env: NodeJS.ProcessEnv = process.env): Shippi
       apiSecret: env.PAXEL_API_SECRET,
       originPhone: env.PAXEL_ORIGIN_PHONE,
       originNote: env.PAXEL_ORIGIN_NOTE,
+      needInsurance: bool(env.PAXEL_NEED_INSURANCE),
       timeoutMs: positiveInt(env.PAXEL_TIMEOUT_MS, 8_000),
       maxRetry: positiveInt(env.PAXEL_MAX_RETRY, 2),
       defaultDimension: env.PAXEL_DEFAULT_DIMENSION ?? '30x35x20',

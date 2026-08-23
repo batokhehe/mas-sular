@@ -392,6 +392,36 @@ export function fetchAdminShipments(params: PageParams & { status?: string } = {
   return api<Paginated<AdminShipment>>(`/admin/shipments${query ? `?${query}` : ''}`);
 }
 
+/** One order's outcome from the packing action. Reported per order, never as a batch verdict. */
+export type PrepareShipmentResult = {
+  orderId: string;
+  ok: boolean;
+  status: string | null;
+  trackingNumber: string | null;
+  error: string | null;
+};
+
+/** The four Paxel services this application books. */
+export const PAXEL_SERVICE_OPTIONS = [
+  { value: 'PAXEL_INSTANT', label: 'Instant' },
+  { value: 'PAXEL_SAMEDAY', label: 'Same Day' },
+  { value: 'PAXEL_NEXTDAY', label: 'Next Day' },
+  { value: 'PAXEL_REGULAR', label: 'Regular' },
+] as const;
+
+/**
+ * Book one or more orders with the pickup slot the admin selected.
+ *
+ * `pickupAt` is required and never defaulted client-side: the courier pickup is
+ * a real appointment, so the operator states it explicitly.
+ */
+export function prepareShipments(input: { orderIds: string[]; pickupAt: string; service?: string }) {
+  return api<{ results: PrepareShipmentResult[]; booked: number; failed: number }>('/admin/orders/shipments/prepare', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
 export type AdminOrderDetail = AdminOrder & {
   address?: AdminAddress | null;
   // Selected shipping-provider snapshot (read-only; no manual cost input).

@@ -9,16 +9,25 @@ import { Card, CardTitle } from '@/components/ui/card';
 import { Pagination } from '@/components/ui/pagination';
 import { ROUTE_PERMISSIONS } from '@/lib/access';
 import { fetchAdminOrders, AdminOrder } from '@/lib/admin';
+import { PrepareShipmentPanel } from './components/prepare-shipment-panel';
 
-const statusOptions = ['ALL', 'PENDING', 'PROCESSING', 'DELIVERING', 'COMPLETED', 'CANCELLED'] as const;
+const statusOptions = ['ALL', 'PENDING', 'PROCESSING', 'PACKING', 'DELIVERING', 'COMPLETED', 'CANCELLED'] as const;
+
+/**
+ * Only these can be handed to a courier. PACKING is the existing state for an
+ * order being prepared; PROCESSING is where a paid order lands. Anything else
+ * is either not paid for yet or already gone, so it cannot be selected.
+ */
+const BOOKABLE_STATUSES = new Set(['PROCESSING', 'PACKING']);
 
 export default function OrdersPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<typeof statusOptions[number]>('ALL');
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['admin-orders', statusFilter, page, limit],
     queryFn: () => fetchAdminOrders({ status: statusFilter === 'ALL' ? undefined : statusFilter, page, limit }),
     placeholderData: keepPreviousData,
@@ -35,6 +44,23 @@ export default function OrdersPage() {
       ),
     );
   }, [data, search]);
+
+  const selectedOrders = useMemo(
+    () => orders.filter((order: AdminOrder) => selectedIds.has(order.id)),
+    [orders, selectedIds],
+  );
+
+  function toggle(order: AdminOrder) {
+    // Guard here as well as in the checkbox: an ineligible order must never
+    // reach the packing action, whatever the UI state.
+    if (!BOOKABLE_STATUSES.has(order.status)) return;
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(order.id)) next.delete(order.id);
+      else next.add(order.id);
+      return next;
+    });
+  }
 
   return (
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.orders}>
@@ -68,6 +94,14 @@ export default function OrdersPage() {
           </select>
         </div>
 
+        {selectedOrders.length > 0 ? (
+          <PrepareShipmentPanel
+            selected={selectedOrders}
+            onDone={() => void refetch()}
+            onClear={() => setSelectedIds(new Set())}
+          />
+        ) : null}
+
         <CardTitle>Recent Orders</CardTitle>
         <div className="mt-4 overflow-x-auto">
           {isLoading ? (
@@ -80,6 +114,7 @@ export default function OrdersPage() {
             <table className="w-full min-w-[760px] text-left text-sm">
               <thead>
                 <tr className="border-b border-gray-100 text-xs uppercase text-gray-400">
+                  <th className="w-8 py-3 font-medium"><span className="sr-only">Select</span></th>
                   <th className="py-3 font-medium">Order</th>
                   <th className="py-3 font-medium">Customer</th>
                   <th className="py-3 font-medium">Status</th>
@@ -91,6 +126,17 @@ export default function OrdersPage() {
               <tbody>
                 {orders.map((order) => (
                   <tr key={order.id} className="border-b border-gray-50 last:border-0">
+                    <td className="py-4">
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${order.orderNumber}`}
+                        checked={selectedIds.has(order.id)}
+                        onChange={() => toggle(order)}
+                        disabled={!BOOKABLE_STATUSES.has(order.status)}
+                        title={BOOKABLE_STATUSES.has(order.status) ? undefined : 'Only paid orders being processed or packed can be shipped'}
+                        className="h-4 w-4 rounded border-gray-300 disabled:cursor-not-allowed disabled:opacity-40"
+                      />
+                    </td>
                     <td className="py-4 font-medium text-gray-800">{order.orderNumber}</td>
                     <td className="py-4 text-gray-500">{order.user?.name ?? '-'}</td>
                     <td className="py-4">

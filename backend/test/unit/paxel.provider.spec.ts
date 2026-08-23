@@ -27,7 +27,7 @@ function config(over: Partial<{ enabled: boolean; maxRetry: number; allowMockRat
       apiKey: API_KEY,
       timeoutMs: 500,
       maxRetry: over.maxRetry ?? 0,
-      defaultDimension: over.dimension ?? '30x35x20',
+      defaultDimension: over.dimension ?? '30x35x20', needInsurance: false,
     },
     jne: { enabled: false, baseUrl: 'https://jne.test', timeoutMs: 500, maxRetry: 0, },
   };

@@ -97,6 +97,8 @@ const baseSchema = z
     // Pickup instruction for the courier, sent as origin.note. No default: it is
     // a real instruction and a placeholder would be shipped as if it were true.
     PAXEL_ORIGIN_NOTE: z.string().min(1).optional(),
+    // Paxel's need_insurance. Absent or anything but 'true' means OFF.
+    PAXEL_NEED_INSURANCE: boolFlag,
     PAXEL_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
     PAXEL_MAX_RETRY: z.coerce.number().int().nonnegative().optional(),
     // Parcel envelope for Paxel's required `dimension` (LxWxH cm, each side 1-50).

@@ -35,7 +35,7 @@ function config(over: Partial<{ enabled: boolean; maxRetry: number }> = {}): Shi
       apiSecret: API_SECRET,
       timeoutMs: 500,
       maxRetry: over.maxRetry ?? 0,
-      defaultDimension: '30x35x20',
+      defaultDimension: '30x35x20', needInsurance: false,
     },
     jne: { enabled: false, baseUrl: 'https://jne.test', timeoutMs: 500, maxRetry: 0 },
   };
@@ -192,12 +192,24 @@ describe('PaxelShipmentProvider tracking', () => {
     ['RAP', ShipmentStatus.FAILED],
     ['UNDLM', ShipmentStatus.FAILED],
     ['RTN', ShipmentStatus.FAILED],
+    // CCS moved out of the undocumented set: staging cancellation produced it.
+    ['CCS', ShipmentStatus.CANCELLED],
   ])('maps the documented status %s to %s', async (paxelStatus, expected) => {
     const { provider } = build(config(), () => res(200, detail(paxelStatus)));
     expect((await provider.trackShipment(AWB)).status).toBe(expected);
   });
 
-  it.each(['CCS', 'HAPH', 'FAILED3PL', 'ONHOLD3PL', 'ODL', 'ODLXL', 'POLXL'])(
+  /**
+   * CCS is no longer in this set. It was moved to the documented list after a
+   * staging cancellation returned 200 and the shipment's latest_status became
+   * "CCS" carrying the cancellation_reason we had sent - direct evidence of its
+   * meaning rather than an inference from the acronym.
+   *
+   * The rest stay UNKNOWN deliberately. The locker states are the tempting
+   * ones, and guessing wrong would either notify a customer early or mark an
+   * undelivered parcel as done.
+   */
+  it.each(['HAPH', 'FAILED3PL', 'ONHOLD3PL', 'ODL', 'ODLXL', 'POLXL'])(
     'maps the undocumented status %s to UNKNOWN rather than guessing',
     async (paxelStatus) => {
       const { provider } = build(config(), () => res(200, detail(paxelStatus)));

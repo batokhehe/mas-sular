@@ -19,7 +19,7 @@ function norm(raw: string): string {
  * NOT establish are deliberately absent so they fall through to UNKNOWN rather
  * than being guessed from the acronym:
  *
- *   CCS, HAPH, FAILED3PL, ONHOLD3PL, ODL, ODLXL, POLXL
+ *   HAPH, FAILED3PL, ONHOLD3PL, ODL, ODLXL, POLXL
  *
  * The locker states (ODL/ODLXL/POLXL) are the tempting ones — "shipment on
  * destination locker" could plausibly be OUT_FOR_DELIVERY or DELIVERED, and
@@ -43,6 +43,13 @@ const PAXEL: Record<string, ShipmentStatus> = {
   RAP: ShipmentStatus.FAILED, // failed pickup, sender uncontactable
   UNDLM: ShipmentStatus.FAILED, // undelivered, address not found
   RTN: ShipmentStatus.FAILED, // returning to sender (no RETURNED in the enum)
+  // Confirmed against Paxel staging, not inferred from the acronym: POST
+  // /shipments/:awb/cancel returned 200 echoing our cancellation_reason, after
+  // which GET /shipments/:awb reported latest_status "CCS" carrying that same
+  // reason. Until this mapping existed, CCS fell through to UNKNOWN, which the
+  // sync service never persists - so a shipment cancelled at Paxel stayed
+  // CREATED in our database forever.
+  CCS: ShipmentStatus.CANCELLED,
 
   // --- generic fallbacks, retained ---
   BOOKED: ShipmentStatus.CREATED,
