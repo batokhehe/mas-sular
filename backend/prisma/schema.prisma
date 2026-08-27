@@ -43,10 +43,15 @@ enum PaymentStatus {
 enum ShipmentStatus {
   PENDING
   RATE_SELECTED
+  CREATED
+  WAITING_PICKUP
   PICKED_UP
   IN_TRANSIT
+  OUT_FOR_DELIVERY
   DELIVERED
   FAILED
+  CANCELLED
+  UNKNOWN
 }
 
 enum VoucherType {
@@ -206,6 +211,7 @@ model Province {
   cities            City[]
   addresses         Address[]
   deliveryCoverages DeliveryCoverage[]
+  outlets           Outlet[]
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
 
@@ -223,6 +229,7 @@ model City {
   districts         District[]
   addresses         Address[]
   deliveryCoverages DeliveryCoverage[]
+  outlets           Outlet[]
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
 
@@ -235,11 +242,23 @@ model District {
   cityId            String
   code              String             @unique
   name              String
+  /// RajaOngkir's own district id, for JNE rate lookups only (PAXELBOX-41).
+  /// Int because the API returns it as a JSON number (`"id": 1360`), not a string.
+  ///
+  /// NULLABLE and deliberately NOT unique. Null means "no verified RajaOngkir
+  /// mapping for this district", which the rate path must read as "no JNE quote
+  /// here" — never as a reason to guess, and never as an error that breaks
+  /// checkout. Uniqueness is not declared because a one-to-one correspondence
+  /// between Kemendagri districts and RajaOngkir districts is NOT proven; the
+  /// import tool still refuses to emit duplicates, so the guarantee is enforced
+  /// where there is evidence for it rather than asserted in the schema.
+  rajaOngkirId      Int?
   isActive          Boolean            @default(true)
   city              City               @relation(fields: [cityId], references: [id], onDelete: Cascade)
   villages          Village[]
   addresses         Address[]
   deliveryCoverages DeliveryCoverage[]
+  outlets           Outlet[]
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
 
@@ -257,6 +276,7 @@ model Village {
   district          District           @relation(fields: [districtId], references: [id], onDelete: Cascade)
   addresses         Address[]
   deliveryCoverages DeliveryCoverage[]
+  outlets           Outlet[]
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
 
@@ -295,6 +315,35 @@ model DeliveryCoverage {
   @@index([isActive])
 }
 
+/// Outlet / origin configuration (System Settings). Shipping providers always use
+/// the single active outlet as the origin. Exactly one row is active at a time.
+model Outlet {
+  id            String                 @id @default(uuid())
+  name          String
+  addressDetail String?                @db.Text
+  provinceId    String?
+  cityId        String?
+  districtId    String?
+  villageId     String?
+  postalCode    String?                @db.VarChar(5)
+  latitude      Decimal?               @db.Decimal(10, 7)
+  longitude     Decimal?               @db.Decimal(10, 7)
+  isActive      Boolean                @default(false)
+  province      Province?              @relation(fields: [provinceId], references: [id])
+  city          City?                  @relation(fields: [cityId], references: [id])
+  district      District?              @relation(fields: [districtId], references: [id])
+  village       Village?               @relation(fields: [villageId], references: [id])
+  reservations  InventoryReservation[]
+  inventories   ProductInventory[]
+  transfersFrom StockTransfer[]        @relation("TransferFrom")
+  transfersTo   StockTransfer[]        @relation("TransferTo")
+  orders        Order[]
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+
+  @@index([isActive])
+}
+
 model Category {
   id        String    @id @default(uuid())
   name      String
@@ -308,27 +357,39 @@ model Category {
 }
 
 model Product {
-  id            String        @id @default(uuid())
-  slug          String        @unique
-  sku           String        @unique
+  id            String                 @id @default(uuid())
+  slug          String                 @unique
+  sku           String                 @unique
   name          String
-  description   String        @db.Text
+  description   String                 @db.Text
   price         Int
   originalPrice Int?
   imageUrl      String
-  rating        Decimal       @default(0) @db.Decimal(3, 2)
-  reviewCount   Int           @default(0)
+  rating        Decimal                @default(0) @db.Decimal(3, 2)
+  reviewCount   Int                    @default(0)
   spicyLevel    Int?
-  isBestSeller  Boolean       @default(false)
-  isNew         Boolean       @default(false)
-  status        ProductStatus @default(ACTIVE)
-  stock         Int           @default(0)
+  // Physical attributes for courier booking. Nullable: the catalogue predates
+  // them, and a product without real measurements must fail a shipment loudly
+  // rather than ship on invented dimensions. Paxel bounds: weight 1-5000 g,
+  // each side 1-50 cm.
+  weightGram    Int?
+  lengthCm      Int?
+  widthCm       Int?
+  heightCm      Int?
+  isFragile     Boolean                @default(false)
+  isBestSeller  Boolean                @default(false)
+  isNew         Boolean                @default(false)
+  status        ProductStatus          @default(ACTIVE)
+  stock         Int                    @default(0)
   categoryId    String
-  category      Category      @relation(fields: [categoryId], references: [id])
+  category      Category               @relation(fields: [categoryId], references: [id])
   orderItems    OrderItem[]
   favorites     Favorite[]
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  reservations  InventoryReservation[]
+  inventories   ProductInventory[]
+  transfers     StockTransfer[]
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
   deletedAt     DateTime?
 
   @@index([categoryId, status])
@@ -415,17 +476,19 @@ model CartSession {
 }
 
 model Order {
-  id                       String            @id @default(uuid())
-  orderNumber              String            @unique
+  id                       String                 @id @default(uuid())
+  orderNumber              String                 @unique
   userId                   String
   addressId                String
   voucherId                String?
   voucherCode              String?
   voucherType              VoucherType?
-  status                   OrderStatus       @default(PENDING)
+  status                   OrderStatus            @default(PENDING)
   subtotal                 Int
-  voucherDiscountAmount    Int               @default(0)
+  voucherDiscountAmount    Int                    @default(0)
   deliveryFee              Int
+  /// Immutable customer-borne gateway fee selected at checkout; legacy orders are zero.
+  paymentServiceFee        Int                    @default(0)
   totalPrice               Int
   paymentMethod            PaymentMethod
   notes                    String?
@@ -433,17 +496,29 @@ model Order {
   // Delivery-coverage snapshot (nullable — legacy orders predate coverage).
   coverageId               String?
   estimatedDeliveryMinutes Int?
-  user                     User              @relation(fields: [userId], references: [id])
-  address                  Address           @relation(fields: [addressId], references: [id])
-  voucher                  Promo?            @relation(fields: [voucherId], references: [id])
-  coverage                 DeliveryCoverage? @relation(fields: [coverageId], references: [id])
+  // Selected shipping-provider quote snapshot (nullable — legacy orders predate it).
+  shippingProvider         String?
+  shippingService          String?
+  shippingServiceName      String?
+  shippingCost             Int?
+  trackingNumber           String?
+  shippingPayload          Json?
+  // Allocated fulfillment outlet (multi-outlet allocation; null on legacy orders).
+  outletId                 String?
+  user                     User                   @relation(fields: [userId], references: [id])
+  address                  Address                @relation(fields: [addressId], references: [id])
+  voucher                  Promo?                 @relation(fields: [voucherId], references: [id])
+  coverage                 DeliveryCoverage?      @relation(fields: [coverageId], references: [id])
+  outlet                   Outlet?                @relation(fields: [outletId], references: [id])
   items                    OrderItem[]
   payment                  Payment?
   shipment                 Shipment?
   events                   OrderEvent[]
   voucherUsage             VoucherUsage?
-  createdAt                DateTime          @default(now())
-  updatedAt                DateTime          @updatedAt
+  reservations             InventoryReservation[]
+  internalNotes            OrderNote[]
+  createdAt                DateTime               @default(now())
+  updatedAt                DateTime               @updatedAt
   deletedAt                DateTime?
 
   @@index([userId, status])
@@ -458,6 +533,16 @@ model OrderItem {
   productName String
   unitPrice   Int
   quantity    Int
+  // Snapshot of the product's physical attributes AT ORDER TIME, for the same
+  // reason productName and unitPrice are snapshotted: shipment creation happens
+  // asynchronously after payment, so reading Product later would let an edit
+  // change the parcel of an order that is already paid for. All nullable -
+  // historical rows have none and are never backfilled with guesses.
+  weightGram  Int?
+  lengthCm    Int?
+  widthCm     Int?
+  heightCm    Int?
+  isFragile   Boolean?
   spicyLevel  Int?
   notes       String?
   order       Order              @relation(fields: [orderId], references: [id], onDelete: Cascade)
@@ -486,12 +571,30 @@ model OrderEvent {
   createdAt DateTime    @default(now())
 }
 
+/// Admin-only internal note attached to an order (operations annotations). Not
+/// customer-facing; independent of the checkout/payment/shipment flows.
+model OrderNote {
+  id        String   @id @default(uuid())
+  orderId   String
+  adminId   String   @db.VarChar(36)
+  adminName String   @db.VarChar(255)
+  body      String   @db.Text
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orderId, createdAt])
+}
+
 model Payment {
   id                String               @id @default(uuid())
   orderId           String               @unique
   method            PaymentMethod
   status            PaymentStatus        @default(PENDING)
   amount            Int
+  // Manual BANK_TRANSFER unique 3-digit code folded into `amount` so the transfer
+  // total is easy to reconcile. Null for QRIS/COD/GATEWAY and legacy payments.
+  uniqueCode        Int?
   provider          String?
   providerReference String?
   manualBankName    String?
@@ -504,6 +607,8 @@ model Payment {
   webhookPayload    Json?
   order             Order                @relation(fields: [orderId], references: [id], onDelete: Cascade)
   transactions      Transaction[]
+  // Gateway attempt ledger (Phase 2). Back-relation only — Payment gains NO column.
+  gatewayTransactions PaymentGatewayTransaction[]
   uploadTokens      PaymentUploadToken[]
   createdAt         DateTime             @default(now())
   updatedAt         DateTime             @updatedAt
@@ -561,19 +666,277 @@ model Transaction {
   @@index([paymentId, createdAt])
 }
 
+/// PROVIDER-level status vocabulary (Phase 2). Deliberately SEPARATE from
+/// PaymentStatus: gateways speak in authorization/capture/settlement terms that
+/// our business layer neither has nor needs. Translation happens in exactly one
+/// place — mapGatewayStatusToPaymentStatus() — and PaymentStatus is unchanged.
+enum GatewayTransactionStatus {
+  PENDING
+  AUTHORIZED
+  CAPTURED
+  SETTLEMENT
+  FAILED
+  EXPIRED
+  CANCELLED
+  REFUNDED
+}
+
+/// Append-only ledger of gateway charge attempts and their provider responses.
+/// One Payment has 0..N of these (a retried charge, a channel switch, a status
+/// sync). Payment stays the business source of truth; this table is the audit
+/// chain and the future webhook-idempotency anchor. Nothing writes here unless
+/// PaymentInitiationService.initiate() is called.
+model PaymentGatewayTransaction {
+  id                    String                   @id @default(uuid())
+  paymentId             String
+  provider              String                   @db.VarChar(32)
+  channelCode           String                   @db.VarChar(32)
+  /// Provider's primary handle for this charge (Midtrans transaction_id, …).
+  providerReference     String?                  @db.VarChar(128)
+  /// The id WE sent to the provider (Midtrans order_id) — usually the order number.
+  providerOrderId       String?                  @db.VarChar(128)
+  /// Provider's own transaction id when it differs from providerReference.
+  providerTransactionId String?                  @db.VarChar(128)
+  status                GatewayTransactionStatus @default(PENDING)
+  /// Provider's own status word, stored VERBATIM ("settlement", "capture", "expire").
+  /// NOT a duplicate of `status`: that one is our normalized enum and is only moved
+  /// by a flow that also settles the Payment. Phase 5C records the provider's truth
+  /// here without mapping it — the mapping happens in 5D, atomically with the Payment.
+  providerStatus        String?                  @db.VarChar(32)
+  /// Event time of the notification that last wrote `providerStatus`. Used ONLY to
+  /// reject an unambiguously older notification (see the webhook fingerprint util).
+  providerStatusAt      DateTime?
+  grossAmount           Int
+  currency              String                   @default("IDR") @db.VarChar(3)
+  redirectUrl           String?                  @db.VarChar(512)
+  deeplinkUrl           String?                  @db.VarChar(512)
+  qrString              String?                  @db.Text
+  vaNumber              String?                  @db.VarChar(64)
+  expiryAt              DateTime?
+  /// Request/response snapshots — MUST be redacted before write (no card PANs, no keys).
+  rawRequest            Json?
+  rawResponse           Json?
+  metadata              Json?
+  failureReason         String?                  @db.VarChar(512)
+  payment               Payment                  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+
+  /// Idempotency anchor: a provider transaction id can be recorded once. Multiple
+  /// NULLs are permitted by MySQL, so pending rows (id not yet known) never clash.
+  @@unique([provider, providerTransactionId])
+  @@index([paymentId, createdAt])
+  /// Webhook correlation key (Phase 5A): a gateway notification carries the
+  /// order_id WE sent, so this is the lookup path. Non-unique on purpose —
+  /// historical rows may hold a legacy value and NULLs are permitted.
+  @@index([provider, providerOrderId])
+  @@index([provider, providerReference])
+  @@index([status, createdAt])
+  @@index([createdAt])
+}
+
+/// Append-only ledger of VERIFIED provider webhook notifications (Phase 5C).
+///
+/// Why not `ProcessedEvent`: that table's `messageId` is `VarChar(36)` — sized for a
+/// broker UUID, not a 64-char digest — and widening it would change the dedup contract
+/// shared by every RabbitMQ consumer. It is also pruned by the retention worker on a
+/// window tuned to broker redelivery, which is the wrong lifecycle for a payment
+/// notification. Reusing it would have coupled two unrelated invariants.
+///
+/// `fingerprint` is UNIQUE: that constraint — not application logic — is what makes
+/// duplicate and concurrent deliveries collapse to exactly one effective processing.
+model PaymentWebhookEvent {
+  id                    String   @id @default(uuid())
+  provider              String   @db.VarChar(32)
+  /// SHA-256 of the canonical notification identity. THE deduplication invariant.
+  fingerprint           String   @unique @db.VarChar(64)
+  /// The id WE sent the provider — the correlation key, never the bare order number.
+  providerOrderId       String   @db.VarChar(128)
+  providerTransactionId String?  @db.VarChar(128)
+  transactionStatus     String?  @db.VarChar(32)
+  statusCode            String?  @db.VarChar(8)
+  fraudStatus           String?  @db.VarChar(32)
+  /// Verbatim amount string as signed by the provider — never normalized to a number.
+  grossAmount           String   @db.VarChar(32)
+  /// Correlated attempt. A plain column, not a relation: this table must survive
+  /// independently of the ledger row so the dedup key is never cascade-deleted.
+  gatewayTransactionId  String?  @db.VarChar(36)
+  /// ALLOWLISTED notification snapshot. `signature_key`, credentials and any
+  /// unrecognised field are excluded at build time — never written, never logged.
+  payload               Json?
+  /// Provider event time when it was parseable; NULL disables the ordering guard.
+  notifiedAt            DateTime?
+  /// How far BUSINESS processing got (Phase 5D). Receipt and settlement are tracked
+  /// separately on purpose: a notification whose authoritative status check failed
+  /// must stay re-processable, so its dedup row exists but is not yet terminal.
+  settlementState       WebhookSettlementState @default(RECEIVED)
+  processedAt           DateTime @default(now())
+
+  @@index([provider, providerOrderId, processedAt])
+  @@index([processedAt])
+  @@index([settlementState, processedAt])
+}
+
+/// Business-processing state of a received webhook notification (Phase 5D).
+enum WebhookSettlementState {
+  /// Recorded, business decision not yet reached — RE-PROCESSABLE on redelivery.
+  RECEIVED
+  /// Authoritative status confirmed payment and the settlement transaction committed.
+  SETTLED
+  /// Authoritative status was checked and does not warrant a transition (pending,
+  /// deny, expire, amount mismatch, …). Terminal for THIS notification.
+  NOT_ELIGIBLE
+  /// The Status API could not be reached or could not be trusted. NOT a success:
+  /// a redelivery must try again, so this never blocks reprocessing.
+  VERIFICATION_FAILED
+}
+
 model Shipment {
+  id                 String            @id @default(uuid())
+  orderId            String            @unique
+  provider           String
+  service            String
+  status             ShipmentStatus    @default(PENDING)
+  cost               Int
+  trackingNumber     String?
+  trackingUrl        String?
+  // Provider shipment-creation snapshot (set once payment is PAID).
+  providerShipmentId String?
+  providerPayload    Json?
+  metadata           Json?
+  order              Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  history            ShipmentHistory[]
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  // P0-1: every worker predicate is status-first (tracking poll, sync sweep,
+  // reconciliation candidates, booking-claim CAS with its updatedAt lease check).
+  // trackingNumber deliberately has NO index: it only ever appears as a
+  // null/not-null residual filter, never as a value lookup.
+  @@index([status, updatedAt])
+}
+
+/// Append-only audit of every shipment status transition (provider → internal).
+model ShipmentHistory {
   id             String         @id @default(uuid())
-  orderId        String         @unique
-  provider       String
-  service        String
-  status         ShipmentStatus @default(PENDING)
-  cost           Int
-  trackingNumber String?
-  trackingUrl    String?
-  metadata       Json?
-  order          Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  shipmentId     String
+  providerStatus String
+  mappedStatus   ShipmentStatus
+  changedAt      DateTime
   createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  shipment       Shipment       @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  @@index([shipmentId, changedAt])
+}
+
+// ---------------- Inventory reservation & stock allocation ----------------
+
+enum ReservationStatus {
+  RESERVED
+  COMMITTED
+  RELEASED
+  EXPIRED
+  CANCELLED
+}
+
+/// A hold on stock for an order item. Available stock = Product.stock - active
+/// RESERVED qty. Committed at payment verification (deducts Product.stock),
+/// released on expiry / cancel / reject.
+model InventoryReservation {
+  id               String                        @id @default(uuid())
+  orderId          String
+  productId        String
+  productVariantId String?
+  outletId         String?
+  reservedQty      Int
+  committedQty     Int                           @default(0)
+  releasedQty      Int                           @default(0)
+  status           ReservationStatus             @default(RESERVED)
+  expiresAt        DateTime?
+  createdAt        DateTime                      @default(now())
+  updatedAt        DateTime                      @updatedAt
+  order            Order                         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product          Product                       @relation(fields: [productId], references: [id])
+  outlet           Outlet?                       @relation(fields: [outletId], references: [id])
+  history          InventoryReservationHistory[]
+
+  @@index([status, expiresAt])
+  @@index([orderId])
+  @@index([productId, status])
+  @@index([outletId])
+}
+
+/// Append-only audit of every reservation status transition (timeline).
+model InventoryReservationHistory {
+  id            String               @id @default(uuid())
+  reservationId String
+  status        ReservationStatus
+  note          String?
+  createdAt     DateTime             @default(now())
+  reservation   InventoryReservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+
+  @@index([reservationId, createdAt])
+}
+
+// ---------------- Multi-outlet inventory & transfers ----------------
+
+/// Per-outlet stock — the source of truth for physical inventory. `available` =
+/// stock − reserved, maintained on every reservation mutation. Product.stock is
+/// retained temporarily for backward compatibility.
+model ProductInventory {
+  id        String   @id @default(uuid())
+  productId String
+  outletId  String
+  stock     Int      @default(0)
+  reserved  Int      @default(0)
+  available Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  outlet    Outlet   @relation(fields: [outletId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, outletId])
+  @@index([outletId])
+  @@index([productId])
+}
+
+enum StockTransferStatus {
+  REQUESTED
+  APPROVED
+  COMPLETED
+  REJECTED
+  CANCELLED
+}
+
+/// A stock movement between two outlets. Timeline: Requested → Approved → Completed.
+model StockTransfer {
+  id           String                 @id @default(uuid())
+  productId    String
+  fromOutletId String
+  toOutletId   String
+  quantity     Int
+  status       StockTransferStatus    @default(REQUESTED)
+  note         String?
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
+  product      Product                @relation(fields: [productId], references: [id])
+  fromOutlet   Outlet                 @relation("TransferFrom", fields: [fromOutletId], references: [id])
+  toOutlet     Outlet                 @relation("TransferTo", fields: [toOutletId], references: [id])
+  history      StockTransferHistory[]
+
+  @@index([status])
+  @@index([productId])
+}
+
+model StockTransferHistory {
+  id         String              @id @default(uuid())
+  transferId String
+  status     StockTransferStatus
+  note       String?
+  createdAt  DateTime            @default(now())
+  transfer   StockTransfer       @relation(fields: [transferId], references: [id], onDelete: Cascade)
+
+  @@index([transferId, createdAt])
 }
 
 model Banner {
@@ -641,6 +1004,9 @@ model OutboxEvent {
   @@index([status, nextAttemptAt])
   @@index([aggregateId, createdAt])
   @@index([status, createdAt])
+  // Queue Center: newest-first unfiltered list + event-name filter.
+  @@index([createdAt])
+  @@index([eventName, createdAt])
 }
 
 enum IdempotencyStatus {
@@ -684,6 +1050,170 @@ model ProcessedEvent {
   @@index([processedAt])
 }
 
+enum LogLevel {
+  DEBUG
+  INFO
+  WARN
+  ERROR
+}
+
+/// Enterprise structured log sink (additive — does NOT replace the Pino logger).
+/// One row per request/exception/worker event; correlated by `requestId`. Pruned
+/// by the retention worker (LOG_RETENTION_DAYS). Newest-first reads are index-backed.
+model SystemLog {
+  id                     String    @id @default(uuid())
+  createdAt              DateTime  @default(now())
+  level                  LogLevel  @default(INFO)
+  module                 String    @db.VarChar(64)
+  action                 String    @db.VarChar(96)
+  message                String    @db.Text
+  requestId              String?   @db.VarChar(64)
+  userId                 String?   @db.VarChar(36)
+  adminId                String?   @db.VarChar(36)
+  orderId                String?   @db.VarChar(36)
+  paymentId              String?   @db.VarChar(36)
+  shipmentId             String?   @db.VarChar(36)
+  inventoryReservationId String?   @db.VarChar(36)
+  ip                     String?   @db.VarChar(64)
+  method                 String?   @db.VarChar(8)
+  path                   String?   @db.VarChar(512)
+  statusCode             Int?
+  durationMs             Int?
+  metadata               Json?
+
+  // Newest-first list + the common filter facets (composite so the filter and the
+  // createdAt sort are served by one index).
+  @@index([createdAt])
+  @@index([level, createdAt])
+  @@index([module, createdAt])
+  @@index([statusCode, createdAt])
+  @@index([requestId])
+  @@index([orderId])
+  @@index([paymentId])
+  @@index([userId])
+}
+
+enum IncidentSeverity {
+  INFO
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum IncidentStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+}
+
+/// Auto-detected operational incident (Incident Center). Deduplicated by `type`
+/// while OPEN/ACKNOWLEDGED (repeat detections bump count/lastSeen). Fully additive
+/// bookkeeping — never touches business flows.
+model Incident {
+  id             String           @id @default(uuid())
+  type           String           @db.VarChar(64)
+  severity       IncidentSeverity @default(MEDIUM)
+  status         IncidentStatus   @default(OPEN)
+  title          String           @db.VarChar(255)
+  description    String           @db.Text
+  source         String           @db.VarChar(64)
+  requestId      String?          @db.VarChar(64)
+  orderId        String?          @db.VarChar(36)
+  paymentId      String?          @db.VarChar(36)
+  shipmentId     String?          @db.VarChar(36)
+  worker         String?          @db.VarChar(64)
+  module         String?          @db.VarChar(64)
+  count          Int              @default(1)
+  firstSeen      DateTime         @default(now())
+  lastSeen       DateTime         @default(now())
+  acknowledgedAt DateTime?
+  acknowledgedBy String?          @db.VarChar(36)
+  resolvedAt     DateTime?
+  resolvedBy     String?          @db.VarChar(36)
+  metadata       Json?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@index([status, severity, lastSeen])
+  @@index([type, status])
+  @@index([source, createdAt])
+  @@index([createdAt])
+}
+
+/// Admin-facing notification (bell / notification center / push). Written by the
+/// event-driven notification worker — one row PER TARGET ADMIN (fan-out on write,
+/// so read state and badges are per-admin). Fully additive.
+model Notification {
+  id        String    @id @default(uuid())
+  eventType String    @db.VarChar(64)
+  category  String    @db.VarChar(32)
+  priority  String    @db.VarChar(16)
+  title     String    @db.VarChar(255)
+  message   String    @db.Text
+  url       String?   @db.VarChar(512)
+  icon      String?   @db.VarChar(64)
+  image     String?   @db.VarChar(512)
+  metadata  Json?
+  adminId   String?   @db.VarChar(36)
+  role      String?   @db.VarChar(64)
+  isRead    Boolean   @default(false)
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([createdAt])
+  @@index([isRead, createdAt])
+  @@index([category, createdAt])
+  @@index([adminId, createdAt])
+  @@index([eventType])
+}
+
+/// Web-push (FCM) token registered by an admin browser/device.
+model PushSubscription {
+  id         String   @id @default(uuid())
+  adminId    String   @db.VarChar(36)
+  token      String   @db.VarChar(512)
+  browser    String?  @db.VarChar(64)
+  platform   String?  @db.VarChar(64)
+  device     String?  @db.VarChar(64)
+  userAgent  String?  @db.VarChar(512)
+  lastSeenAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  @@unique([adminId, token(length: 191)])
+  @@index([adminId])
+  @@index([lastSeenAt])
+}
+
+/// Enterprise audit trail — HUMAN administrative actions (vs SystemLog = app
+/// events). Written fire-and-forget by the global AuditTrailInterceptor; fully
+/// additive (the legacy AuditLog table is untouched).
+model AuditTrail {
+  id         String   @id @default(uuid())
+  createdAt  DateTime @default(now())
+  adminId    String?  @db.VarChar(36)
+  adminName  String?  @db.VarChar(255)
+  ipAddress  String?  @db.VarChar(64)
+  userAgent  String?  @db.VarChar(512)
+  requestId  String?  @db.VarChar(64)
+  module     String   @db.VarChar(64)
+  entity     String   @db.VarChar(64)
+  entityId   String?  @db.VarChar(64)
+  entityName String?  @db.VarChar(255)
+  action     String   @db.VarChar(48)
+  before     Json?
+  after      Json?
+  diff       Json?
+  metadata   Json?
+  success    Boolean  @default(true)
+
+  @@index([createdAt])
+  @@index([module, createdAt])
+  @@index([entity, entityId])
+  @@index([adminId, createdAt])
+  @@index([requestId])
+}
+
 enum NotificationChannel {
   EMAIL
   SMS
@@ -719,4 +1249,6 @@ model NotificationOutbox {
   @@index([createdAt])
   @@index([status, sentAt])
   @@index([status, createdAt])
+  // Customer Communication Center: conversation lookups by recipient.
+  @@index([recipient, createdAt])
 }

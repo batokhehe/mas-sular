@@ -14,9 +14,10 @@ import { ReceiptCell } from '@/components/payments/receipt-cell';
 
 export default function PaymentsPage() {
   const queryClient = useQueryClient();
+  const [search, setSearch] = useState('');
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['admin-payments', 'pending'],
-    queryFn: fetchAdminPendingPayments,
+    queryKey: ['admin-payments', 'pending', search],
+    queryFn: () => fetchAdminPendingPayments(search),
     retry: false,
   });
   const refreshQueue = () => queryClient.invalidateQueries({ queryKey: ['admin-payments', 'pending'] });
@@ -100,7 +101,15 @@ export default function PaymentsPage() {
         </PermissionGate>
       </div>
       <Card>
-        <CardTitle>Manual Transfer Queue</CardTitle>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <CardTitle>Manual Transfer Queue</CardTitle>
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search order, customer, or transfer amount (e.g. 135123)"
+            className="h-10 w-full rounded-xl border border-gray-200 bg-gray-50 px-4 text-sm outline-none focus:border-[#465fff] focus:bg-white sm:w-96"
+          />
+        </div>
         <div className="mt-4 space-y-3">
           {isLoading ? (
             <p className="p-6 text-sm text-gray-500">Loading payments...</p>
@@ -124,7 +133,20 @@ export default function PaymentsPage() {
                 <div className="min-w-0">
                   <p className="font-medium text-gray-800">{payment.order.orderNumber}</p>
                   <p className="text-sm text-gray-500">
-                    {payment.manualBankName ?? payment.method} · Rp {payment.amount.toLocaleString('id-ID')}
+                    {payment.manualBankName ?? payment.method}
+                    {payment.uniqueCode != null ? (
+                      <> · Unique code <span className="font-semibold text-gray-700">{payment.uniqueCode}</span></>
+                    ) : null}
+                  </p>
+                  {payment.uniqueCode != null ? (
+                    <p className="text-sm text-gray-500">
+                      Business total:{' '}
+                      <span className="font-semibold text-gray-700">Rp {payment.order.totalPrice.toLocaleString('id-ID')}</span>
+                    </p>
+                  ) : null}
+                  <p className="text-sm text-gray-500">
+                    {payment.uniqueCode != null ? 'Transfer amount' : 'Total payment'}:{' '}
+                    <span className="font-semibold text-gray-700">Rp {payment.amount.toLocaleString('id-ID')}</span>
                   </p>
                 </div>
                 {/* Receipt: inline on desktop, wraps below the info on mobile (w-full → new line). */}

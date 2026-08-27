@@ -1,0 +1,33 @@
+# Keep the build context small and free of anything secret or host-specific.
+# app/, components/, lib/, public/, next.config.mjs, tsconfig.json and
+# package.json MUST stay included — `next build` compiles from them.
+
+.git
+.gitignore
+.github
+
+node_modules
+.next
+out
+build
+
+# Secrets — never enter an image. NEXT_PUBLIC_* are supplied as build args.
+.env
+.env.*
+
+# Tests (not part of a production build)
+*.test.ts
+*.test.tsx
+coverage
+tsconfig.tsbuildinfo
+
+# Editor / OS noise
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# Docker's own files
+Dockerfile
+.dockerignore
+docker-compose*.yml

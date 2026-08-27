@@ -22,8 +22,14 @@ export interface ProviderTemplateDescriptor {
   providerTemplateId: string;
   /** WhatsApp body parameter layout (undefined for non-templated channels). */
   body?: QontakBodyParam[];
-  /** Include the dynamic-URL button fed by variables.uploadToken. */
+  /** Include the dynamic-URL button. */
   button?: boolean;
+  /**
+   * Which variable feeds the button's URL slot. Defaults to `uploadToken`, the
+   * only source that existed before PAXELBOX-37, so every template registered
+   * before this field appeared keeps its exact behaviour.
+   */
+  buttonSource?: string;
 }
 
 @Injectable()
@@ -35,6 +41,13 @@ export class TemplateRegistry {
     // EMAIL → renderer template key (EmailProvider renders text from variables).
     this.register(NotificationChannel.EMAIL, 'order.transfer', { providerTemplateId: 'order.transfer' });
     this.register(NotificationChannel.EMAIL, 'order.cod', { providerTemplateId: 'order.cod' });
+    this.register(NotificationChannel.EMAIL, 'order.shipped', { providerTemplateId: 'order.shipped' });
+    this.register(NotificationChannel.EMAIL, 'order.delivered', { providerTemplateId: 'order.delivered' });
+    this.register(NotificationChannel.EMAIL, 'shipment.status', { providerTemplateId: 'shipment.status' });
+    // Manual (admin-composed) templates — Customer Communication Center.
+    this.register(NotificationChannel.EMAIL, 'manual.order-update', { providerTemplateId: 'manual.order-update' });
+    this.register(NotificationChannel.EMAIL, 'manual.shipment-update', { providerTemplateId: 'manual.shipment-update' });
+    this.register(NotificationChannel.EMAIL, 'manual.custom', { providerTemplateId: 'manual.custom' });
 
     // WHATSAPP → Qontak template ids + parameter layout.
     this.register(NotificationChannel.WHATSAPP, 'order.transfer', {
@@ -59,6 +72,61 @@ export class TemplateRegistry {
       ],
       button: false,
     });
+    // "Pesanan Anda telah dikirim. Kurir / Layanan / Nomor Resi"
+    this.register(NotificationChannel.WHATSAPP, 'order.shipped', {
+      providerTemplateId: qontak.shippedTemplateId ?? '',
+      body: [
+        { key: '1', valueName: 'provider', source: 'shippingProvider' },
+        { key: '2', valueName: 'service', source: 'shippingService' },
+        { key: '3', valueName: 'tracking', source: 'trackingNumber' },
+      ],
+      button: false,
+    });
+    this.register(NotificationChannel.WHATSAPP, 'order.delivered', {
+      providerTemplateId: qontak.deliveredTemplateId ?? '',
+      body: [
+        { key: '1', valueName: 'provider', source: 'shippingProvider' },
+        { key: '2', valueName: 'service', source: 'shippingService' },
+        { key: '3', valueName: 'tracking', source: 'trackingNumber' },
+      ],
+      button: false,
+    });
+    // Generic shipment status update — one template, status text supplied per event.
+    this.register(NotificationChannel.WHATSAPP, 'shipment.status', {
+      providerTemplateId: qontak.shipmentTemplateId ?? '',
+      body: [
+        { key: '1', valueName: 'status', source: 'statusLabel' },
+        { key: '2', valueName: 'provider', source: 'shippingProvider' },
+        { key: '3', valueName: 'tracking', source: 'trackingNumber' },
+      ],
+      button: false,
+    });
+    /**
+     * INTERNAL operational alert — "Pesanan Baru Masuk". Goes to an operator,
+     * not a customer, and its button deep-links the admin order-detail page.
+     * Registered like every other template so it inherits the same outbox,
+     * sender worker and PAXELBOX-31 delivery gate; nothing about it bypasses
+     * the checks a customer message goes through.
+     */
+    this.register(NotificationChannel.WHATSAPP, 'order.new', {
+      providerTemplateId: qontak.newOrderTemplateId ?? '',
+      body: [
+        { key: '1', valueName: 'order_no', source: 'orderNumber' },
+        { key: '2', valueName: 'customer_name', source: 'customerName' },
+        { key: '3', valueName: 'total', source: 'grandTotal', format: 'currency' },
+        { key: '4', valueName: 'payment', source: 'paymentSummary' },
+        { key: '5', valueName: 'shipping', source: 'shippingSummary' },
+      ],
+      button: true,
+      buttonSource: 'adminOrderUrl',
+    });
+    // Manual sends share ONE approved free-text Qontak template ({{1}} = message).
+    // resolve() rejects them with ConfigurationError until QONTAK_MANUAL_TEMPLATE_ID
+    // is set, and the communication API pre-checks that before queueing.
+    const manualBody = [{ key: '1', valueName: 'message', source: 'message' }];
+    this.register(NotificationChannel.WHATSAPP, 'manual.order-update', { providerTemplateId: qontak.manualTemplateId ?? '', body: manualBody, button: false });
+    this.register(NotificationChannel.WHATSAPP, 'manual.shipment-update', { providerTemplateId: qontak.manualTemplateId ?? '', body: manualBody, button: false });
+    this.register(NotificationChannel.WHATSAPP, 'manual.custom', { providerTemplateId: qontak.manualTemplateId ?? '', body: manualBody, button: false });
   }
 
   private key(channel: NotificationChannel, template: NotificationTemplate): string {

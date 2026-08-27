@@ -1,11 +1,13 @@
-import { Inject, Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
-import { Payment, PaymentMethod, PaymentStatus } from '@prisma/client';
-import { randomUUID } from 'crypto';
+import { ConflictException, Inject, Injectable, Logger, Optional, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
+import { Payment, PaymentMethod, PaymentStatus, ReservationStatus } from '@prisma/client';
+import { PaymentSettlementService } from './settlement/payment-settlement.service';
 import { PrismaService } from '../../database/prisma.service';
+import { LogService } from '../../infrastructure/logging/log.service';
 import { OrderCancellationService } from '../orders/order-cancellation.service';
 import { PAYMENT_LIFECYCLE_CONFIG, PaymentLifecycleConfig } from './payment-lifecycle.config';
 import { PaymentLifecycleMetrics } from './payment-lifecycle.metrics';
 import { PaymentUploadTokenService } from './payment-upload-token.service';
+import { buildOutboxEvent } from '../../infrastructure/outbox/outbox-event.builder';
 
 // A payment is reminder/expiry-eligible only while still awaiting payment/verification.
 const ELIGIBLE_STATUSES: PaymentStatus[] = [PaymentStatus.PENDING, PaymentStatus.WAITING_VERIFICATION];
@@ -36,7 +38,25 @@ export class PaymentLifecycleWorker implements OnApplicationBootstrap, OnModuleD
     private readonly cancellation: OrderCancellationService,
     private readonly metrics: PaymentLifecycleMetrics,
     @Inject(PAYMENT_LIFECYCLE_CONFIG) private readonly config: PaymentLifecycleConfig,
+    // Optional so existing unit tests (positional construction) keep working; when
+    // present, each tick's outcome is persisted to the SystemLog center.
+    @Optional() private readonly logs?: LogService,
+    // Phase 5E: the shared payment state machine. Optional for the same reason —
+    // see `settlement` below.
+    @Optional() private readonly injectedSettlement?: PaymentSettlementService,
   ) {}
+
+  private lazySettlement?: PaymentSettlementService;
+
+  /**
+   * The shared transition path. When Nest did not inject one (positional test
+   * construction), build it from the collaborators we already hold; the resulting
+   * expiry behaviour is identical, because those are the same instances DI passes.
+   */
+  private get settlement(): PaymentSettlementService {
+    return (this.injectedSettlement ??
+      (this.lazySettlement ??= new PaymentSettlementService(this.prisma, undefined, undefined, this.cancellation)));
+  }
 
   onApplicationBootstrap(): void {
     if (!this.config.enabled) {
@@ -74,10 +94,19 @@ export class PaymentLifecycleWorker implements OnApplicationBootstrap, OnModuleD
     this.inFlight = (async () => {
       try {
         // Expire first so an about-to-expire payment is not also reminded.
-        await this.runExpiry();
-        await this.runReminders();
+        const expired = await this.runExpiry();
+        const reminded = await this.runReminders();
+        if (expired > 0 || reminded > 0) {
+          this.logs?.write({
+            level: 'INFO', module: 'worker.payment-lifecycle', action: 'tick',
+            message: `payment lifecycle: expired=${expired} reminded=${reminded}`,
+            metadata: { expired, reminded },
+          });
+        }
       } catch (err) {
-        this.logger.error(`payment lifecycle tick failed: ${err instanceof Error ? err.message : String(err)}`);
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.error(`payment lifecycle tick failed: ${message}`);
+        this.logs?.write({ level: 'ERROR', module: 'worker.payment-lifecycle', action: 'tick.failed', message, metadata: { stack: err instanceof Error ? err.stack : undefined } });
       }
     })();
     await this.inFlight;
@@ -123,41 +152,33 @@ export class PaymentLifecycleWorker implements OnApplicationBootstrap, OnModuleD
     return expired;
   }
 
+  /**
+   * The EXPIRED transition moved to PaymentSettlementService (Phase 5E) so this
+   * worker, the Midtrans webhook and reconciliation share one expiry path. The
+   * semantics here are unchanged: CAS over the eligible statuses, restock with
+   * `ReservationStatus.EXPIRED`, one `payment.expired` event, metrics on success,
+   * and a transient failure left for the next tick.
+   */
   async expirePayment(payment: Payment): Promise<boolean> {
     try {
-      const didExpire = await this.prisma.$transaction(async (tx) => {
-        // CAS: only a non-terminal payment transitions to EXPIRED. Idempotent +
-        // concurrency-safe: the loser of a race gets count 0 and does nothing.
-        const flip = await tx.payment.updateMany({
-          where: { id: payment.id, status: { in: ELIGIBLE_STATUSES } },
-          data: { status: PaymentStatus.EXPIRED },
-        });
-        if (flip.count !== 1) return false;
-
-        await this.cancellation.cancelAndRestock(tx, payment.orderId, 'Payment expired (no receipt within the payment window)');
-
-        await tx.outboxEvent.create({
-          data: {
-            id: randomUUID(),
-            aggregateType: 'payment',
-            aggregateId: payment.id,
-            eventName: 'payment.expired',
-            eventVersion: 1,
-            exchange: 'payments',
-            routingKey: 'payment.expired',
-            payload: { paymentId: payment.id, orderId: payment.orderId },
-            metadata: { source: 'payment.lifecycle.expiry' },
-            occurredAt: new Date(this.nowMs()),
-          },
-        });
-        return true;
-      }, { timeout: 10000 });
-
+      const outcome = await this.settlement.expire(
+        payment.id,
+        { kind: 'SYSTEM', source: 'payment.lifecycle.expiry' },
+        'Payment expired (no receipt within the payment window)',
+      );
+      const didExpire = outcome.result === 'APPLIED';
       if (didExpire) this.metrics.paymentExpired();
       return didExpire;
     } catch (err) {
-      // Transient failure → left as-is, retried on the next tick.
-      this.logger.error(`expire payment ${payment.id} failed: ${err instanceof Error ? err.message : String(err)}`);
+      // A lost CAS race (the payment went terminal concurrently) is normal and not
+      // worth an error line; only a genuine failure is. Either way the row is left
+      // as-is and picked up again on the next tick.
+      const message = err instanceof Error ? err.message : String(err);
+      if (err instanceof ConflictException) {
+        this.logger.log(`expire payment ${payment.id} skipped: ${message}`);
+      } else {
+        this.logger.error(`expire payment ${payment.id} failed: ${message}`);
+      }
       return false;
     }
   }
@@ -224,12 +245,10 @@ export class PaymentLifecycleWorker implements OnApplicationBootstrap, OnModuleD
         const issued = await this.uploadTokens.issue(tx, payment.id);
 
         await tx.outboxEvent.create({
-          data: {
-            id: randomUUID(),
+          data: buildOutboxEvent({
             aggregateType: 'payment',
             aggregateId: payment.id,
             eventName: 'payment.reminder',
-            eventVersion: 1,
             exchange: 'payments',
             routingKey: 'payment.reminder',
             payload: {
@@ -242,7 +261,7 @@ export class PaymentLifecycleWorker implements OnApplicationBootstrap, OnModuleD
             },
             metadata: { source: 'payment.lifecycle.reminder' },
             occurredAt: new Date(this.nowMs()),
-          },
+          }),
         });
         return true;
       }, { timeout: 10000 });

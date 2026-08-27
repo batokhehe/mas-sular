@@ -1,29 +1,23 @@
 'use client'
 
-import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
-import Script from 'next/script'
+import { Suspense, useCallback, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useQueryClient } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Check, Loader2, MapPin } from 'lucide-react'
+import { Check, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
-import { toast } from 'sonner'
 import { useAuth } from '@/lib/auth/auth-context'
 import { useCreateAddress } from '@/lib/query/hooks/use-addresses'
 import { qk } from '@/lib/query/keys'
 import type { User } from '@/lib/types/models'
 import { RegionFields } from '@/components/address/region-fields'
-import {
-  partsFromGoogleComponents,
-  resolveRegionFromGeocode,
-  type RegionValue,
-} from '@/lib/address/region-value'
+import type { RegionValue } from '@/lib/address/region-value'
 
 const addressSchema = z.object({
   recipientName: z.string().min(2, 'Nama penerima minimal 2 karakter'),
@@ -39,16 +33,15 @@ const addressSchema = z.object({
 
 type AddressFormData = z.infer<typeof addressSchema>
 
+// The map picker was removed from onboarding, but the backend contract still
+// REQUIRES coordinates: CreateAddressDto validates latitude/longitude with
+// @IsNumber (non-optional) and the Address columns are non-nullable, so this
+// placeholder (Jakarta) is sent instead. This matches the previous behavior —
+// the old map flow fell back to this exact value whenever the user never
+// touched the map. Coverage gating and JNE pricing use region/postal-code;
+// distance-priced couriers (Paxel) receive these placeholder coordinates,
+// exactly as they did for no-pin submissions before.
 const DEFAULT_LOCATION = { lat: -6.2088, lng: 106.8456 }
-const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
-
-type LatLng = { lat: number; lng: number }
-
-declare global {
-  interface Window {
-    google?: any
-  }
-}
 
 // Same internal-path guard used by the login page (avoids open redirects).
 function safeRedirect(value: string | null): string {
@@ -63,15 +56,7 @@ function OnboardingInner() {
   const { user } = useAuth()
   const createAddress = useCreateAddress()
 
-  const [mapLocation, setMapLocation] = useState<LatLng | null>(null)
-  const [isMapReady, setIsMapReady] = useState(false)
-  const [isGeocoding, setIsGeocoding] = useState(false)
-  const [isLocating, setIsLocating] = useState(false)
   const [region, setRegion] = useState<RegionValue>({})
-  const mapRef = useRef<HTMLDivElement | null>(null)
-  const mapInstanceRef = useRef<any>(null)
-  const markerRef = useRef<any>(null)
-  const geocoderRef = useRef<any>(null)
 
   const {
     register,
@@ -91,8 +76,7 @@ function OnboardingInner() {
     },
   })
 
-  // Push a chain-select selection into RHF (used by both manual selection and the
-  // reverse-geocode auto-fill).
+  // Push a chain-select selection into RHF.
   const applyRegion = useCallback(
     (next: RegionValue) => {
       setRegion(next)
@@ -106,125 +90,8 @@ function OnboardingInner() {
     [setValue, clearErrors],
   )
 
-  const reverseGeocodeLocation = useCallback(
-    (location: LatLng) => {
-      if (!geocoderRef.current) return
-
-      setIsGeocoding(true)
-      geocoderRef.current.geocode({ location }, (results: any[], status: string) => {
-        if (status === 'OK' && results?.[0]?.formatted_address) {
-          setValue('fullAddress', results[0].formatted_address, { shouldValidate: true })
-          // Best-effort: resolve Google's component names → master-table ids so the
-          // chain-select and postal code auto-fill without manual selection.
-          const parts = partsFromGoogleComponents(results[0].address_components ?? [])
-          resolveRegionFromGeocode(parts)
-            .then((resolved) => {
-              if (resolved.provinceId) applyRegion(resolved)
-            })
-            .catch(() => undefined)
-            .finally(() => setIsGeocoding(false))
-          return
-        }
-
-        setIsGeocoding(false)
-        toast.error('Alamat dari lokasi ini tidak ditemukan')
-      })
-    },
-    [setValue, applyRegion],
-  )
-
-  const selectMapLocation = useCallback((location: LatLng, shouldReverseGeocode = true) => {
-    setMapLocation(location)
-
-    if (mapInstanceRef.current) {
-      mapInstanceRef.current.panTo(location)
-      mapInstanceRef.current.setZoom(16)
-    }
-
-    if (markerRef.current) {
-      markerRef.current.setPosition(location)
-    }
-
-    if (shouldReverseGeocode) {
-      reverseGeocodeLocation(location)
-    }
-  }, [reverseGeocodeLocation])
-
-  const initializeMap = useCallback(() => {
-    if (!mapRef.current || !window.google?.maps || mapInstanceRef.current) return
-
-    const center = mapLocation || DEFAULT_LOCATION
-    geocoderRef.current = new window.google.maps.Geocoder()
-    mapInstanceRef.current = new window.google.maps.Map(mapRef.current, {
-      center,
-      zoom: mapLocation ? 16 : 12,
-      disableDefaultUI: true,
-      zoomControl: true,
-      fullscreenControl: true,
-      mapTypeControl: false,
-      streetViewControl: false,
-    })
-
-    markerRef.current = new window.google.maps.Marker({
-      position: center,
-      map: mapInstanceRef.current,
-      draggable: true,
-      title: 'Lokasi pengiriman',
-    })
-
-    mapInstanceRef.current.addListener('click', (event: any) => {
-      if (!event.latLng) return
-      selectMapLocation({
-        lat: event.latLng.lat(),
-        lng: event.latLng.lng(),
-      })
-    })
-
-    markerRef.current.addListener('dragend', (event: any) => {
-      if (!event.latLng) return
-      selectMapLocation({
-        lat: event.latLng.lat(),
-        lng: event.latLng.lng(),
-      })
-    })
-
-    setIsMapReady(true)
-  }, [mapLocation, selectMapLocation])
-
-  useEffect(() => {
-    if (googleMapsApiKey && window.google?.maps && mapRef.current && !mapInstanceRef.current) {
-      initializeMap()
-    }
-  }, [initializeMap])
-
-  const handleGetLocation = () => {
-    if (!navigator.geolocation) {
-      toast.error('Browser Anda tidak mendukung geolokasi')
-      return
-    }
-
-    setIsLocating(true)
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const { latitude, longitude } = position.coords
-        selectMapLocation({ lat: latitude, lng: longitude }, Boolean(geocoderRef.current))
-        setIsLocating(false)
-        toast.success('Lokasi berhasil didapatkan')
-      },
-      () => {
-        setIsLocating(false)
-        toast.error('Gagal mendapatkan lokasi. Pastikan GPS aktif.')
-      },
-      { enableHighAccuracy: true },
-    )
-  }
-
   const onSubmit = async (data: AddressFormData) => {
     try {
-      // ── TEMP RCA instrumentation — remove after verification ───────────────
-      console.debug('[RCA] me.addresses BEFORE create  :', qc.getQueryData<User>(qk.me)?.addresses?.length,
-        '| addresses cache:', (qc.getQueryData(qk.addresses) as unknown[] | undefined)?.length)
-      // ───────────────────────────────────────────────────────────────────────
 
       // Real address creation (POST /users/me/addresses). The hook invalidates
       // qk.me + qk.addresses; the backend sets isOnboarded=true on this call.
@@ -235,8 +102,8 @@ function OnboardingInner() {
         fullAddress: data.fullAddress,
         addressDetail: data.fullAddress,
         notes: data.notes,
-        latitude: mapLocation?.lat ?? DEFAULT_LOCATION.lat,
-        longitude: mapLocation?.lng ?? DEFAULT_LOCATION.lng,
+        latitude: DEFAULT_LOCATION.lat,
+        longitude: DEFAULT_LOCATION.lng,
         isDefault: true,
         provinceId: data.provinceId,
         cityId: data.cityId,
@@ -245,18 +112,11 @@ function OnboardingInner() {
         postalCode: data.postalCode,
       })
 
-      // ── TEMP RCA instrumentation — remove after verification ───────────────
-      console.debug('[RCA] me.addresses AFTER mutate+invalidate:', qc.getQueryData<User>(qk.me)?.addresses?.length)
-      // ───────────────────────────────────────────────────────────────────────
 
       // Reflect isOnboarded=true synchronously BEFORE navigating so no stale
       // qk.me read can bounce the user back into onboarding.
       qc.setQueryData<User>(qk.me, (current) => (current ? { ...current, isOnboarded: true } : current))
 
-      // ── TEMP RCA instrumentation — remove after verification ───────────────
-      console.debug('[RCA] me.addresses AFTER setQueryData :', qc.getQueryData<User>(qk.me)?.addresses?.length,
-        '| addresses cache:', (qc.getQueryData(qk.addresses) as unknown[] | undefined)?.length)
-      // ───────────────────────────────────────────────────────────────────────
 
       router.replace(safeRedirect(redirect))
     } catch {
@@ -303,71 +163,6 @@ function OnboardingInner() {
               Tambahkan alamat untuk memudahkan pengiriman pesanan Anda
             </p>
           </div>
-
-          {googleMapsApiKey && (
-            <Script
-              src={`https://maps.googleapis.com/maps/api/js?key=${googleMapsApiKey}`}
-              strategy="afterInteractive"
-              onLoad={initializeMap}
-              onError={() => toast.error('Gagal memuat Google Maps')}
-            />
-          )}
-
-          {/* Map */}
-          <div className="relative h-56 rounded-lg overflow-hidden bg-secondary mb-3 border">
-            {googleMapsApiKey ? (
-              <>
-                <div ref={mapRef} className="absolute inset-0" />
-                {!isMapReady && (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-secondary">
-                    <Loader2 className="h-7 w-7 animate-spin text-primary mb-2" />
-                    <p className="text-sm text-muted-foreground">Memuat Google Maps...</p>
-                  </div>
-                )}
-              </>
-            ) : (
-              <div className="absolute inset-0 flex flex-col items-center justify-center px-6 text-center">
-                <MapPin className="h-8 w-8 text-muted-foreground mb-2" />
-                <p className="text-sm font-medium">Google Maps belum dikonfigurasi</p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Tambahkan NEXT_PUBLIC_GOOGLE_MAPS_API_KEY untuk memilih titik pengiriman di peta.
-                </p>
-              </div>
-            )}
-          </div>
-
-          <div className="flex items-center justify-between gap-3 mb-6 text-xs text-muted-foreground">
-            <span>
-              {mapLocation
-                ? `${mapLocation.lat.toFixed(5)}, ${mapLocation.lng.toFixed(5)}`
-                : 'Ketuk peta atau gunakan lokasi saat ini'}
-            </span>
-            {isGeocoding && (
-              <span className="inline-flex items-center gap-1 whitespace-nowrap">
-                <Loader2 className="h-3 w-3 animate-spin" />
-                Membaca alamat
-              </span>
-            )}
-          </div>
-
-          <Button
-            variant="outline"
-            className="w-full mb-6 rounded-full"
-            onClick={handleGetLocation}
-            disabled={isLocating}
-          >
-            {isLocating ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Mencari lokasi...
-              </>
-            ) : (
-              <>
-                <MapPin className="mr-2 h-4 w-4" />
-                Gunakan Lokasi Saat Ini
-              </>
-            )}
-          </Button>
 
           {/* Address Form */}
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">

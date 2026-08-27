@@ -1,10 +1,12 @@
-import { Inject, Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
-import { NotificationOutbox } from '@prisma/client';
+import { Inject, Injectable, Logger, Optional, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
+import { NotificationOutbox, Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { hostname } from 'os';
 import { PrismaService } from '../../database/prisma.service';
+import { LogService } from '../logging/log.service';
 import { ConfigurationError } from '../../common/errors/configuration.error';
 import { InvalidPhoneError } from '../../common/utils/phone.util';
+import { NotificationBlockedError, NotificationDeliveryGate } from './notification-delivery.gate';
 import { NotificationMessageBuilder } from './notification-message.builder';
 import { NotificationProviderFactory } from './notification-provider.factory';
 import { NOTIFICATION_SENDER_CONFIG, NotificationSenderConfig } from './notification.config';
@@ -42,7 +44,40 @@ export class NotificationSenderWorker implements OnApplicationBootstrap, OnModul
     private readonly factory: NotificationProviderFactory,
     private readonly metrics: NotificationMetrics,
     @Inject(NOTIFICATION_SENDER_CONFIG) private readonly config: NotificationSenderConfig,
+    // REQUIRED, deliberately not @Optional(): a safety boundary that can be
+    // omitted is a safety boundary that fails open. A wiring mistake must break
+    // loudly here rather than quietly re-enable unrestricted delivery.
+    private readonly gate: NotificationDeliveryGate,
+    @Optional() private readonly logs?: LogService,
   ) {}
+
+  /**
+   * Fenced write-back (C1): a row may only be persisted by the worker that still
+   * OWNS its lease (`lockedBy` unchanged since the claim). A stale worker that
+   * lost the lease mid-send gets count 0 → the new owner's state stands; we log
+   * `lease_lost` and never throw (the provider side effect already happened —
+   * only persistence ownership is being protected).
+   */
+  private async fencedWriteBack(
+    row: NotificationOutbox,
+    data: Prisma.NotificationOutboxUpdateManyMutationInput,
+    intent: string,
+  ): Promise<boolean> {
+    const { count } = await this.prisma.notificationOutbox.updateMany({
+      where: { id: row.id, lockedBy: row.lockedBy },
+      data,
+    });
+    if (count === 1) return true;
+    this.logger.warn(`NotificationOutbox ${row.id}: lease lost before ${intent} — leaving the new owner's state untouched`);
+    this.logs?.write({
+      level: 'WARN',
+      module: 'worker.notification-sender',
+      action: 'lease_lost',
+      message: `lease lost before ${intent} (row ${row.id})`,
+      metadata: { notificationOutboxId: row.id, intent, lockedBy: row.lockedBy },
+    });
+    return false;
+  }
 
   onApplicationBootstrap(): void {
     if (!this.config.enabled) {
@@ -133,6 +168,12 @@ export class NotificationSenderWorker implements OnApplicationBootstrap, OnModul
       // Builder owns business composition (active account, phone, template id);
       // factory resolves the provider by channel; provider is transport-only.
       const message = await this.builder.build(row);
+      // THE safety boundary. Everything above this line is composition and is
+      // allowed to happen for every row; nothing below it may run unless
+      // delivery is explicitly enabled AND this recipient is explicitly
+      // authorized. Placed before the factory so WhatsApp and Email are
+      // covered by one guard and neither provider filters recipients itself.
+      this.gate.assertDeliverable(message);
       const provider = this.factory.get(row.channel);
       const result = await provider.send(message);
       await this.markSent(row, result.providerMessageId);
@@ -141,7 +182,18 @@ export class NotificationSenderWorker implements OnApplicationBootstrap, OnModul
     } catch (err) {
       // ConfigurationError (no active account / unresolved template) and InvalidPhoneError
       // are non-retryable, same as a provider PermanentSendError.
-      if (err instanceof PermanentSendError || err instanceof ConfigurationError || err instanceof InvalidPhoneError) {
+      //
+      // NotificationBlockedError joins them: a row refused by the safety gate
+      // must NOT sit PENDING with a backoff, because that would make it deliver
+      // itself the moment someone enables delivery. Terminal FAILED means
+      // reviving it always costs a deliberate, authenticated resend — which is
+      // itself re-checked by the gate.
+      if (
+        err instanceof PermanentSendError ||
+        err instanceof ConfigurationError ||
+        err instanceof InvalidPhoneError ||
+        err instanceof NotificationBlockedError
+      ) {
         await this.markFailed(row, err);
         this.metrics.failedPermanent();
         return;
@@ -152,9 +204,9 @@ export class NotificationSenderWorker implements OnApplicationBootstrap, OnModul
   }
 
   private async markSent(row: NotificationOutbox, providerMessageId: string): Promise<void> {
-    await this.prisma.notificationOutbox.update({
-      where: { id: row.id },
-      data: {
+    await this.fencedWriteBack(
+      row,
+      {
         status: 'SENT',
         sentAt: new Date(this.nowMs()),
         providerMessageId,
@@ -162,16 +214,18 @@ export class NotificationSenderWorker implements OnApplicationBootstrap, OnModul
         lockedBy: null,
         lastError: null,
       },
-    });
+      'markSent',
+    );
   }
 
   private async markFailed(row: NotificationOutbox, err: unknown): Promise<void> {
     const message = (err instanceof Error ? err.message : String(err)).slice(0, 1000);
-    await this.prisma.notificationOutbox.update({
-      where: { id: row.id },
-      data: { status: 'FAILED', attempts: row.attempts + 1, lastError: message, lockedUntil: null, lockedBy: null },
-    });
-    this.logger.error(`NotificationOutbox ${row.id} permanently FAILED: ${message}`);
+    const owned = await this.fencedWriteBack(
+      row,
+      { status: 'FAILED', attempts: row.attempts + 1, lastError: message, lockedUntil: null, lockedBy: null },
+      'markFailed',
+    );
+    if (owned) this.logger.error(`NotificationOutbox ${row.id} permanently FAILED: ${message}`);
   }
 
   private async scheduleRetry(row: NotificationOutbox, err: unknown): Promise<void> {
@@ -179,24 +233,30 @@ export class NotificationSenderWorker implements OnApplicationBootstrap, OnModul
     const attempts = row.attempts + 1;
 
     if (attempts >= this.config.maxAttempts) {
-      await this.prisma.notificationOutbox.update({
-        where: { id: row.id },
-        data: { status: 'FAILED', attempts, lastError: message, lockedUntil: null, lockedBy: null },
-      });
-      this.metrics.failedExhausted();
-      this.logger.error(`NotificationOutbox ${row.id} FAILED after ${attempts} attempts: ${message}`);
+      const owned = await this.fencedWriteBack(
+        row,
+        { status: 'FAILED', attempts, lastError: message, lockedUntil: null, lockedBy: null },
+        'markExhausted',
+      );
+      if (owned) {
+        this.metrics.failedExhausted();
+        this.logger.error(`NotificationOutbox ${row.id} FAILED after ${attempts} attempts: ${message}`);
+      }
       return;
     }
 
     // Honor a provider-suggested Retry-After (e.g. 429), else exponential backoff.
     const retryAfterMs = err instanceof TransientSendError ? err.retryAfterMs : undefined;
     const delay = retryAfterMs ?? this.backoffDelayMs(attempts);
-    await this.prisma.notificationOutbox.update({
-      where: { id: row.id },
-      data: { attempts, nextAttemptAt: new Date(this.nowMs() + delay), lastError: message, lockedUntil: null, lockedBy: null },
-    });
-    this.metrics.retried();
-    this.logger.warn(`NotificationOutbox ${row.id} send failed (attempt ${attempts}); retry in ${delay}ms: ${message}`);
+    const owned = await this.fencedWriteBack(
+      row,
+      { attempts, nextAttemptAt: new Date(this.nowMs() + delay), lastError: message, lockedUntil: null, lockedBy: null },
+      'scheduleRetry',
+    );
+    if (owned) {
+      this.metrics.retried();
+      this.logger.warn(`NotificationOutbox ${row.id} send failed (attempt ${attempts}); retry in ${delay}ms: ${message}`);
+    }
   }
 
   /** Full-jitter exponential backoff in [0, cap). */

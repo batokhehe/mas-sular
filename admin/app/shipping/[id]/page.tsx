@@ -24,8 +24,8 @@ export default function ShipmentDetailPage() {
   });
 
   const ordersQuery = useQuery({
-    queryKey: ['admin-orders'],
-    queryFn: fetchAdminOrders,
+    queryKey: ['admin-orders', 'shipment-options'],
+    queryFn: () => fetchAdminOrders({ limit: 100 }),
     retry: false,
   });
 
@@ -88,7 +88,7 @@ export default function ShipmentDetailPage() {
         </div>
       ) : null}
       <ShipmentForm
-        orders={ordersQuery.data}
+        orders={ordersQuery.data.items}
         initialValues={shipmentQuery.data}
         onSubmit={async (values) => {
           if (!shipmentId) return;

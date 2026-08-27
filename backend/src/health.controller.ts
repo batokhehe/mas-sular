@@ -1,8 +1,15 @@
-import { Controller, Get, Inject, Logger } from '@nestjs/common';
+import { Controller, Get, HttpStatus, Inject, Logger, Res } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { ApiTags } from '@nestjs/swagger';
 import { Cache } from 'cache-manager';
-import amqp from 'amqplib';
+import type { Response } from 'express';
+// NAMESPACE import, matching every other amqplib call site in this codebase.
+// A default import emits `amqplib_1.default.connect(...)` under `module: commonjs`
+// without `esModuleInterop`, and amqplib is CommonJS with no `default` export — so
+// it threw "Cannot read properties of undefined (reading 'connect')" before any
+// socket was opened. `allowSyntheticDefaultImports` silenced the type error but
+// changes no emit, which is why it compiled cleanly and failed only at runtime.
+import * as amqp from 'amqplib';
 import { PrismaService } from './database/prisma.service';
 import { amqpErrorInfo, describeAmqpTarget } from './common/diagnostics/amqp-redact';
 
@@ -26,7 +33,7 @@ export class HealthController {
   }
 
   @Get('ready')
-  async ready() {
+  async ready(@Res({ passthrough: true }) res: Response) {
     const checks: Record<string, string> = {};
 
     try {
@@ -68,8 +75,23 @@ export class HealthController {
       checks.rabbitmq = rabbitRequired ? 'failed' : 'skipped';
     }
 
-    const status = Object.values(checks).every((value) => value === 'ok' || value === 'skipped') ? 'ready' : 'not_ready';
-    return { status, checks };
+    const ready = Object.values(checks).every((value) => value === 'ok' || value === 'skipped');
+
+    // The status CODE is the readiness signal, not just the body. Proxies,
+    // orchestrators and load balancers route on the code and never parse the
+    // JSON; this endpoint used to answer 200 while reporting `not_ready`, so
+    // any such consumer would happily send traffic to an API whose database
+    // was down.
+    //
+    // Set on the response rather than thrown: ServiceUnavailableException is
+    // caught by AllExceptionsFilter, which rewrites the body to
+    // {statusCode,message,path,timestamp} and would discard the per-dependency
+    // `checks` detail that operators and the recovery runbook read. With
+    // `passthrough` Nest still serialises the object returned below, so the
+    // response body is byte-for-byte what it was before.
+    res.status(ready ? HttpStatus.OK : HttpStatus.SERVICE_UNAVAILABLE);
+
+    return { status: ready ? 'ready' : 'not_ready', checks };
   }
 
   @Get('live')

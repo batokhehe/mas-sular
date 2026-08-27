@@ -1,13 +1,30 @@
-import { BadRequestException, Injectable, Optional } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, Optional } from '@nestjs/common';
 import { CoverageType, OrderStatus, PaymentMethod, PaymentStatus, Prisma, Product, Promo, Topping, VoucherType } from '@prisma/client';
-import { randomUUID } from 'crypto';
 import { PrismaService } from '../../database/prisma.service';
 import { IdempotencyService, SupersededError } from '../../infrastructure/idempotency/idempotency.service';
 import { PaymentUploadTokenService } from '../payments/payment-upload-token.service';
+import { PaymentUniqueCodeService } from '../payments/payment-unique-code.service';
 import { ShippingService } from '../shipping/shipping.service';
+import { ShippingQuote, ShippingRateRequest } from '../shipping/domain/shipping-provider.interface';
+import { selectPaxelBox } from '../shipping/domain/paxel-box';
 import { DeliveryCoverageService } from '../delivery-coverage/delivery-coverage.service';
-import { CheckoutItemDto, CheckoutSummaryDto, CreateOrderDto, ShippingCostDto, ValidateVoucherDto } from './application/dto/create-order.dto';
+import { InventoryReservationService } from '../inventory/inventory-reservation.service';
+import { InventoryAllocationService } from '../inventory/inventory-allocation.service';
+import {
+  CheckoutItemDto,
+  CheckoutSummaryDto,
+  CreateOrderDto,
+  ShippingCostDto,
+  ShippingOptionsDto,
+  ValidateVoucherDto,
+} from './application/dto/create-order.dto';
 import { generateOrderNumber, isOrderNumberConflict } from './order-number.util';
+import { buildOutboxEvent } from '../../infrastructure/outbox/outbox-event.builder';
+import { PaymentInitiationService } from '../payments/gateway/payment-initiation.service';
+import { PaymentChannelRegistry } from '../payments/gateway/payment-channel.registry';
+import { buildCheckoutGatewayPayload } from '../payments/gateway/domain/payment-instruction.builder';
+import { DEFAULT_PAYMENT_METHOD, isSelectablePaymentMethod, selectablePaymentMethods } from '../payments/gateway/domain/payment-channel';
+import { calculatePaymentServiceFee } from '../payments/gateway/domain/payment-service-fee';
 
 type NormalizedCheckoutItem = {
   productId: string;
@@ -45,8 +62,23 @@ const ORDER_CHECKOUT_INCLUDE = {
   payment: true,
 } satisfies Prisma.OrderInclude;
 
+/**
+ * Master-address relations needed to build a courier rate request. Names only -
+ * ids are meaningless to a courier, and nothing else here needs the rows.
+ */
+const ADDRESS_REGION_NAMES = {
+  include: {
+    province: { select: { name: true } },
+    city: { select: { name: true } },
+    district: { select: { name: true } },
+    village: { select: { name: true } },
+  },
+} as const;
+
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger('OrdersService');
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly shipping: ShippingService,
@@ -55,20 +87,34 @@ export class OrdersService {
     // Optional so existing unit tests that construct OrdersService with 4 args keep
     // working; when absent (tests), coverage enforcement is skipped (legacy flow).
     @Optional() private readonly coverage?: DeliveryCoverageService,
+    // Optional: when present, checkout RESERVES stock (committed at payment verify)
+    // instead of decrementing Product.stock immediately (legacy fallback).
+    @Optional() private readonly inventory?: InventoryReservationService,
+    // Optional: when present, checkout ALLOCATES the best outlet (multi-outlet)
+    // instead of always using the single active outlet (legacy fallback).
+    @Optional() private readonly allocation?: InventoryAllocationService,
+    // Optional: when present (and enabled), manual BANK_TRANSFER orders get a random
+    // unique code folded into the amount. Absent → legacy behavior (no code).
+    @Optional() private readonly uniqueCode?: PaymentUniqueCodeService,
+    // Optional: opens the gateway charge AFTER the checkout transaction commits.
+    // Absent (tests / gateway module removed) → checkout behaves exactly as before.
+    @Optional() private readonly paymentInitiation?: PaymentInitiationService,
+    @Optional() private readonly paymentChannels?: PaymentChannelRegistry,
   ) {}
 
   /**
-   * Resolve delivery coverage for an address and translate it into a fee/estimate,
-   * or block the order. Returns null when coverage is unconfigured for the location
-   * (or the address predates the region hierarchy) → caller keeps the legacy
-   * courier-based delivery fee. Pickup is never affected here (delivery-only).
+   * Coverage gate for delivery. Delivery Coverage is ONLY responsible for the
+   * DELIVERY / PICKUP_ONLY / DISABLED decision — it no longer calculates shipping
+   * cost (that comes from the shipping providers). Throws for DISABLED / PICKUP_ONLY,
+   * returns the coverageId to snapshot for DELIVERY, or null when unconfigured
+   * (or the address predates the region hierarchy) → delivery is allowed.
    */
   private async resolveCoverage(address: {
     provinceId: string | null;
     cityId: string | null;
     districtId: string | null;
     villageId: string | null;
-  }): Promise<{ coverageId: string; deliveryFee: number; minimumOrder: number; estimatedMinutes: number } | null> {
+  }): Promise<{ coverageId: string } | null> {
     if (!this.coverage || !address.provinceId || !address.cityId) return null;
     const match = await this.coverage.resolve({
       provinceId: address.provinceId,
@@ -83,12 +129,212 @@ export class OrdersService {
     if (match.coverageType === CoverageType.PICKUP_ONLY) {
       throw new BadRequestException('This area is only available for Pickup.');
     }
+    return { coverageId: match.id };
+  }
+
+  /**
+   * Resolve the shipping quote for the order. Uses the customer's explicit
+   * provider+service selection when present; otherwise falls back to the chosen
+   * courier's first service (legacy). The price is always taken server-side.
+   */
+  private async resolveShippingQuote(
+    dto: { courier: string; shipping_provider?: string; shipping_service?: string },
+    request: ShippingRateRequest,
+    /**
+     * Quotes allocation already priced for THIS request, when it ran. Reusing
+     * them turns the selected-service lookup into a local find instead of a
+     * second fan-out across every courier service (4 more Paxel calls for one
+     * answer). Null on the legacy path, which still quotes on demand.
+     */
+    quotes?: ShippingQuote[] | null,
+  ): Promise<ShippingQuote> {
+    if (dto.shipping_provider && dto.shipping_service) {
+      return quotes
+        ? this.shipping.selectQuote(quotes, dto.shipping_provider, dto.shipping_service)
+        : this.shipping.findQuote(request, dto.shipping_provider, dto.shipping_service);
+    }
+    const rate = await this.shipping.calculateRateForCourier(dto.courier, request);
     return {
-      coverageId: match.id,
-      deliveryFee: match.deliveryFee,
-      minimumOrder: match.minimumOrder,
-      estimatedMinutes: match.estimatedMinutes,
+      provider: rate.provider ?? dto.courier,
+      service: rate.service,
+      serviceName: `${rate.provider ?? dto.courier} ${rate.service ?? ''}`.trim(),
+      estimatedDays: rate.etd,
+      shippingCost: rate.cost,
     };
+  }
+
+  /**
+   * Build a REAL shipping request: origin = the active outlet (System Settings),
+   * destination = the customer's selected address. Validates that the destination
+   * carries the required fields (postal code / province / city) and throws a
+   * validation error otherwise — no placeholder values ever reach the providers.
+   */
+  private async buildShippingRequest(
+    address: {
+      provinceId: string | null;
+      cityId: string | null;
+      postalCode: string | null;
+      latitude: unknown;
+      longitude: unknown;
+      fullAddress?: string | null;
+      addressDetail?: string | null;
+      province?: { name: string } | null;
+      city?: { name: string } | null;
+      district?: { name: string } | null;
+      village?: { name: string } | null;
+    },
+    weightGram: number,
+    totalQuantity: number,
+  ): Promise<ShippingRateRequest> {
+    const missing: string[] = [];
+    if (!address.postalCode) missing.push('postal code');
+    if (!address.provinceId) missing.push('province');
+    if (!address.cityId) missing.push('city');
+    if (missing.length) {
+      throw new BadRequestException(
+        `Delivery address is missing required fields for shipping: ${missing.join(', ')}. Please update your address.`,
+      );
+    }
+
+    const outlet = await this.prisma.outlet.findFirst({
+      where: { isActive: true },
+      include: ADDRESS_REGION_NAMES.include,
+    });
+    const toNum = (v: unknown): number | undefined =>
+      v === null || v === undefined ? undefined : Number(v);
+
+    return {
+      originPostalCode: outlet?.postalCode ?? '',
+      destinationPostalCode: address.postalCode as string,
+      weightGram,
+      originLatitude: toNum(outlet?.latitude),
+      originLongitude: toNum(outlet?.longitude),
+      destinationLatitude: toNum(address.latitude),
+      destinationLongitude: toNum(address.longitude),
+      originName: outlet?.name,
+      // The WHOLE ORDER's box, from total quantity - never per-item, never
+      // derived from weight. selectPaxelBox() is the single source of the
+      // S/M/L/XL threshold; nothing here re-implements it.
+      paxelBoxSize: selectPaxelBox(totalQuantity),
+      // Region names for couriers that price on place names rather than postal
+      // codes (Paxel). Undefined when a relation is unset - the provider decides
+      // whether it can proceed; nothing is substituted here.
+      originAddress: outlet?.addressDetail ?? undefined,
+      originProvince: outlet?.province?.name,
+      originCity: outlet?.city?.name,
+      originDistrict: outlet?.district?.name,
+      originVillage: outlet?.village?.name,
+      destinationAddress: address.fullAddress ?? address.addressDetail ?? undefined,
+      destinationProvince: address.province?.name,
+      destinationCity: address.city?.name,
+      destinationDistrict: address.district?.name,
+      destinationVillage: address.village?.name,
+    };
+  }
+
+  /**
+   * Resolve the fulfilment outlet + shipping request + quotes. When the allocation
+   * engine is wired it picks the best outlet (stock/distance/shipping/ETA);
+   * otherwise it falls back to the single active outlet (legacy).
+   */
+  private async resolveOutletRequest(
+    address: {
+      provinceId: string | null;
+      cityId: string | null;
+      districtId: string | null;
+      villageId: string | null;
+      postalCode: string | null;
+      latitude: unknown;
+      longitude: unknown;
+      fullAddress?: string | null;
+      addressDetail?: string | null;
+      province?: { name: string } | null;
+      city?: { name: string } | null;
+      district?: { name: string } | null;
+      village?: { name: string } | null;
+    },
+    items: NormalizedCheckoutItem[],
+    weightGram: number,
+  ): Promise<{ outletId: string | null; request: ShippingRateRequest; quotes: ShippingQuote[] | null }> {
+    // SUM(OrderItem.quantity) across the whole cart — the box is one per
+    // order, never per SKU or per line. Computed once here so both branches
+    // below (allocated outlet vs. legacy active-outlet) agree.
+    const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0);
+
+    if (this.allocation) {
+      const allocItems = items.map((i) => ({ productId: i.productId, quantity: i.quantity }));
+      const result = await this.allocation.allocate(allocItems, this.toAllocationAddress(address), weightGram);
+      const outlet = result.outlet;
+      const request: ShippingRateRequest = {
+        originPostalCode: outlet?.postalCode ?? '',
+        destinationPostalCode: address.postalCode as string,
+        weightGram,
+        originLatitude: outlet?.latitude ?? undefined,
+        originLongitude: outlet?.longitude ?? undefined,
+        destinationLatitude: this.toNumOpt(address.latitude),
+        destinationLongitude: this.toNumOpt(address.longitude),
+        originName: outlet?.name,
+        paxelBoxSize: selectPaxelBox(totalQuantity),
+        // Origin names come from the outlet the allocator actually picked, not
+        // from the active-outlet fallback — otherwise a multi-outlet order would
+        // be priced from the wrong origin city.
+        originAddress: outlet?.address ?? undefined,
+        originProvince: outlet?.province ?? undefined,
+        originCity: outlet?.city ?? undefined,
+        originDistrict: outlet?.district ?? undefined,
+        originVillage: outlet?.village ?? undefined,
+        destinationAddress: address.fullAddress ?? address.addressDetail ?? undefined,
+        destinationProvince: address.province?.name,
+        destinationCity: address.city?.name,
+        destinationDistrict: address.district?.name,
+        destinationVillage: address.village?.name,
+      };
+      return { outletId: result.outletId, request, quotes: result.quotes };
+    }
+    const request = await this.buildShippingRequest(address, weightGram, totalQuantity);
+    return { outletId: null, request, quotes: null };
+  }
+
+  /** Flatten the loaded master-address relations into the allocator's address shape. */
+  private toAllocationAddress(address: {
+    provinceId: string | null;
+    cityId: string | null;
+    districtId: string | null;
+    villageId: string | null;
+    postalCode: string | null;
+    latitude: unknown;
+    longitude: unknown;
+    fullAddress?: string | null;
+    addressDetail?: string | null;
+    province?: { name: string } | null;
+    city?: { name: string } | null;
+    district?: { name: string } | null;
+    village?: { name: string } | null;
+  }) {
+    return {
+      ...address,
+      address: address.fullAddress ?? address.addressDetail ?? null,
+      province: address.province?.name ?? null,
+      city: address.city?.name ?? null,
+      district: address.district?.name ?? null,
+      village: address.village?.name ?? null,
+    };
+  }
+
+  private toNumOpt(v: unknown): number | undefined {
+    return v === null || v === undefined ? undefined : Number(v);
+  }
+
+  /** Shipping services available for a cart + address (after the coverage gate). */
+  async getShippingOptions(userId: string, dto: ShippingOptionsDto): Promise<ShippingQuote[]> {
+    const address = await this.assertAddress(userId, dto.address_id);
+    const items = this.normalizeItems(dto.items);
+    const { products } = await this.getCartPricing(items);
+    // Gate: throws for DISABLED / PICKUP_ONLY so unsupported areas never see options.
+    await this.resolveCoverage(address);
+    const { request, quotes } = await this.resolveOutletRequest(address, items, this.getShippingWeightGram(items, products));
+    // Allocation already priced the chosen outlet; legacy path quotes on demand.
+    return quotes ?? this.shipping.getQuotes(request);
   }
 
   private normalizeItems(items: CheckoutItemDto[]): NormalizedCheckoutItem[] {
@@ -188,6 +434,9 @@ export class OrdersService {
   private async assertAddress(userId: string, addressId: string) {
     const address = await this.prisma.address.findFirst({
       where: { id: addressId, userId, deletedAt: null },
+      // Region NAMES (not just ids): couriers price on human place names, and
+      // Paxel rejects a rate request without destination province/city/district.
+      include: ADDRESS_REGION_NAMES.include,
     });
     if (!address) throw new BadRequestException('Shipping address is invalid');
     return address;
@@ -229,8 +478,47 @@ export class OrdersService {
     }
   }
 
-  private getShippingWeightGram(totalItems: number) {
-    return Math.max(1, totalItems) * 500;
+  /**
+   * Real parcel weight for a RATE request: SUM(Product.weightGram × quantity).
+   *
+   * Replaces the legacy `totalItems × 500 g` placeholder, which was wrong twice
+   * over: it charged every SKU the same 500 g regardless of what it actually
+   * weighs, and it crossed Paxel's 5000 g /rates/city cap at 11 items, silently
+   * removing SAMEDAY/NEXTDAY/REGULAR from any order that size.
+   *
+   * A product with no configured weight is REFUSED, never defaulted — falling
+   * back to 500 g is what produced a wrong quote in the first place, and a
+   * guessed weight is a price a customer would actually be charged. Product
+   * physical data is mandatory for shipping, and this surfaces that at the
+   * quote instead of hiding it until booking.
+   *
+   * This is the WEIGHT axis only. The PaxelBox dimension is selected purely
+   * from total QUANTITY (`selectPaxelBox`) and is deliberately unrelated to
+   * Product.lengthCm/widthCm/heightCm — the box is the outer carton, the
+   * product dimensions are its contents.
+   */
+  private getShippingWeightGram(items: NormalizedCheckoutItem[], products: Product[]): number {
+    const missing: string[] = [];
+    let totalWeightGram = 0;
+
+    for (const item of items) {
+      // getCartPricing already rejected any unknown/unavailable product.
+      const product = products.find((candidate) => candidate.id === item.productId)!;
+      if (product.weightGram === null || product.weightGram === undefined) {
+        if (!missing.includes(product.name)) missing.push(product.name);
+        continue;
+      }
+      totalWeightGram += product.weightGram * item.quantity;
+    }
+
+    if (missing.length) {
+      throw new BadRequestException(
+        `Shipping cannot be quoted: ${missing.join(', ')} ${missing.length === 1 ? 'has' : 'have'} no weight configured. ` +
+          `Set the product weight, then retry.`,
+      );
+    }
+
+    return totalWeightGram;
   }
 
   private normalizeEstimatedDays(etd: string) {
@@ -238,14 +526,11 @@ export class OrdersService {
   }
 
   async calculateShippingCost(userId: string, dto: ShippingCostDto) {
-    await this.assertAddress(userId, dto.address_id);
+    const address = await this.assertAddress(userId, dto.address_id);
     const items = this.normalizeItems(dto.items);
-    const { totalItems } = await this.getCartPricing(items);
-    const rate = await this.shipping.calculateRateForCourier(dto.courier, {
-      originPostalCode: '00000',
-      destinationPostalCode: 'customer-address',
-      weightGram: this.getShippingWeightGram(totalItems),
-    });
+    const { products, totalItems } = await this.getCartPricing(items);
+    const request = await this.buildShippingRequest(address, this.getShippingWeightGram(items, products), totalItems);
+    const rate = await this.shipping.calculateRateForCourier(dto.courier, request);
 
     return {
       shipping_cost: rate.cost,
@@ -280,35 +565,16 @@ export class OrdersService {
     const { products, subtotal, totalItems } = await this.getCartPricing(items);
     this.assertStock(items, products);
 
-    // Delivery coverage takes precedence over the courier rate when configured for
-    // this location: it sets the fee/estimate and can block delivery (DISABLED /
-    // PICKUP_ONLY throw). Unconfigured locations fall back to the courier rate.
+    // Coverage gate only (DISABLED / PICKUP_ONLY throw); it no longer sets the fee.
     const coverage = await this.resolveCoverage(address);
 
-    let deliveryFee: number;
-    let estimatedDays: string | null;
-    let estimatedMinutes: number | null = null;
-    let coverageId: string | null = null;
-
-    if (coverage) {
-      if (subtotal < coverage.minimumOrder) {
-        throw new BadRequestException(
-          `Minimum order for delivery to this area is Rp ${coverage.minimumOrder.toLocaleString('id-ID')}`,
-        );
-      }
-      deliveryFee = coverage.deliveryFee;
-      estimatedMinutes = coverage.estimatedMinutes;
-      coverageId = coverage.coverageId;
-      estimatedDays = null;
-    } else {
-      const shipping = await this.calculateShippingCost(userId, {
-        address_id: dto.address_id,
-        courier: dto.courier,
-        items: dto.items,
-      });
-      deliveryFee = shipping.shipping_cost;
-      estimatedDays = shipping.estimated_days;
-    }
+    // Allocate the best outlet (multi-outlet) or fall back to the active outlet;
+    // shipping is priced from that outlet's origin.
+    // `quotes` is what allocation already priced for this exact request; passing
+    // it through keeps the summary to one courier fan-out instead of two.
+    const { outletId, request, quotes } = await this.resolveOutletRequest(address, items, this.getShippingWeightGram(items, products));
+    const quote = await this.resolveShippingQuote(dto, request, quotes);
+    const deliveryFee = quote.shippingCost;
 
     let voucher: Promo | null = null;
     let discount = 0;
@@ -319,16 +585,24 @@ export class OrdersService {
       discount = this.calculateVoucherDiscount(voucher, subtotal, deliveryFee);
     }
 
+    const transactionBase = subtotal + deliveryFee - discount;
+    const paymentServiceFee = dto.payment_method === PaymentMethod.GATEWAY
+      ? calculatePaymentServiceFee({ paymentChannel: dto.payment_channel, transactionBase }).feeAmount
+      : 0;
+
     return {
       subtotal,
       shipping_cost: deliveryFee,
       delivery_fee: deliveryFee,
       discount,
-      grand_total: subtotal + deliveryFee - discount,
+      payment_service_fee: paymentServiceFee,
+      grand_total: transactionBase + paymentServiceFee,
       total_items: totalItems,
-      estimated_days: estimatedDays,
-      estimated_minutes: estimatedMinutes,
-      coverage_id: coverageId,
+      estimated_days: quote.estimatedDays,
+      estimated_minutes: null as number | null,
+      coverage_id: coverage?.coverageId ?? null,
+      outlet_id: outletId,
+      shipping: quote,
       voucher,
     };
   }
@@ -434,12 +708,59 @@ export class OrdersService {
     idempotencyRecordId: string | null,
     fenceToken: number | null,
   ) {
+    this.assertSelectablePaymentMethod(dto.payment_method);
     const items = this.normalizeItems(dto.items);
     const { products, toppings } = await this.getCartPricing(items);
     this.assertStock(items, products);
     const summary = await this.getSummary(userId, dto);
 
-    return this.persistOrderWithRetry({ userId, dto, items, products, toppings, summary, idempotencyRecordId, fenceToken });
+    const order = await this.persistOrderWithRetry({ userId, dto, items, products, toppings, summary, idempotencyRecordId, fenceToken });
+    return this.withGatewayCharge(order, dto);
+  }
+
+  /**
+   * The ONLY gate on which payment methods may start a new order. Selectability
+   * is derived from the payment-channel registry (Phase 4A), so COD — offered by
+   * no channel — can never be created again. Historical COD orders are read-only
+   * data and are entirely unaffected.
+   */
+  private assertSelectablePaymentMethod(method?: PaymentMethod): void {
+    if (!method) return; // omitted → DEFAULT_PAYMENT_METHOD, which is selectable by construction
+    if (!isSelectablePaymentMethod(method)) {
+      throw new BadRequestException(
+        `Payment method ${method} is no longer available. Choose one of: ${selectablePaymentMethods().join(', ')}.`,
+      );
+    }
+  }
+
+  /**
+   * GATEWAY orders open their charge AFTER the checkout transaction has committed
+   * — an external HTTP call must never run inside a database transaction (the
+   * same rule the post-verify shipment booking follows).
+   *
+   * Best-effort by design: if the gateway is unreachable the ORDER STILL STANDS
+   * with a PENDING payment, exactly as a manual order would; the customer can be
+   * offered the payment page again. Non-gateway methods return untouched, so the
+   * manual flow is byte-identical.
+   */
+  private async withGatewayCharge(order: Awaited<ReturnType<OrdersService['persistOrderOnce']>>, dto: CreateOrderDto) {
+    const method = dto.payment_method ?? DEFAULT_PAYMENT_METHOD;
+    if (method !== PaymentMethod.GATEWAY) return order;
+    if (!dto.payment_channel || !this.paymentInitiation || !this.paymentChannels) return order;
+
+    const descriptor = this.paymentChannels.find(dto.payment_channel);
+    if (!descriptor) return order;
+
+    try {
+      const result = await this.paymentInitiation.initiate(order.payment!.id, dto.payment_channel);
+      // Additive block: every existing field of the order response is untouched.
+      return { ...order, ...buildCheckoutGatewayPayload(result, descriptor) };
+    } catch (err) {
+      this.logger.error(
+        `gateway charge failed for order ${order.orderNumber}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return order; // order survives; payment stays PENDING
+    }
   }
 
   // Retry the order transaction on the astronomically-rare orderNumber unique
@@ -463,22 +784,43 @@ export class OrdersService {
     const { userId, dto, items, products, toppings, summary, idempotencyRecordId, fenceToken } = args;
     const voucher = summary.voucher;
     // Single source of truth for the method: persisted identically to the order
-    // and its payment. Defaults to COD when the client omits a selection.
-    const paymentMethod = dto.payment_method ?? PaymentMethod.COD;
+    // and its payment. Defaults to manual bank transfer when the client omits a
+    // selection (Phase 4A — COD is no longer selectable).
+    const paymentMethod = dto.payment_method ?? DEFAULT_PAYMENT_METHOD;
+
+    // Order.totalPrice is the backend-calculated customer charge, including the
+    // immutable gateway-fee snapshot. The manual transfer code remains separate:
+    // it is added only to Payment.amount and is never order revenue.
+    const chargedTotal = summary.grand_total;
 
     const order = await this.prisma.$transaction(async (tx) => {
-      for (const product of products) {
-        const requestedQty = items
-          .filter((item) => item.productId === product.id)
-          .reduce((sum, item) => sum + item.quantity, 0);
+      // C4: unique-code allocation runs INSIDE the checkout transaction, so the
+      // collision re-check against PENDING transfers happens immediately before
+      // the payment row is created (a pre-tx probe could race a concurrent
+      // checkout committing the same transfer total between check and create).
+      let uniqueCode: number | null = null;
+      let transferTotal = chargedTotal;
+      if (paymentMethod === PaymentMethod.BANK_TRANSFER && this.uniqueCode?.isEnabled()) {
+        uniqueCode = await this.uniqueCode.allocateInTx(tx, chargedTotal);
+        if (uniqueCode !== null) transferTotal = chargedTotal + uniqueCode;
+      }
+      // Legacy path (no inventory service wired): decrement Product.stock now.
+      // Reservation path (inventory present): stock is RESERVED after order.create
+      // below and only deducted at payment verification.
+      if (!this.inventory) {
+        for (const product of products) {
+          const requestedQty = items
+            .filter((item) => item.productId === product.id)
+            .reduce((sum, item) => sum + item.quantity, 0);
 
-        const stockUpdate = await tx.product.updateMany({
-          where: { id: product.id, stock: { gte: requestedQty } },
-          data: { stock: { decrement: requestedQty } },
-        });
+          const stockUpdate = await tx.product.updateMany({
+            where: { id: product.id, stock: { gte: requestedQty } },
+            data: { stock: { decrement: requestedQty } },
+          });
 
-        if (stockUpdate.count !== 1) {
-          throw new BadRequestException(`Insufficient stock for ${product.name}`);
+          if (stockUpdate.count !== 1) {
+            throw new BadRequestException(`Insufficient stock for ${product.name}`);
+          }
         }
       }
 
@@ -491,9 +833,19 @@ export class OrdersService {
           subtotal: summary.subtotal,
           deliveryFee: summary.shipping_cost,
           voucherDiscountAmount: summary.discount,
-          totalPrice: summary.grand_total,
+          paymentServiceFee: summary.payment_service_fee,
+          // Unique code lives only on Payment.amount; the service fee is part of
+          // the immutable customer charge snapshot above.
+          totalPrice: chargedTotal,
           coverageId: summary.coverage_id ?? undefined,
           estimatedDeliveryMinutes: summary.estimated_minutes ?? undefined,
+          outletId: summary.outlet_id ?? undefined,
+          // Shipping-provider quote snapshot (for order history + admin display).
+          shippingProvider: summary.shipping.provider,
+          shippingService: summary.shipping.service,
+          shippingServiceName: summary.shipping.serviceName,
+          shippingCost: summary.shipping.shippingCost,
+          shippingPayload: JSON.parse(JSON.stringify(summary.shipping)) as Prisma.InputJsonValue,
           voucherId: voucher?.id,
           voucherCode: voucher?.code,
           voucherType: voucher?.voucherType,
@@ -505,6 +857,16 @@ export class OrdersService {
                 productName: product.name,
                 unitPrice: product.price,
                 quantity: item.quantity,
+                // Physical snapshot, taken here for the same reason productName
+                // and unitPrice are: shipment booking happens asynchronously
+                // after payment, so reading Product then would let a later edit
+                // change the parcel of an order that is already paid for.
+                // Null when the product has no measurements yet - never guessed.
+                weightGram: product.weightGram,
+                lengthCm: product.lengthCm,
+                widthCm: product.widthCm,
+                heightCm: product.heightCm,
+                isFragile: product.isFragile,
                 spicyLevel: item.spicyLevel,
                 notes: item.notes,
                 toppings: {
@@ -519,17 +881,24 @@ export class OrdersService {
           payment: {
             create: {
               method: paymentMethod,
-              amount: summary.grand_total,
+              // Transfer total = chargedTotal + uniqueCode (what the customer sends).
+              amount: transferTotal,
+              uniqueCode,
               status: PaymentStatus.PENDING,
             },
           },
           shipment: {
             create: {
-              provider: dto.courier,
-              service: dto.courier === 'paxel' ? 'Same Day' : 'REG',
+              provider: summary.shipping.provider ?? dto.courier,
+              service: summary.shipping.serviceName || summary.shipping.service || dto.courier,
               status: 'RATE_SELECTED',
               cost: summary.shipping_cost,
-              metadata: { estimatedDays: summary.estimated_days },
+              metadata: {
+                estimatedDays: summary.estimated_days ?? null,
+                provider: summary.shipping.provider ?? dto.courier,
+                service: summary.shipping.service ?? null,
+                serviceName: summary.shipping.serviceName ?? null,
+              },
             },
           },
           events: {
@@ -541,6 +910,17 @@ export class OrdersService {
         },
         include: ORDER_CHECKOUT_INCLUDE,
       });
+
+      // Reserve stock for every item (row-locked availability check). Any shortfall
+      // throws → the whole checkout transaction (order, payment, …) rolls back.
+      if (this.inventory) {
+        await this.inventory.reserveForOrder(tx, {
+          orderId: createdOrder.id,
+          items: items.map((item) => ({ productId: item.productId, quantity: item.quantity })),
+          paymentMethod,
+          outletId: summary.outlet_id ?? undefined,
+        });
+      }
 
       if (voucher) {
         const voucherUpdate = voucher.maxUsageCount !== null
@@ -588,23 +968,23 @@ export class OrdersService {
       // the order. It is the last statement so a superseded finalize (above) rolls
       // back the order AND this event together — no event for an uncommitted order.
       await tx.outboxEvent.create({
-        data: {
-          id: randomUUID(),
+        data: buildOutboxEvent({
           aggregateType: 'order',
           aggregateId: createdOrder.id,
           eventName: 'order.created',
-          eventVersion: 1,
           exchange: 'orders',
           routingKey: 'order.created',
           payload: {
             orderId: createdOrder.id,
             orderNumber: createdOrder.orderNumber,
-            totalPrice: createdOrder.totalPrice,
+            // Notifications show the amount the customer must transfer = Payment.amount
+            // (transfer total). Order.totalPrice is now business-only, so source this
+            // from the payment to keep the customer-facing amount unchanged.
+            totalPrice: createdOrder.payment!.amount,
             ...(uploadUrl ? { uploadUrl } : {}),
           },
           metadata: { source: 'orders.checkout' },
-          occurredAt: new Date(),
-        },
+        }),
       });
 
       return createdOrder;
@@ -613,11 +993,54 @@ export class OrdersService {
     return order;
   }
 
-  listForUser(userId: string, status?: string) {
-    return this.prisma.order.findMany({
+  /**
+   * The customer's own orders.
+   *
+   * `payment` keeps every field it returned before (`include` selects all Payment
+   * scalars), plus ONE additive summary: `payment.gateway`, the latest gateway
+   * attempt's deadline and state. The storefront needs it to stop offering "Bayar
+   * Sekarang" for an attempt that already died — Payment.status stays PENDING
+   * until the provider's expire notification arrives, which can lag by hours.
+   *
+   * Deliberately a NARROW `select`: this is a list endpoint, so anything exposed
+   * here is multiplied across every order. The QR payload, VA number, provider
+   * ids and raw provider bodies stay out, as does the provider NAME — customers
+   * never see which gateway is in use.
+   *
+   * One batched query, no N+1: the nested read is index-backed by
+   * `@@index([paymentId, createdAt])`.
+   */
+  async listForUser(userId: string, status?: string) {
+    const orders = await this.prisma.order.findMany({
       where: { userId, deletedAt: null, status: status as never },
-      include: { items: { include: { toppings: true } }, address: true, payment: true, shipment: true },
+      include: {
+        items: { include: { toppings: true } },
+        address: true,
+        payment: {
+          include: {
+            gatewayTransactions: {
+              orderBy: { createdAt: 'desc' },
+              take: 1,
+              select: { expiryAt: true, status: true },
+            },
+          },
+        },
+        shipment: true,
+      },
       orderBy: { createdAt: 'desc' },
+    });
+
+    // Present the latest attempt as `payment.gateway`; the relation name and its
+    // array shape are an internal detail the frontend should not depend on.
+    return orders.map(({ payment, ...order }) => {
+      if (!payment) return { ...order, payment: null };
+      const { gatewayTransactions, ...rest } = payment;
+      const latest = gatewayTransactions[0];
+      // Rebuild the summary field by field rather than spreading the row: the
+      // narrow `select` above already limits it, but widening that clause later
+      // must not silently start publishing provider data to every order.
+      const gateway = latest ? { expiryAt: latest.expiryAt, status: latest.status } : null;
+      return { ...order, payment: { ...rest, gateway } };
     });
   }
 }

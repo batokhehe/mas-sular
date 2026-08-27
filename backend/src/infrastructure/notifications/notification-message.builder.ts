@@ -43,12 +43,47 @@ export class NotificationMessageBuilder {
     }
 
     let variables: NotificationVariables;
-    if (template === 'order.transfer') {
+    if (template === 'shipment.status') {
+      variables = {
+        template: 'shipment.status',
+        customerName,
+        orderNumber,
+        shipmentStatus: String(p.shipmentStatus ?? ''),
+        statusLabel: String(p.statusLabel ?? ''),
+        shippingProvider: String(p.shippingProvider ?? ''),
+        shippingService: String(p.shippingService ?? ''),
+        trackingNumber: String(p.trackingNumber ?? ''),
+      };
+    } else if (template === 'order.shipped' || template === 'order.delivered') {
+      variables = {
+        template,
+        customerName,
+        orderNumber,
+        shippingProvider: String(p.shippingProvider ?? ''),
+        shippingService: String(p.shippingService ?? ''),
+        trackingNumber: String(p.trackingNumber ?? ''),
+      };
+    } else if (template === 'order.new') {
+      // INTERNAL operational alert. Every value is copied from the payload the
+      // consumer composed at enqueue time — no business lookup here, so the
+      // alert says what was true when the order arrived.
+      variables = {
+        template: 'order.new',
+        customerName,
+        orderNumber,
+        grandTotal: Number(p.grandTotal ?? 0),
+        paymentSummary: String(p.paymentSummary ?? ''),
+        shippingSummary: String(p.shippingSummary ?? ''),
+        adminOrderUrl: String(p.adminOrderUrl ?? ''),
+      };
+    } else if (template === 'order.transfer') {
       const account = await this.accounts.getActiveAccount(); // → ConfigurationError if none active
       const uploadToken = String(p.uploadToken ?? '');
       if (!uploadToken) {
         throw new ConfigurationError(`transfer notification ${row.id} is missing uploadToken`);
       }
+      // The unique code is already folded into totalPrice (the final transfer amount),
+      // so the customer-facing message shows only the total — no separate code line.
       variables = {
         template: 'order.transfer',
         customerName,
@@ -59,6 +94,16 @@ export class NotificationMessageBuilder {
         bankCode: account.bankCode,
         accountName: account.accountName,
         accountNumber: account.accountNumber,
+      };
+    } else if (template === 'manual.order-update' || template === 'manual.shipment-update' || template === 'manual.custom') {
+      // Admin-composed message (Customer Communication Center) — free text only,
+      // no business lookups.
+      variables = {
+        template,
+        customerName,
+        orderNumber,
+        message: String(p.message ?? ''),
+        ...(p.subject ? { subject: String(p.subject) } : {}),
       };
     } else {
       variables = {

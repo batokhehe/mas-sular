@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { AdminShell } from '@/components/layout/admin-shell';
@@ -26,11 +27,31 @@ export default function EditRolePage() {
     retry: false,
   });
 
+  // The optimistic-concurrency token is captured ONCE, from the GET that seeded the
+  // form (C7b). Reading roleQuery.data at submit time would pick up a refetch - on
+  // window focus, say - and hand the server a fresh timestamp that always matches,
+  // which is exactly the silent-overwrite this protects against.
+  const loadedUpdatedAt = useRef<string | null>(null);
+  const [conflict, setConflict] = useState(false);
+
+  useEffect(() => {
+    if (roleQuery.data && loadedUpdatedAt.current === null) {
+      loadedUpdatedAt.current = roleQuery.data.updatedAt;
+    }
+  }, [roleQuery.data]);
+
   const updateRole = useMutation({
     mutationFn: (input: { name: string; description?: string; permissionIds: string[] }) =>
-      updateAdminRole(roleId ?? '', input),
+      updateAdminRole(roleId ?? '', { ...input, expectedUpdatedAt: loadedUpdatedAt.current ?? '' }),
     onSuccess: () => {
+      setConflict(false);
       router.push('/roles');
+    },
+    onError: (error: unknown) => {
+      // 409 means another administrator saved first. Surface it and stop: no silent
+      // retry, no refetch over the form. The edits stay on screen so they can be
+      // reapplied deliberately after a manual reload.
+      setConflict(typeof error === 'object' && error !== null && (error as { status?: number }).status === 409);
     },
   });
 
@@ -58,6 +79,16 @@ export default function EditRolePage() {
         <h2 className="text-xl font-semibold text-gray-900">Edit Role</h2>
         <p className="mt-1 text-sm text-gray-500">Update role name, description, and permissions.</p>
       </div>
+
+      {conflict ? (
+        <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+          <p className="font-medium">Role was modified by another administrator.</p>
+          <p className="mt-1">
+            Your changes below have not been saved. Reload this page to see the current permissions,
+            then reapply your edits.
+          </p>
+        </div>
+      ) : null}
 
       <RoleForm
         permissions={permissionsQuery.data}

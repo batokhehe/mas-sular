@@ -15,7 +15,9 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
     "prisma:seed": "tsx prisma/seed.ts",
-    "prisma:seed:address": "tsx prisma/seed-address.ts"
+    "prisma:seed:address": "tsx prisma/seed-address.ts",
+    "prisma:seed:inventory": "tsx prisma/seed-inventory.ts",
+    "test:sandbox": "jest --config test/integration/jest.sandbox.config.js"
   },
   "dependencies": {
     "@nestjs/bullmq": "^11.0.2",
@@ -85,5 +87,10 @@
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
+  },
+  "packageManager": "pnpm@10.0.0",
+  "engines": {
+    "node": ">=22.0.0 <23",
+    "pnpm": ">=10 <12"
   }
 }

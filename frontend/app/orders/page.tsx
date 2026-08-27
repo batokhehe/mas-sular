@@ -24,6 +24,7 @@ import { formatIDR } from '@/lib/utils/format'
 import { cn } from '@/lib/utils'
 import { useMe } from '@/lib/query/hooks/use-me'
 import { useOrders } from '@/lib/query/hooks/use-orders'
+import { canResumeGatewayPayment, gatewayPaymentHref } from '@/lib/payments/resume'
 import type { Order } from '@/lib/types/models'
 import type { OrderStatus, PaymentStatus, ShipmentStatus } from '@/lib/types/enums'
 
@@ -75,6 +76,9 @@ function OrderCard({ order, onRefetch }: { order: Order; onRefetch: () => void }
   const pay = payment ? PAYMENT_LABEL[payment.status] : undefined
   const canUpload =
     payment && RECEIPT_METHODS.has(order.paymentMethod) && UPLOADABLE.includes(payment.status)
+  // A gateway payment the customer never finished. The link replays the attempt
+  // already stored at checkout — it starts no new charge.
+  const canResume = canResumeGatewayPayment(payment)
 
   return (
     <Card className="space-y-3 p-4">
@@ -214,6 +218,17 @@ function OrderCard({ order, onRefetch }: { order: Order; onRefetch: () => void }
             </>
           ) : null}
         </div>
+      ) : null}
+
+      {/* Resume an unfinished gateway payment. Navigation only: the payment page
+          re-reads the stored attempt, so no QR data travels through the URL. */}
+      {canResume ? (
+        <>
+          <Separator />
+          <Button asChild size="sm" className="rounded-full">
+            <Link href={gatewayPaymentHref(payment!.id)}>Bayar Sekarang</Link>
+          </Button>
+        </>
       ) : null}
 
       {/* Payment receipt upload — preserved exactly */}
