@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start -H 0.0.0.0",
     "lint": "eslint .",
-    "test": "node --test lib/system/dashboard-view.test.ts lib/system/request-explorer-view.test.ts lib/system/queue-center-view.test.ts lib/system/performance-view.test.ts lib/system/incident-view.test.ts lib/system/notification-view.test.ts lib/system/communication-view.test.ts lib/system/audit-view.test.ts lib/system/bell-view.test.ts lib/debounce.test.ts lib/utils/number.test.ts",
+    "test": "node --test lib/shipments/service-display.test.ts lib/orders/prepare-shipment.test.ts lib/system/dashboard-view.test.ts lib/system/request-explorer-view.test.ts lib/system/queue-center-view.test.ts lib/system/performance-view.test.ts lib/system/incident-view.test.ts lib/system/notification-view.test.ts lib/system/communication-view.test.ts lib/system/audit-view.test.ts lib/system/bell-view.test.ts lib/debounce.test.ts lib/utils/number.test.ts lib/products/physical-attributes.test.ts",
     "format": "prettier --write ."
   },
   "dependencies": {

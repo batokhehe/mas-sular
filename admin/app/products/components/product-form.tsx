@@ -7,6 +7,14 @@ import { Card, CardTitle } from '@/components/ui/card';
 import Image from 'next/image';
 import { uploadImage } from '@/lib/upload';
 import { showError } from '@/lib/admin-alert';
+import {
+  PHYSICAL_LIMITS,
+  PhysicalFormState,
+  PhysicalNumericField,
+  toPhysicalFormState,
+  toPhysicalPayload,
+  validatePhysicalState,
+} from '@/lib/products/physical-attributes';
 
 interface ProductFormProps {
   categories: AdminCategory[];
@@ -32,6 +40,14 @@ export type ProductFormValues = {
   status: 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
   stock: number;
   categoryId: string;
+  // Physical attributes. Optional on the wire: an unmeasured field is OMITTED
+  // rather than sent as 0/null, so saving an unrelated edit leaves a NULL
+  // measurement untouched.
+  weightGram?: number;
+  lengthCm?: number;
+  widthCm?: number;
+  heightCm?: number;
+  isFragile?: boolean;
 };
 
 const statusOptions = ['DRAFT', 'ACTIVE', 'ARCHIVED'] as const;
@@ -72,6 +88,11 @@ export function ProductForm({
     stock: initialValues?.stock ?? 0,
     categoryId: initialValues?.categoryId ?? categories[0]?.id ?? '',
   });
+
+  // Held separately as strings so an unmeasured product shows an EMPTY box.
+  // Folding these into `values` as numbers would turn "no measurement" into 0.
+  const [physical, setPhysical] = useState<PhysicalFormState>(() => toPhysicalFormState(initialValues));
+  const [physicalErrors, setPhysicalErrors] = useState<string[]>([]);
 
   const categoryOptions = useMemo(
     () => categories.map((category) => ({ value: category.id, label: category.name })),
@@ -126,7 +147,21 @@ export function ProductForm({
       return;
     }
 
-    await onSubmit(values);
+    // Refuse rather than round or clamp: a silently corrected measurement ships
+    // a parcel that is not the one described.
+    const errors = validatePhysicalState(physical);
+    setPhysicalErrors(errors);
+    if (errors.length) {
+      void showError(new Error(errors.join(' ')));
+      return;
+    }
+
+    // Empty measurements are omitted here, so an untouched NULL stays NULL.
+    await onSubmit({ ...values, ...toPhysicalPayload(physical) });
+  };
+
+  const handlePhysicalChange = (field: PhysicalNumericField, value: string) => {
+    setPhysical((current) => ({ ...current, [field]: value }));
   };
 
   return (
@@ -288,6 +323,66 @@ export function ProductForm({
               </label>
             </div>
           </div>
+        </div>
+
+        {/* Physical Product Data — the real measurements of the item itself.
+            Required by Paxel to book a shipment (items[].weight/length/width/
+            height) and used as the shipping rate weight. Deliberately NOT the
+            PaxelBox: the outer carton is chosen from total order quantity. */}
+        <div className="space-y-3 border-t border-gray-100 pt-6">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900">Physical Product Data</h3>
+            <p className="mt-1 text-xs text-gray-500">
+              Real measurements of the product itself. Required before this product can be shipped —
+              shipping is quoted from the actual weight, and the courier needs the dimensions to book.
+              Leave blank if not yet measured; blank values are left unchanged.
+            </p>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-4">
+            {([
+              ['weightGram', 'Weight (gram)'],
+              ['lengthCm', 'Length (cm)'],
+              ['widthCm', 'Width (cm)'],
+              ['heightCm', 'Height (cm)'],
+            ] as Array<[PhysicalNumericField, string]>).map(([field, labelText]) => (
+              <label key={field} className="space-y-2 text-sm text-gray-700">
+                <span>{labelText}</span>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  step={1}
+                  min={PHYSICAL_LIMITS[field].min}
+                  max={PHYSICAL_LIMITS[field].max}
+                  placeholder={`${PHYSICAL_LIMITS[field].min}–${PHYSICAL_LIMITS[field].max}`}
+                  value={physical[field]}
+                  onChange={(event) => handlePhysicalChange(field, event.target.value)}
+                  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none focus:border-[#465fff] focus:bg-white"
+                />
+                <span className="block text-xs text-gray-400">
+                  {PHYSICAL_LIMITS[field].min}–{PHYSICAL_LIMITS[field].max} {PHYSICAL_LIMITS[field].unit}, whole numbers only
+                </span>
+              </label>
+            ))}
+          </div>
+
+          <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+            <input
+              type="checkbox"
+              checked={physical.isFragile}
+              onChange={(event) => setPhysical((current) => ({ ...current, isFragile: event.target.checked }))}
+              className="h-4 w-4 rounded border-gray-300 text-[#465fff] focus:ring-[#465fff]"
+            />
+            Fragile
+          </label>
+
+          {physicalErrors.length > 0 ? (
+            <ul className="space-y-1 text-sm text-red-600">
+              {physicalErrors.map((message) => (
+                <li key={message}>{message}</li>
+              ))}
+            </ul>
+          ) : null}
         </div>
 
         <div className="flex flex-wrap gap-3">

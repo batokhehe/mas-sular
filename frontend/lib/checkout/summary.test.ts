@@ -12,7 +12,7 @@ const rowValue = (rows: Array<{ key: string; value: number }>, key: string) => r
 const hasRow = (rows: Array<{ key: string }>, key: string) => rows.some((r) => r.key === key)
 
 // Backend /checkout/summary response fixture (server-authoritative amounts).
-const backendSummary = { subtotal: 120000, shipping_cost: 15000, discount: 5000, grand_total: 130000 }
+const backendSummary = { subtotal: 120000, shipping_cost: 15000, discount: 5000, payment_service_fee: 0, grand_total: 130000 }
 
 test('checkout summary rows equal the backend response verbatim', () => {
   const byKey = Object.fromEntries(checkoutSummaryRows(backendSummary as never).map((r) => [r.key, r.value]))
@@ -24,7 +24,7 @@ test('checkout summary rows equal the backend response verbatim', () => {
 
 test('frontend NEVER recalculates the grand total — it uses backend.grand_total', () => {
   // Deliberately inconsistent: subtotal + shipping - discount = 130000, backend says 99999.
-  const rows = checkoutSummaryRows({ subtotal: 120000, shipping_cost: 15000, discount: 5000, grand_total: 99999 } as never)
+  const rows = checkoutSummaryRows({ subtotal: 120000, shipping_cost: 15000, discount: 5000, payment_service_fee: 700, grand_total: 99999 } as never)
   const total = rows.find((r) => r.key === 'grand_total')
   assert.equal(total?.value, 99999) // proves no client-side subtotal+shipping-discount math
 })
@@ -35,8 +35,22 @@ test('checkout summary never contains a unique-code row', () => {
 })
 
 test('discount row is omitted when there is no voucher discount', () => {
-  const rows = checkoutSummaryRows({ subtotal: 100000, shipping_cost: 10000, discount: 0, grand_total: 110000 } as never)
+  const rows = checkoutSummaryRows({ subtotal: 100000, shipping_cost: 10000, discount: 0, payment_service_fee: 0, grand_total: 110000 } as never)
   assert.ok(!rows.some((r) => r.key === 'discount'))
+})
+
+test('checkout renders backend-provided Biaya Layanan without calculating it itself', () => {
+  const rows = checkoutSummaryRows({
+    subtotal: 100000,
+    shipping_cost: 10000,
+    discount: 5000,
+    // Deliberately inconsistent with any frontend formula: backend is authoritative.
+    payment_service_fee: 777,
+    grand_total: 105777,
+  } as never)
+  const fee = rows.find((r) => r.key === 'payment_service_fee')
+  assert.deepEqual(fee, { key: 'payment_service_fee', label: 'Biaya Layanan', value: 777 })
+  assert.equal(rows.find((r) => r.key === 'grand_total')?.value, 105777)
 })
 
 // Created-order fixture (POST /checkout/order response).

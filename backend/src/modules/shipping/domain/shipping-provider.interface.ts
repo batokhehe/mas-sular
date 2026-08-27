@@ -1,3 +1,5 @@
+import type { PaxelBoxSize } from './paxel-box';
+
 export interface ShippingRateRequest {
   originPostalCode: string;
   destinationPostalCode: string;
@@ -26,6 +28,27 @@ export interface ShippingRateRequest {
   destinationLatitude?: number;
   destinationLongitude?: number;
   originName?: string;
+  /**
+   * The box the WHOLE ORDER ships in, chosen from TOTAL ORDER QUANTITY by
+   * `selectPaxelBox()` - never from this request's own weight/address fields,
+   * and never per-item.
+   *
+   * Three distinct states, and the difference matters:
+   *
+   * - ABSENT   the caller computed no box (JNE-only paths, legacy callers,
+   *            existing tests). PaxelProvider falls back to
+   *            PAXEL_DEFAULT_DIMENSION exactly as before this field existed.
+   * - a size   the order fits that box; it drives the RATE `dimension`.
+   * - null     the caller DID compute, and the quantity fits no supported box
+   *            (>20, XL being out of scope). Paxel cannot carry the order, so
+   *            the provider returns no quotes rather than pricing a box the
+   *            order does not fit.
+   *
+   * Absent and null are deliberately NOT the same. Every caller that computes a
+   * box assigns `selectPaxelBox()` straight into this field, and that returns
+   * `PaxelBoxSize | null` - never undefined - so the two can never be confused.
+   */
+  paxelBoxSize?: PaxelBoxSize | null;
 }
 
 /** Legacy single-rate shape (kept for the /shipping/rates endpoint and the
@@ -47,6 +70,14 @@ export interface ShippingQuote {
   serviceName: string; // human label, e.g. 'Paxel Same Day'
   estimatedDays: string; // human ETA, e.g. 'Today', '2-3 Days'
   shippingCost: number; // in IDR
+  /**
+   * Paxel's own `fixed_size` - the price bucket THEIR API resolved
+   * server-side from the dimension we sent. This is the PROVIDER's answer and
+   * is kept separate from our local PaxelBoxSize selection; the two are never
+   * conflated with each other. Absent for providers that don't return one
+   * (JNE) or when Paxel's response didn't include it.
+   */
+  fixedSize?: string;
 }
 
 export interface TrackingResult {

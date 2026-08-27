@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { AdminOrder, PAXEL_SERVICE_OPTIONS, PrepareShipmentResult, prepareShipments } from '@/lib/admin';
+import { distinctServices, serviceLabel } from '@/lib/orders/prepare-shipment';
 
 /**
  * Admin packing action.
@@ -23,7 +24,10 @@ interface Props {
 }
 
 export function PrepareShipmentPanel({ selected, onDone, onClear }: Props) {
-  const [service, setService] = useState<string>('PAXEL_SAMEDAY');
+  // Each order's own paid service. A batch may mix them; the panel says so
+  // rather than implying one shared value.
+  const serviceNames = distinctServices(selected).map((code) => serviceLabel(code, PAXEL_SERVICE_OPTIONS));
+
   const [pickupDate, setPickupDate] = useState('');
   const [pickupTime, setPickupTime] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -48,7 +52,8 @@ export function PrepareShipmentPanel({ selected, onDone, onClear }: Props) {
       const response = await prepareShipments({
         orderIds: selected.map((order) => order.id),
         pickupAt: pickupAt.toISOString(),
-        service,
+        // No `service`: every order keeps the one the customer paid for. See
+        // lib/orders/prepare-shipment.ts for why the override was withdrawn.
       });
       setResults(response.results);
       // Refresh regardless: a partial batch changed some orders.
@@ -85,17 +90,18 @@ export function PrepareShipmentPanel({ selected, onDone, onClear }: Props) {
         </label>
         <label className="text-xs font-medium text-gray-500">
           Service
-          <select
-            value={service}
-            onChange={(event) => setService(event.target.value)}
-            className="mt-1 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]"
-          >
-            {PAXEL_SERVICE_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+          {/* Read-only: the customer chose and paid for this at checkout, and it
+              is what gets booked. Shown the same way as Courier so it never
+              looks like an editable control. */}
+          <input
+            value={
+              serviceNames.length === 1
+                ? serviceNames[0]
+                : `${serviceNames.length} services — per order`
+            }
+            readOnly
+            className="mt-1 h-10 w-full rounded-xl border border-gray-200 bg-gray-100 px-3 text-sm text-gray-700"
+          />
         </label>
         <label className="text-xs font-medium text-gray-500">
           Pickup date <span className="text-red-500">*</span>
@@ -125,7 +131,12 @@ export function PrepareShipmentPanel({ selected, onDone, onClear }: Props) {
         <p className="text-xs font-medium text-gray-500">Review</p>
         <ul className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-700">
           {selected.map((order) => (
-            <li key={order.id}>{order.orderNumber}</li>
+            <li key={order.id}>
+              {order.orderNumber}
+              <span className="ml-1 text-gray-400">
+                · {serviceLabel(order.shippingService, PAXEL_SERVICE_OPTIONS)}
+              </span>
+            </li>
           ))}
         </ul>
       </div>

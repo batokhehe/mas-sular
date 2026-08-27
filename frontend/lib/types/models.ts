@@ -160,6 +160,7 @@ export interface CheckoutSummary {
   subtotal: number
   shipping_cost: number
   discount: number
+  payment_service_fee: number
   grand_total: number
   estimated_days?: string
   voucher?: Promo | null
@@ -245,6 +246,7 @@ export interface Order {
   subtotal: number
   voucherDiscountAmount: number
   deliveryFee: number
+  paymentServiceFee: number
   totalPrice: number
   paymentMethod: PaymentMethod
   voucherCode?: string | null

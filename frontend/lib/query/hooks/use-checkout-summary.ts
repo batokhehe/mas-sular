@@ -9,6 +9,8 @@ interface CheckoutSummaryParams {
   provider?: string
   service?: string
   voucherCode?: string
+  paymentMethod?: 'QRIS' | 'BANK_TRANSFER' | 'COD' | 'GATEWAY'
+  paymentChannel?: string
   items: CheckoutItem[]
   enabled: boolean
 }
@@ -19,9 +21,9 @@ interface CheckoutSummaryParams {
  * only renders them. Read-only (no reservation / order side effects).
  */
 export function useCheckoutSummary(params: CheckoutSummaryParams) {
-  const { addressId, provider, service, voucherCode, items, enabled } = params
+  const { addressId, provider, service, voucherCode, paymentMethod, paymentChannel, items, enabled } = params
   return useQuery({
-    queryKey: ['checkout-summary', addressId, provider, service, voucherCode ?? '', items],
+    queryKey: ['checkout-summary', addressId, provider, service, voucherCode ?? '', paymentMethod ?? '', paymentChannel ?? '', items],
     queryFn: () =>
       ordersApi.summary({
         address_id: addressId as string,
@@ -30,6 +32,8 @@ export function useCheckoutSummary(params: CheckoutSummaryParams) {
         shipping_provider: provider,
         shipping_service: service,
         voucher_code: voucherCode || undefined,
+        payment_method: paymentMethod,
+        payment_channel: paymentChannel,
         items,
       }),
     enabled: enabled && !!addressId && !!provider && !!service && items.length > 0,

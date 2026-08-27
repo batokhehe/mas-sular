@@ -6,6 +6,7 @@ import { PaymentUploadTokenService } from '../payments/payment-upload-token.serv
 import { PaymentUniqueCodeService } from '../payments/payment-unique-code.service';
 import { ShippingService } from '../shipping/shipping.service';
 import { ShippingQuote, ShippingRateRequest } from '../shipping/domain/shipping-provider.interface';
+import { selectPaxelBox } from '../shipping/domain/paxel-box';
 import { DeliveryCoverageService } from '../delivery-coverage/delivery-coverage.service';
 import { InventoryReservationService } from '../inventory/inventory-reservation.service';
 import { InventoryAllocationService } from '../inventory/inventory-allocation.service';
@@ -23,6 +24,7 @@ import { PaymentInitiationService } from '../payments/gateway/payment-initiation
 import { PaymentChannelRegistry } from '../payments/gateway/payment-channel.registry';
 import { buildCheckoutGatewayPayload } from '../payments/gateway/domain/payment-instruction.builder';
 import { DEFAULT_PAYMENT_METHOD, isSelectablePaymentMethod, selectablePaymentMethods } from '../payments/gateway/domain/payment-channel';
+import { calculatePaymentServiceFee } from '../payments/gateway/domain/payment-service-fee';
 
 type NormalizedCheckoutItem = {
   productId: string;
@@ -138,9 +140,18 @@ export class OrdersService {
   private async resolveShippingQuote(
     dto: { courier: string; shipping_provider?: string; shipping_service?: string },
     request: ShippingRateRequest,
+    /**
+     * Quotes allocation already priced for THIS request, when it ran. Reusing
+     * them turns the selected-service lookup into a local find instead of a
+     * second fan-out across every courier service (4 more Paxel calls for one
+     * answer). Null on the legacy path, which still quotes on demand.
+     */
+    quotes?: ShippingQuote[] | null,
   ): Promise<ShippingQuote> {
     if (dto.shipping_provider && dto.shipping_service) {
-      return this.shipping.findQuote(request, dto.shipping_provider, dto.shipping_service);
+      return quotes
+        ? this.shipping.selectQuote(quotes, dto.shipping_provider, dto.shipping_service)
+        : this.shipping.findQuote(request, dto.shipping_provider, dto.shipping_service);
     }
     const rate = await this.shipping.calculateRateForCourier(dto.courier, request);
     return {
@@ -173,6 +184,7 @@ export class OrdersService {
       village?: { name: string } | null;
     },
     weightGram: number,
+    totalQuantity: number,
   ): Promise<ShippingRateRequest> {
     const missing: string[] = [];
     if (!address.postalCode) missing.push('postal code');
@@ -200,6 +212,10 @@ export class OrdersService {
       destinationLatitude: toNum(address.latitude),
       destinationLongitude: toNum(address.longitude),
       originName: outlet?.name,
+      // The WHOLE ORDER's box, from total quantity - never per-item, never
+      // derived from weight. selectPaxelBox() is the single source of the
+      // S/M/L/XL threshold; nothing here re-implements it.
+      paxelBoxSize: selectPaxelBox(totalQuantity),
       // Region names for couriers that price on place names rather than postal
       // codes (Paxel). Undefined when a relation is unset - the provider decides
       // whether it can proceed; nothing is substituted here.
@@ -240,6 +256,11 @@ export class OrdersService {
     items: NormalizedCheckoutItem[],
     weightGram: number,
   ): Promise<{ outletId: string | null; request: ShippingRateRequest; quotes: ShippingQuote[] | null }> {
+    // SUM(OrderItem.quantity) across the whole cart — the box is one per
+    // order, never per SKU or per line. Computed once here so both branches
+    // below (allocated outlet vs. legacy active-outlet) agree.
+    const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0);
+
     if (this.allocation) {
       const allocItems = items.map((i) => ({ productId: i.productId, quantity: i.quantity }));
       const result = await this.allocation.allocate(allocItems, this.toAllocationAddress(address), weightGram);
@@ -253,6 +274,7 @@ export class OrdersService {
         destinationLatitude: this.toNumOpt(address.latitude),
         destinationLongitude: this.toNumOpt(address.longitude),
         originName: outlet?.name,
+        paxelBoxSize: selectPaxelBox(totalQuantity),
         // Origin names come from the outlet the allocator actually picked, not
         // from the active-outlet fallback — otherwise a multi-outlet order would
         // be priced from the wrong origin city.
@@ -269,7 +291,7 @@ export class OrdersService {
       };
       return { outletId: result.outletId, request, quotes: result.quotes };
     }
-    const request = await this.buildShippingRequest(address, weightGram);
+    const request = await this.buildShippingRequest(address, weightGram, totalQuantity);
     return { outletId: null, request, quotes: null };
   }
 
@@ -307,10 +329,10 @@ export class OrdersService {
   async getShippingOptions(userId: string, dto: ShippingOptionsDto): Promise<ShippingQuote[]> {
     const address = await this.assertAddress(userId, dto.address_id);
     const items = this.normalizeItems(dto.items);
-    const { totalItems } = await this.getCartPricing(items);
+    const { products } = await this.getCartPricing(items);
     // Gate: throws for DISABLED / PICKUP_ONLY so unsupported areas never see options.
     await this.resolveCoverage(address);
-    const { request, quotes } = await this.resolveOutletRequest(address, items, this.getShippingWeightGram(totalItems));
+    const { request, quotes } = await this.resolveOutletRequest(address, items, this.getShippingWeightGram(items, products));
     // Allocation already priced the chosen outlet; legacy path quotes on demand.
     return quotes ?? this.shipping.getQuotes(request);
   }
@@ -456,8 +478,47 @@ export class OrdersService {
     }
   }
 
-  private getShippingWeightGram(totalItems: number) {
-    return Math.max(1, totalItems) * 500;
+  /**
+   * Real parcel weight for a RATE request: SUM(Product.weightGram × quantity).
+   *
+   * Replaces the legacy `totalItems × 500 g` placeholder, which was wrong twice
+   * over: it charged every SKU the same 500 g regardless of what it actually
+   * weighs, and it crossed Paxel's 5000 g /rates/city cap at 11 items, silently
+   * removing SAMEDAY/NEXTDAY/REGULAR from any order that size.
+   *
+   * A product with no configured weight is REFUSED, never defaulted — falling
+   * back to 500 g is what produced a wrong quote in the first place, and a
+   * guessed weight is a price a customer would actually be charged. Product
+   * physical data is mandatory for shipping, and this surfaces that at the
+   * quote instead of hiding it until booking.
+   *
+   * This is the WEIGHT axis only. The PaxelBox dimension is selected purely
+   * from total QUANTITY (`selectPaxelBox`) and is deliberately unrelated to
+   * Product.lengthCm/widthCm/heightCm — the box is the outer carton, the
+   * product dimensions are its contents.
+   */
+  private getShippingWeightGram(items: NormalizedCheckoutItem[], products: Product[]): number {
+    const missing: string[] = [];
+    let totalWeightGram = 0;
+
+    for (const item of items) {
+      // getCartPricing already rejected any unknown/unavailable product.
+      const product = products.find((candidate) => candidate.id === item.productId)!;
+      if (product.weightGram === null || product.weightGram === undefined) {
+        if (!missing.includes(product.name)) missing.push(product.name);
+        continue;
+      }
+      totalWeightGram += product.weightGram * item.quantity;
+    }
+
+    if (missing.length) {
+      throw new BadRequestException(
+        `Shipping cannot be quoted: ${missing.join(', ')} ${missing.length === 1 ? 'has' : 'have'} no weight configured. ` +
+          `Set the product weight, then retry.`,
+      );
+    }
+
+    return totalWeightGram;
   }
 
   private normalizeEstimatedDays(etd: string) {
@@ -467,8 +528,8 @@ export class OrdersService {
   async calculateShippingCost(userId: string, dto: ShippingCostDto) {
     const address = await this.assertAddress(userId, dto.address_id);
     const items = this.normalizeItems(dto.items);
-    const { totalItems } = await this.getCartPricing(items);
-    const request = await this.buildShippingRequest(address, this.getShippingWeightGram(totalItems));
+    const { products, totalItems } = await this.getCartPricing(items);
+    const request = await this.buildShippingRequest(address, this.getShippingWeightGram(items, products), totalItems);
     const rate = await this.shipping.calculateRateForCourier(dto.courier, request);
 
     return {
@@ -509,8 +570,10 @@ export class OrdersService {
 
     // Allocate the best outlet (multi-outlet) or fall back to the active outlet;
     // shipping is priced from that outlet's origin.
-    const { outletId, request } = await this.resolveOutletRequest(address, items, this.getShippingWeightGram(totalItems));
-    const quote = await this.resolveShippingQuote(dto, request);
+    // `quotes` is what allocation already priced for this exact request; passing
+    // it through keeps the summary to one courier fan-out instead of two.
+    const { outletId, request, quotes } = await this.resolveOutletRequest(address, items, this.getShippingWeightGram(items, products));
+    const quote = await this.resolveShippingQuote(dto, request, quotes);
     const deliveryFee = quote.shippingCost;
 
     let voucher: Promo | null = null;
@@ -522,12 +585,18 @@ export class OrdersService {
       discount = this.calculateVoucherDiscount(voucher, subtotal, deliveryFee);
     }
 
+    const transactionBase = subtotal + deliveryFee - discount;
+    const paymentServiceFee = dto.payment_method === PaymentMethod.GATEWAY
+      ? calculatePaymentServiceFee({ paymentChannel: dto.payment_channel, transactionBase }).feeAmount
+      : 0;
+
     return {
       subtotal,
       shipping_cost: deliveryFee,
       delivery_fee: deliveryFee,
       discount,
-      grand_total: subtotal + deliveryFee - discount,
+      payment_service_fee: paymentServiceFee,
+      grand_total: transactionBase + paymentServiceFee,
       total_items: totalItems,
       estimated_days: quote.estimatedDays,
       estimated_minutes: null as number | null,
@@ -719,13 +788,10 @@ export class OrdersService {
     // selection (Phase 4A — COD is no longer selectable).
     const paymentMethod = dto.payment_method ?? DEFAULT_PAYMENT_METHOD;
 
-    // Accounting split: the unique code is NOT business revenue — it only identifies
-    // the bank transfer. So the business total (subtotal + shipping - discount) is
-    // stored on Order.totalPrice (what reports sum), while the transfer total
-    // (businessTotal + uniqueCode) is stored on Payment.amount (what the customer
-    // sends). Only BANK_TRANSFER gets a code; when it is null (QRIS/COD/legacy/disabled)
-    // transferTotal == businessTotal, so Payment.amount == Order.totalPrice.
-    const businessTotal = summary.grand_total;
+    // Order.totalPrice is the backend-calculated customer charge, including the
+    // immutable gateway-fee snapshot. The manual transfer code remains separate:
+    // it is added only to Payment.amount and is never order revenue.
+    const chargedTotal = summary.grand_total;
 
     const order = await this.prisma.$transaction(async (tx) => {
       // C4: unique-code allocation runs INSIDE the checkout transaction, so the
@@ -733,10 +799,10 @@ export class OrdersService {
       // the payment row is created (a pre-tx probe could race a concurrent
       // checkout committing the same transfer total between check and create).
       let uniqueCode: number | null = null;
-      let transferTotal = businessTotal;
+      let transferTotal = chargedTotal;
       if (paymentMethod === PaymentMethod.BANK_TRANSFER && this.uniqueCode?.isEnabled()) {
-        uniqueCode = await this.uniqueCode.allocateInTx(tx, businessTotal);
-        if (uniqueCode !== null) transferTotal = businessTotal + uniqueCode;
+        uniqueCode = await this.uniqueCode.allocateInTx(tx, chargedTotal);
+        if (uniqueCode !== null) transferTotal = chargedTotal + uniqueCode;
       }
       // Legacy path (no inventory service wired): decrement Product.stock now.
       // Reservation path (inventory present): stock is RESERVED after order.create
@@ -767,8 +833,10 @@ export class OrdersService {
           subtotal: summary.subtotal,
           deliveryFee: summary.shipping_cost,
           voucherDiscountAmount: summary.discount,
-          // Business revenue only — the unique code lives on Payment.amount, not here.
-          totalPrice: businessTotal,
+          paymentServiceFee: summary.payment_service_fee,
+          // Unique code lives only on Payment.amount; the service fee is part of
+          // the immutable customer charge snapshot above.
+          totalPrice: chargedTotal,
           coverageId: summary.coverage_id ?? undefined,
           estimatedDeliveryMinutes: summary.estimated_minutes ?? undefined,
           outletId: summary.outlet_id ?? undefined,
@@ -813,7 +881,7 @@ export class OrdersService {
           payment: {
             create: {
               method: paymentMethod,
-              // Transfer total = businessTotal + uniqueCode (what the customer sends).
+              // Transfer total = chargedTotal + uniqueCode (what the customer sends).
               amount: transferTotal,
               uniqueCode,
               status: PaymentStatus.PENDING,

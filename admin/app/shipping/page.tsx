@@ -11,6 +11,7 @@ import { Card, CardTitle } from '@/components/ui/card';
 import { Pagination } from '@/components/ui/pagination';
 import { ROUTE_PERMISSIONS } from '@/lib/access';
 import { fetchAdminShipments, AdminShipment } from '@/lib/admin';
+import { shipmentServiceDisplay, shipmentServiceSearchTerms } from '@/lib/shipments/service-display';
 
 const statusOptions = ['ALL', 'PENDING', 'RATE_SELECTED', 'PICKED_UP', 'IN_TRANSIT', 'DELIVERED', 'FAILED'] as const;
 
@@ -32,7 +33,14 @@ export default function ShippingPage() {
   const shipments = useMemo(() => {
     if (!data) return [];
     return data.items.filter((shipment: AdminShipment) =>
-      [shipment.order.orderNumber, shipment.provider, shipment.service, shipment.trackingNumber ?? ''].some((field) =>
+      [
+        shipment.order.orderNumber,
+        shipment.provider,
+        // Search every representation: legacy rows hold a label, the order
+        // holds the paid code. Read-time compatibility, never a migration.
+        ...shipmentServiceSearchTerms(shipment),
+        shipment.trackingNumber ?? '',
+      ].some((field) =>
         field.toLowerCase().includes(search.toLowerCase()),
       ),
     );
@@ -100,7 +108,7 @@ export default function ShippingPage() {
                   <tr key={shipment.id} className="border-b border-gray-50 last:border-0">
                     <td className="py-4 font-medium text-gray-800">{shipment.order.orderNumber}</td>
                     <td className="py-4 text-gray-500">{shipment.provider}</td>
-                    <td className="py-4 text-gray-500">{shipment.service}</td>
+                    <td className="py-4 text-gray-500">{shipmentServiceDisplay(shipment)}</td>
                     <td className="py-4 text-gray-500">{shipment.trackingNumber ?? '-'}</td>
                     <td className="py-4">
                       <Badge tone={shipment.status === 'DELIVERED' ? 'success' : 'brand'}>{shipment.status}</Badge>

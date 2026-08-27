@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { AlertCircle, Loader2, MapPin, Banknote, CreditCard, Wallet, ChevronRight } from 'lucide-react'
+import { AlertCircle, Loader2, MapPin, Banknote, CreditCard, Wallet, ChevronRight, Check } from 'lucide-react'
 import { StorefrontShell } from '@/components/storefront/shell'
 import { Empty } from '@/components/common/empty'
 import { Button } from '@/components/ui/button'
@@ -28,7 +28,6 @@ import { badgesFor, groupChannels } from '@/lib/payments/channel-view'
 import { useMe } from '@/lib/query/hooks/use-me'
 import { useCheckout } from '@/lib/query/hooks/use-checkout'
 import { useCheckoutSummary } from '@/lib/query/hooks/use-checkout-summary'
-import { useCoverageCheck } from '@/lib/query/hooks/use-delivery-coverage'
 import { useShippingOptions } from '@/lib/query/hooks/use-shipping-options'
 import { useCartStore } from '@/lib/stores/cart-store'
 import { useLastOrderStore } from '@/lib/stores/last-order-store'
@@ -36,6 +35,8 @@ import { ApiError } from '@/lib/api/client'
 import { formatIDR } from '@/lib/utils/format'
 import { formatAddressLine } from '@/lib/address/format-address'
 import { checkoutSummaryRows } from '@/lib/checkout/summary'
+import { groupShippingOptions } from '@/lib/checkout/shipping-groups'
+import { ProviderLogo } from '@/components/checkout/provider-logo'
 import { cn } from '@/lib/utils'
 import type { CreateOrderInput } from '@/lib/api/orders.api'
 import type { ShippingOption } from '@/lib/types/models'
@@ -92,20 +93,22 @@ export default function CheckoutPage() {
   const addresses = me?.addresses ?? []
   const checkoutItems = useMemo(() => lines.map((l) => ({ product_id: l.productId, qty: l.qty })), [lines])
 
-  // 1) Delivery coverage gate for the selected address (DELIVERY / PICKUP_ONLY / DISABLED).
+  // 1) Shipping availability is the courier's answer, not ours. DeliveryCoverage
+  //    is deactivated for this flow: it used to gate the quote request, so a
+  //    DISABLED / PICKUP_ONLY rule hid Paxel services from areas Paxel serves.
+  //    An address is quotable as soon as one is selected; whether anything can
+  //    actually ship there is decided by the options the provider returns.
   const selectedAddressId = watch('address_id')
   const selectedAddress = addresses.find((a) => a.id === selectedAddressId)
-  const coverageQuery = useCoverageCheck(selectedAddress)
-  const coverage = coverageQuery.data
-  const coverageBlocked = coverage?.coverageType === 'DISABLED'
-  const coveragePickupOnly = coverage?.coverageType === 'PICKUP_ONLY'
-  const deliverable = !!selectedAddress && !coverageBlocked && !coveragePickupOnly
+  const deliverable = !!selectedAddress
 
-  // 2) When deliverable, fetch shipping quotes from all providers and let the
-  //    customer pick one (coverage no longer sets the fee — the provider does).
+  // 2) Fetch shipping quotes from all providers and let the customer pick one
+  //    (the provider sets the fee).
   const shippingQuery = useShippingOptions(selectedAddressId, checkoutItems, deliverable)
   const shippingOptions = shippingQuery.data ?? []
   const [selectedShipping, setSelectedShipping] = useState<ShippingOption | null>(null)
+  // Presentation-only grouping; does not touch selection or the submit payload.
+  const shippingGroups = useMemo(() => groupShippingOptions(shippingOptions), [shippingOptions])
 
   // Reset the selection when the address changes; auto-pick the cheapest option once loaded.
   useEffect(() => {
@@ -129,6 +132,12 @@ export default function CheckoutPage() {
     return () => clearTimeout(t)
   }, [voucherCodeRaw])
 
+  const selectedChannelCode = watch('payment_channel')
+  const selectedChannel = useMemo(
+    () => channelSections.flatMap((s) => s.channels).find((c) => c.code === selectedChannelCode),
+    [channelSections, selectedChannelCode],
+  )
+
   // Server-authoritative money: subtotal / shipping / discount / grand total all
   // come from the backend. The frontend NEVER recalculates them.
   const summaryQuery = useCheckoutSummary({
@@ -136,6 +145,8 @@ export default function CheckoutPage() {
     provider: selectedShipping?.provider,
     service: selectedShipping?.service,
     voucherCode: debouncedVoucher,
+    paymentMethod: selectedChannel?.method,
+    paymentChannel: selectedChannel?.method === 'GATEWAY' ? selectedChannel.code : undefined,
     items: checkoutItems,
     enabled: canPlaceOrder,
   })
@@ -149,12 +160,6 @@ export default function CheckoutPage() {
       setValue('address_id', preselect.id)
     }
   }, [addresses, getValues, setValue])
-
-  const selectedChannelCode = watch('payment_channel')
-  const selectedChannel = useMemo(
-    () => channelSections.flatMap((s) => s.channels).find((c) => c.code === selectedChannelCode),
-    [channelSections, selectedChannelCode],
-  )
 
   const onSubmit = (values: FormValues) => {
     setConflict(null)
@@ -293,27 +298,6 @@ export default function CheckoutPage() {
                 )}
                 {errors.address_id ? <p className="text-sm text-destructive">{errors.address_id.message}</p> : null}
 
-                {/* Delivery coverage status for the selected address */}
-                {selectedAddress && coverageQuery.isFetching ? (
-                  <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Loader2 className="size-4 animate-spin" /> Checking delivery coverage…
-                  </p>
-                ) : null}
-                {coverageBlocked ? (
-                  <div className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
-                    <AlertCircle className="mt-0.5 size-4" />
-                    <span>Sorry, we do not currently deliver to your location.</span>
-                  </div>
-                ) : coveragePickupOnly ? (
-                  <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
-                    <AlertCircle className="mt-0.5 size-4" />
-                    <span>This area is only available for Pickup.</span>
-                  </div>
-                ) : deliverable ? (
-                  <div className="rounded-lg border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-800">
-                    <p className="font-medium">Delivery available to this area.</p>
-                  </div>
-                ) : null}
               </Card>
 
               {/* Order items (real cart lines) */}
@@ -346,10 +330,6 @@ export default function CheckoutPage() {
                   <Label>Shipping method</Label>
                   {!selectedAddress ? (
                     <p className="text-sm text-muted-foreground">Select a delivery address first.</p>
-                  ) : coverageBlocked ? (
-                    <p className="text-sm text-muted-foreground">Delivery is unavailable in this area.</p>
-                  ) : coveragePickupOnly ? (
-                    <p className="text-sm text-muted-foreground">Only pickup is available in this area.</p>
                   ) : shippingQuery.isFetching ? (
                     <p className="flex items-center gap-2 text-sm text-muted-foreground">
                       <Loader2 className="size-4 animate-spin" /> Loading shipping options…
@@ -359,29 +339,51 @@ export default function CheckoutPage() {
                   ) : shippingOptions.length === 0 ? (
                     <p className="text-sm text-muted-foreground">No shipping services available.</p>
                   ) : (
-                    <div className="space-y-2">
-                      {shippingOptions.map((opt) => {
-                        const active =
-                          selectedShipping?.provider === opt.provider &&
-                          selectedShipping?.service === opt.service
-                        return (
-                          <button
-                            type="button"
-                            key={`${opt.provider}-${opt.service}`}
-                            onClick={() => setSelectedShipping(opt)}
-                            className={cn(
-                              'flex w-full items-center justify-between gap-3 rounded-xl border p-3 text-left transition-colors',
-                              active ? 'border-primary bg-primary/5' : 'hover:border-primary/50',
-                            )}
-                          >
-                            <div>
-                              <p className="text-sm font-medium">{opt.serviceName}</p>
-                              <p className="text-xs text-muted-foreground">{opt.estimatedDays}</p>
-                            </div>
-                            <span className="text-sm font-semibold">{formatIDR(opt.shippingCost)}</span>
-                          </button>
-                        )
-                      })}
+                    // Grouped by the backend's stable `provider` id — presentation
+                    // only; each button still selects the exact option object.
+                    <div className="space-y-4">
+                      {shippingGroups.map((group) => (
+                        <div key={group.provider} className="space-y-2">
+                          <div className="flex items-center gap-2">
+                            <ProviderLogo provider={group.provider} title={group.title} />
+                            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                              {group.title}
+                            </h3>
+                          </div>
+                          {group.options.map((opt) => {
+                            const active =
+                              selectedShipping?.provider === opt.provider &&
+                              selectedShipping?.service === opt.service
+                            return (
+                              <button
+                                type="button"
+                                key={`${opt.provider}-${opt.service}`}
+                                onClick={() => setSelectedShipping(opt)}
+                                aria-pressed={active}
+                                className={cn(
+                                  'flex w-full items-center justify-between gap-3 rounded-xl border p-3 text-left transition-colors',
+                                  active ? 'border-primary bg-primary/5' : 'hover:border-primary/50',
+                                )}
+                              >
+                                <div className="min-w-0">
+                                  <p className="text-sm font-medium">{opt.serviceName}</p>
+                                  <p className="text-xs text-muted-foreground">{opt.estimatedDays}</p>
+                                </div>
+                                {/* Always rendered, only faded — keeps the price
+                                    aligned and gives the selected state a
+                                    non-colour cue. */}
+                                <span className="flex shrink-0 items-center gap-2">
+                                  <Check
+                                    aria-hidden="true"
+                                    className={cn('size-4 text-primary', active ? 'opacity-100' : 'opacity-0')}
+                                  />
+                                  <span className="text-sm font-semibold">{formatIDR(opt.shippingCost)}</span>
+                                </span>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -513,10 +515,6 @@ export default function CheckoutPage() {
                     <>
                       <Loader2 className="mr-2 size-4 animate-spin" /> Placing order…
                     </>
-                  ) : coverageBlocked ? (
-                    'Delivery unavailable in this area'
-                  ) : coveragePickupOnly ? (
-                    'Pickup only in this area'
                   ) : (
                     <>
                       Place order

@@ -40,6 +40,16 @@ export type AdminProduct = {
   isNew: boolean;
   price: number;
   spicyLevel?: number | null;
+  // Real physical attributes of the PRODUCT itself, sent to Paxel as
+  // items[].weight/length/width/height on shipment creation, and used as the
+  // rate weight. Nullable: a product that has never been measured stays NULL
+  // rather than carrying an invented value. These are NOT the PaxelBox — the
+  // box is the outer carton and is chosen from total order quantity alone.
+  weightGram?: number | null;
+  lengthCm?: number | null;
+  widthCm?: number | null;
+  heightCm?: number | null;
+  isFragile?: boolean | null;
   createdAt: string;
 };
 
@@ -146,6 +156,17 @@ export type AdminOrder = {
   totalPrice: number;
   paymentMethod: string;
   createdAt: string;
+  /**
+   * Shipping snapshot taken at checkout. `GET /admin/orders` already returns
+   * these (the query uses Prisma `include`, so every Order scalar is sent) —
+   * the type simply omitted them. `shippingService` is the machine code the
+   * customer bought and is the source of truth for the Prepare Shipment
+   * default; `Shipment.service` is a display label until an AWB exists.
+   */
+  shippingProvider?: string | null;
+  shippingService?: string | null;
+  /** Human label quoted at checkout; preferred over Shipment.service for display. */
+  shippingServiceName?: string | null;
   user?: {
     name: string;
     email: string;

@@ -37,7 +37,7 @@ export const ordersApi = {
     api.post<ShippingOption[]>('/checkout/shipping-options', body, 'customer'),
   validateVoucher: (body: { voucher_code: string; subtotal: number }) =>
     api.post<VoucherPreview>('/checkout/validate-voucher', body, 'customer'),
-  summary: (body: Omit<CreateOrderInput, 'payment_method'>) =>
+  summary: (body: CreateOrderInput) =>
     api.post<CheckoutSummary>('/checkout/summary', body, 'customer'),
   createOrder: (body: CreateOrderInput, idempotencyKey: string) =>
     api.post<Order>('/checkout/order', body, 'customer', { 'Idempotency-Key': idempotencyKey }),
