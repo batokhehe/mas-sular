@@ -1,10 +1,31 @@
 node_modules
 .next
 dist
-coverage
+# Coverage output is scoped per package: a bare `coverage` pattern is unanchored
+# and also matched admin/components/coverage/, silently untracking real source
+# and breaking the admin build from a clean checkout (F67).
+backend/coverage/
+frontend/coverage/
+admin/coverage/
+e2e/coverage/
 .env
 .env.*
 !.env.example
-uploads
+# Runtime customer uploads (receipt images). Scoped: a bare `uploads` pattern
+# also matched backend/src/uploads/, a source path.
+backend/uploads/
 tmp
 *.log
+
+# Production compose secrets (template lives in production.env.example)
+production.env
+
+# Backup artifacts — NEVER commit. Scoped deliberately narrow: the backend repo
+# tracks 35 legitimate prisma/migrations/*.sql files, so a blanket *.sql rule
+# would silently untrack real migrations.
+backups/
+scripts/backup/*.log
+*.sql.gz
+*.tar.gz
+*.enc
+*.bak
