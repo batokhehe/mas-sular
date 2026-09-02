@@ -141,6 +141,25 @@ export interface ShippingQuote {
   estimated_days: string
 }
 
+/**
+ * Verbatim courier fields the ShippingOption contract has nowhere else to put.
+ * Every key is optional and nullable because it is whatever the courier sent —
+ * JNE returns nulls for ETD on retail services, and other providers send none of
+ * this at all. Diagnostic/display data only: nothing selects or prices from it.
+ */
+export interface ShippingProviderMeta {
+  service_code?: string | null
+  service_display?: string | null
+  goods_type?: string | null
+  currency?: string | null
+  price?: string | null
+  etd_from?: string | null
+  etd_thru?: string | null
+  times?: string | null
+  origin_name?: string | null
+  destination_name?: string | null
+}
+
 /** A selectable shipping service returned by /checkout/shipping-options. */
 export interface ShippingOption {
   provider: string
@@ -148,6 +167,12 @@ export interface ShippingOption {
   serviceName: string
   estimatedDays: string
   shippingCost: number
+  /**
+   * Present for couriers that return more than this contract models (JNE).
+   * OPTIONAL on purpose: providers that send nothing extra are unaffected, and
+   * nothing in checkout may depend on it — identity stays provider + service.
+   */
+  providerMeta?: ShippingProviderMeta
 }
 
 export interface VoucherPreview {

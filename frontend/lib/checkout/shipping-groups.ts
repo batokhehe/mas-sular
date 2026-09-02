@@ -62,3 +62,37 @@ export function groupShippingOptions(
 
   return groups
 }
+
+/**
+ * Strip everything but letters and digits, lower-cased. Lets us ask "does this
+ * label already say this code?" without caring about spaces, underscores or case.
+ */
+function squash(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
+/**
+ * The service label a customer reads.
+ *
+ * JNE can return two DIFFERENT services whose `service_display` is identical:
+ * `REG15` and `REG19` are both displayed "REG", at prices that differed tenfold
+ * in the tariff we measured. Selection was never ambiguous — identity is
+ * `provider + service` — but two rows reading "REG" at different prices give the
+ * customer nothing to choose between.
+ *
+ * So the code is appended when, and only when, the name does not already contain
+ * it: "REG" + REG15 -> `REG (REG15)`, while "Paxel Same Day" + PAXEL_SAMEDAY and
+ * JNE's `JTR<130` + JTR<130 are left exactly as they were. Providers whose names
+ * already carry their code see no change at all.
+ *
+ * Nothing is interpreted. The suffix `15`/`19` is not decoded, not sorted on and
+ * not mapped to a meaning — the code is shown verbatim precisely BECAUSE we do
+ * not know what it means, and the customer can at least tell the options apart.
+ */
+export function serviceLabel(option: Pick<ShippingOption, 'service' | 'serviceName'>): string {
+  const name = option.serviceName?.trim()
+  const code = option.service?.trim()
+  if (!code) return name || ''
+  if (!name) return code
+  return squash(name).includes(squash(code)) ? name : `${name} (${code})`
+}

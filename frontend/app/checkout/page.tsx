@@ -35,7 +35,7 @@ import { ApiError } from '@/lib/api/client'
 import { formatIDR } from '@/lib/utils/format'
 import { formatAddressLine } from '@/lib/address/format-address'
 import { checkoutSummaryRows } from '@/lib/checkout/summary'
-import { groupShippingOptions } from '@/lib/checkout/shipping-groups'
+import { groupShippingOptions, serviceLabel } from '@/lib/checkout/shipping-groups'
 import { ProviderLogo } from '@/components/checkout/provider-logo'
 import { cn } from '@/lib/utils'
 import type { CreateOrderInput } from '@/lib/api/orders.api'
@@ -366,7 +366,7 @@ export default function CheckoutPage() {
                                 )}
                               >
                                 <div className="min-w-0">
-                                  <p className="text-sm font-medium">{opt.serviceName}</p>
+                                  <p className="text-sm font-medium">{serviceLabel(opt)}</p>
                                   <p className="text-xs text-muted-foreground">{opt.estimatedDays}</p>
                                 </div>
                                 {/* Always rendered, only faded — keeps the price
