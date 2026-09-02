@@ -36,3 +36,11 @@ scripts/backup/*.log
 # Kemendagri seed (regions.full.json, regions.types.ts), so a blanket rule there
 # would silently untrack real seed data.
 backend/prisma/data/rajaongkir-cache/
+
+# Captured JNE API responses (PAXELBOX-61C/61L/61M), preserved locally in 61Y so
+# that regenerating them never costs JNE API quota. They carry no credentials —
+# JNE authenticates in the REQUEST, never the response — but they are captures,
+# not source, and belong to no repository. Scoped to the directory alone: a
+# broader rule such as *.out.json would reach into backend/ and frontend/ where
+# nothing of the sort is generated today, and would silently hide it if it were.
+.artifacts/
