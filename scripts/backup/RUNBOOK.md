@@ -41,9 +41,9 @@ Every procedure below carries a status label. Read it before relying on the step
 | **Uploads volume** | **CRITICAL** | Yes | Yes | No | — |
 | **Redis** | EPHEMERAL | **No** | **No** | Yes — recreate empty | — |
 | **RabbitMQ** | REBUILDABLE | **No** | **No** | Yes — topology re-asserted on consumer boot | MySQL (`OutboxEvent` is authoritative) |
-| **Backend** | REBUILDABLE | No | No | Build from `mas-sular-be` | MySQL, migrations, Redis, RabbitMQ |
-| **Frontend** | REBUILDABLE | No | No | Build from `mas-sular-fe` | Backend (runtime only) |
-| **Admin** | REBUILDABLE | No | No | Build from `mas-sular-admin` | Backend (runtime only) |
+| **Backend** | REBUILDABLE | No | No | Build from `mas-sular` (see §12) | MySQL, migrations, Redis, RabbitMQ |
+| **Frontend** | REBUILDABLE | No | No | Build from `mas-sular` (see §12) | Backend (runtime only) |
+| **Admin** | REBUILDABLE | No | No | Build from `mas-sular` (see §12) | Backend (runtime only) |
 | **Secrets / config** | **CRITICAL** | **Yes — separately** | Yes | No | Must exist before anything starts |
 
 **Why Redis and RabbitMQ are not backed up** (verified in Phase 5J.13 Step 2):
@@ -300,7 +300,11 @@ host + Docker
 ```
 
 1. Provision host, install Docker
-2. Clone the three deployment repos (`mas-sular-be`, `-fe`, `-admin`)
+2. Clone **`mas-sular`**, branch **`main`** — the single source deployment builds from.
+   All three services are built from that one checkout: `docker-compose.production.yml`
+   lives there and its build contexts are `./backend`, `./frontend` and `./admin`.
+   The standalone repositories (`mas-sular-be`, `-fe`, `-admin`) are **NOT** used for
+   deployment and carry none of the compose, migration or backup tooling below.
 3. **Restore `production.env` secrets and the backup encryption key**
 4. `docker compose -f docker-compose.production.yml build`
 5. Start `mysql`; **restore the database (§8)**
