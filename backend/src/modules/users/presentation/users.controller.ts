@@ -4,6 +4,7 @@ import { PrismaService } from '../../../database/prisma.service';
 import { CurrentUser, AuthUser } from '../../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { CreateAddressDto, UpdateAddressDto } from '../application/dto/address.dto';
+import { AddressGeocodingService } from '../../geocoding/address-geocoding.service';
 
 /**
  * Region names embedded on every address read so the storefront/admin can render
@@ -22,7 +23,10 @@ const ADDRESS_REGION_INCLUDE = {
 @UseGuards(JwtAuthGuard)
 @Controller({ path: 'users', version: '1' })
 export class UsersController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly geocoding: AddressGeocodingService,
+  ) {}
 
   @Get('me')
   me(@CurrentUser() user: AuthUser) {
@@ -50,6 +54,13 @@ export class UsersController {
 
   @Post('me/addresses')
   async createAddress(@CurrentUser() user: AuthUser, @Body() dto: CreateAddressDto) {
+    // Geocoded BEFORE the transaction opens, deliberately: an outbound HTTP call
+    // inside a transaction would hold row locks for the whole round trip. A
+    // failure throws, so no address is ever written with a placeholder
+    // coordinate (PAXELBOX-61AG.3). With the feature off this returns the dto
+    // unchanged, preserving today's behaviour exactly.
+    const data = await this.geocoding.withCoordinates({ ...dto });
+
     return this.prisma.$transaction(async (prisma) => {
       if (dto.isDefault) {
         await prisma.address.updateMany({
@@ -60,7 +71,7 @@ export class UsersController {
 
       const address = await prisma.address.create({
         data: {
-          ...dto,
+          ...data,
           userId: user.sub,
         },
       });
@@ -87,6 +98,11 @@ export class UsersController {
     });
     if (!owned) throw new NotFoundException('Address not found');
 
+    // Re-geocoded ONLY when the patch touches a field that moves the address.
+    // Editing a label or a phone number costs no Google request and leaves the
+    // existing pin exactly where it is.
+    const data = await this.geocoding.withCoordinates({ ...dto }, { skipWhenUnchanged: true });
+
     return this.prisma.$transaction(async (prisma) => {
       if (dto.isDefault) {
         await prisma.address.updateMany({
@@ -94,7 +110,7 @@ export class UsersController {
           data: { isDefault: false },
         });
       }
-      return prisma.address.update({ where: { id }, data: { ...dto } });
+      return prisma.address.update({ where: { id }, data: { ...data } });
     });
   }
 

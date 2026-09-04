@@ -105,6 +105,14 @@ const baseSchema = z
     // Parcel envelope for Paxel's required `dimension` (LxWxH cm, each side 1-50).
     // Paxel prices from it, so a bad value silently changes what customers pay.
     PAXEL_DEFAULT_DIMENSION: z.string().regex(/^\d{1,2}x\d{1,2}x\d{1,2}$/, 'PAXEL_DEFAULT_DIMENSION must be LxWxH in cm, e.g. 30x35x20').optional(),
+    // Server-side address geocoding (PAXELBOX-61AG.3). OFF by default: enabling
+    // it makes address creation depend on Google, and a failure must surface
+    // rather than persist a placeholder coordinate.
+    GEOCODING_ENABLED: boolFlag,
+    // Server-side ONLY. Never NEXT_PUBLIC_*, which Next compiles into the browser bundle.
+    GOOGLE_MAPS_API_KEY: z.string().optional(),
+    GOOGLE_GEOCODING_BASE_URL: z.string().optional(),
+    GEOCODING_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
     JNE_ENABLED: boolFlag,
     // Which JNE tenant the courier addresses. Absent means sandbox; an
     // unrecognised value is rejected here rather than silently downgraded.
@@ -218,6 +226,12 @@ export const envSchema = baseSchema.superRefine((env, ctx) => {
         });
       }
     }
+  }
+
+  // Geocoding needs a key the moment it is switched on; discovering that at the
+  // first customer address instead of at boot would fail a real checkout.
+  if (env.GEOCODING_ENABLED === 'true' && !env.GOOGLE_MAPS_API_KEY) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['GOOGLE_MAPS_API_KEY'], message: 'GOOGLE_MAPS_API_KEY is required when GEOCODING_ENABLED=true' });
   }
 
   // Browsers reject SameSite=None cookies unless they are also Secure.

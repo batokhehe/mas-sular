@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { RegionFields } from '@/components/address/region-fields'
+import { isUsableCoordinate } from '@/lib/address/coordinates'
 import type { RegionValue } from '@/lib/address/region-value'
 import type { Address } from '@/lib/types/models'
 
@@ -89,9 +90,27 @@ export function AddressForm({ initial, pending, onSubmit }: Props) {
     clearErrors(['provinceId', 'cityId', 'districtId', 'villageId', 'postalCode'])
   }
 
-  const submit = (values: AddressFormValues) =>
+  const submit = (values: AddressFormValues) => {
     // fullAddress carries the street detail (backward compatible); addressDetail mirrors it.
-    onSubmit({ ...values, addressDetail: values.fullAddress } as AddressFormValues & { addressDetail: string })
+    const payload = { ...values, addressDetail: values.fullAddress }
+
+    // PAXELBOX-61AG.3.8.6. On an EDIT, only send coordinates that are real.
+    //
+    // The form has no map picker, so its hidden latitude/longitude fields just
+    // echo whatever is stored. For a legacy address stored at 0,0 that echo is
+    // the placeholder, which the server now rejects (61AG.3.7) — leaving those
+    // addresses uneditable even for a phone-number change. Omitting the fields
+    // says "leave the pin alone"; 0,0 says "move it to nowhere".
+    //
+    // CREATE is deliberately untouched: it still sends 0,0, and the server
+    // geocodes over it (61AG.3).
+    if (initial && !isUsableCoordinate(values.latitude, values.longitude)) {
+      delete (payload as Partial<AddressFormValues>).latitude
+      delete (payload as Partial<AddressFormValues>).longitude
+    }
+
+    onSubmit(payload as AddressFormValues & { addressDetail: string })
+  }
 
   return (
     <form onSubmit={handleSubmit(submit)} className="space-y-3">

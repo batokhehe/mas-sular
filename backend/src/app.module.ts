@@ -30,6 +30,7 @@ import { PaymentGatewayModule } from './modules/payments/gateway/payment-gateway
 import { PaymentAccountsModule } from './modules/payment-accounts/payment-accounts.module';
 import { PaymentLifecycleModule } from './modules/payments/payment-lifecycle.module';
 import { ShippingModule } from './modules/shipping/shipping.module';
+import { GeocodingModule } from './modules/geocoding/geocoding.module';
 import { ShipmentModule } from './modules/shipment/shipment.module';
 import { OutletsModule } from './modules/outlets/outlets.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
@@ -81,6 +82,7 @@ import { UploadModule } from './modules/upload/upload.module';
     PaymentLifecycleModule,
     ShippingModule,
     ShipmentModule,
+    GeocodingModule,
     OutletsModule,
     InventoryModule,
     CmsModule,

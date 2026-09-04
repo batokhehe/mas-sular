@@ -21,9 +21,13 @@ function build(owned: unknown = { id: 'addr-1' }, deleteCount = 1) {
     },
     $transaction: jest.fn().mockImplementation((cb: (tx: unknown) => Promise<unknown>) => cb(tx)),
   };
+  // PAXELBOX-61AG.3: geocoding is a no-op double here. These tests are about
+  // ownership and default-flag handling, not coordinates - the geocoding
+  // behaviour has its own suite.
+  const geocoding = { enabled: false, withCoordinates: jest.fn(async (d: unknown) => d) };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const controller = new UsersController(prisma as any);
-  return { controller, prisma, tx }
+  const controller = new UsersController(prisma as any, geocoding as any);
+  return { controller, prisma, tx, geocoding }
 }
 
 describe('UsersController — address update/delete', () => {

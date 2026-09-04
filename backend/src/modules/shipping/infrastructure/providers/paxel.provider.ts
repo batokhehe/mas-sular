@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PermanentError } from '../../domain/shipping-errors';
 import { ShippingProvider, ShippingQuote, ShippingRateRequest, TrackingResult } from '../../domain/shipping-provider.interface';
+import { isPersistableCoordinate } from '../../../geocoding/geocoding.service';
 import { SHIPPING_CONFIG, ShippingConfig } from '../../shipping.config';
 import {
   defaultShippingHttpClient,
@@ -177,6 +178,14 @@ export class PaxelProvider implements ShippingProvider {
     const longitude = side === 'origin' ? request.originLongitude : request.destinationLongitude;
 
     // Optional keys are omitted rather than sent as undefined/empty.
+    //
+    // Coordinates are omitted unless they are usable (PAXELBOX-61AG.3). The old
+    // `typeof === 'number'` test let (0, 0) through, and 0,0 is precisely what the
+    // address form writes when nobody picked a location - so Paxel was being told
+    // the parcel was in the Gulf of Guinea. Omitting is the honest answer: Paxel
+    // still receives province/city/district/village and can price from those,
+    // whereas a placeholder coordinate silently misprices the order.
+    const hasCoordinates = isPersistableCoordinate(latitude, longitude);
     return {
       address: address ?? '',
       province: province ?? '',
@@ -184,8 +193,7 @@ export class PaxelProvider implements ShippingProvider {
       district: district as string,
       ...(village ? { village } : {}),
       ...(zip ? { zip_code: zip } : {}),
-      ...(typeof latitude === 'number' ? { latitude } : {}),
-      ...(typeof longitude === 'number' ? { longitude } : {}),
+      ...(hasCoordinates ? { latitude, longitude } : {}),
     };
   }
 

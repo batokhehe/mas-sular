@@ -6,7 +6,17 @@ import {
   IsString,
   Length,
   MinLength,
+  ValidateIf,
 } from 'class-validator';
+import { IsCoordinatePair } from '../validators/is-coordinate-pair.validator';
+
+/**
+ * True once the caller has supplied EITHER axis. Both fields validate together
+ * from that point, so a half-supplied pair is rejected rather than silently
+ * writing one axis against the other's stale value.
+ */
+const coordinateSupplied = (dto: { latitude?: number; longitude?: number }): boolean =>
+  dto.latitude !== undefined || dto.longitude !== undefined;
 
 export class CreateAddressDto {
   @IsString()
@@ -89,11 +99,21 @@ export class UpdateAddressDto {
   @IsString()
   notes?: string;
 
-  @IsOptional()
+  /**
+   * PAXELBOX-61AG.3.7. Validated as a PAIR, and only when the caller actually
+   * sends one — `@ValidateIf` rather than `@IsOptional()`, so that supplying just
+   * one axis fails on the missing one instead of being skipped.
+   *
+   * This is the guard that stops `PATCH {latitude: 0, longitude: 0}` from
+   * replacing a geocoded pin with the address form's placeholder. It changes no
+   * geocoding behaviour: a coordinate-only patch still does NOT call Google.
+   */
+  @ValidateIf(coordinateSupplied)
   @IsNumber()
+  @IsCoordinatePair()
   latitude?: number;
 
-  @IsOptional()
+  @ValidateIf(coordinateSupplied)
   @IsNumber()
   longitude?: number;
 
