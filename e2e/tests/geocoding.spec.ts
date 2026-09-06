@@ -21,8 +21,28 @@ import { API_URL, CUSTOMER_URL, STORAGE } from '../utils/env';
  */
 
 const OUT_DIR = process.env.E2E_OUT_DIR ?? '';
-const readJson = <T>(name: string): T =>
-  JSON.parse(readFileSync(`${OUT_DIR}/${name}`, 'utf8')) as T;
+
+/**
+ * Read one of the isolated stack's state files, or null when the stack is not
+ * running.
+ *
+ * NEVER THROWS. A throw here would happen while Playwright is collecting tests,
+ * which aborts the whole run — the entire suite reported "0 tests in 0 files"
+ * because this file read state at module load (PAXELBOX-61AG.3.15).
+ *
+ * Returning null rather than a default is deliberate: there is no safe fallback.
+ * Guessing a backend URL would point these tests at whatever happens to be on
+ * :3001 — in practice the shared dev database, with real Google and real Paxel
+ * behind it. The tests skip instead.
+ */
+const readJson = <T>(name: string): T | null => {
+  if (!OUT_DIR) return null;
+  try {
+    return JSON.parse(readFileSync(`${OUT_DIR}/${name}`, 'utf8')) as T;
+  } catch {
+    return null;
+  }
+};
 
 interface StackState {
   customerTestId: string;
@@ -37,9 +57,11 @@ interface PaxelCapture {
   }>;
 }
 
-const state = readJson<StackState>('stack-ready.json');
-const EXPECTED_LAT = state.expected.latitude;   // -6.9207623
-const EXPECTED_LNG = state.expected.longitude;  // 107.6096701
+const stack = readJson<StackState>('stack-ready.json');
+// NaN when the stack is absent: the suite is skipped in that case, and a NaN
+// would fail an assertion rather than let one pass by accident.
+const EXPECTED_LAT = stack?.expected.latitude ?? Number.NaN;   // -6.9207623
+const EXPECTED_LNG = stack?.expected.longitude ?? Number.NaN;  // 107.6096701
 const ADDRESS_LABEL = 'Rumah E2E';
 
 /**
@@ -109,6 +131,15 @@ async function pickRegion(page: import('@playwright/test').Page, placeholder: st
 }
 
 test.describe('Server-side geocoding — customer', () => {
+  // These tests are meaningful ONLY against the isolated stack: it supplies the
+  // disposable database, the seeded fixtures and the stubbed Google/Paxel
+  // transports the assertions below depend on. Without it they are skipped —
+  // never retargeted at whatever else might be listening.
+  test.skip(
+    !stack,
+    'isolated stack not running: set E2E_OUT_DIR to its state directory (stack-ready.json). ' +
+      'These tests never fall back to a shared backend, database or live provider.',
+  );
   test.use({ storageState: STORAGE.customer });
 
   test('GEO-001 create address through the real UI; server replaces the 0,0 placeholder', async ({ page }, ti) => {
@@ -191,12 +222,14 @@ test.describe('Server-side geocoding — customer', () => {
     // Cart fixture: seeded into the persisted zustand store rather than driven
     // through the catalog UI. The cart is not what this phase is testing, and
     // seeding it keeps the test focused on address → geocoding → shipping.
+    // Non-null: the describe-level skip above guarantees the stack is present.
+    const product = stack!.product;
     const line = {
-      productId: state.product.id,
-      slug: state.product.slug,
-      name: state.product.name,
-      price: state.product.price,
-      imageUrl: state.product.imageUrl,
+      productId: product.id,
+      slug: product.slug,
+      name: product.name,
+      price: product.price,
+      imageUrl: product.imageUrl,
       qty: 2,
     };
     await page.addInitScript((l) => {
@@ -246,9 +279,10 @@ test.describe('Server-side geocoding — customer', () => {
     tc(ti, 'GEO-003', '[Positive] Persisted coordinates bridge to the Paxel payload');
 
     const capture = readJson<PaxelCapture>('paxel-capture.json');
-    expect(capture.calls.length, 'Paxel was called during checkout').toBeGreaterThan(0);
+    expect(capture, 'the isolated stack recorded Paxel calls (paxel-capture.json)').not.toBeNull();
+    expect(capture!.calls.length, 'Paxel was called during checkout').toBeGreaterThan(0);
 
-    for (const call of capture.calls) {
+    for (const call of capture!.calls) {
       expect(call.destination.latitude, `service ${call.service_type}`).toBe(EXPECTED_LAT);
       expect(call.destination.longitude, `service ${call.service_type}`).toBe(EXPECTED_LNG);
       expect(
@@ -260,7 +294,7 @@ test.describe('Server-side geocoding — customer', () => {
     // The browser posted 0,0 (asserted in GEO-001) and never sends coordinates to
     // /checkout/shipping-options at all — its DTO carries only address_id + items.
     // So the coordinate above can only have come from the persisted Address row.
-    const distinct = new Set(capture.calls.map((c) => `${c.destination.latitude},${c.destination.longitude}`));
+    const distinct = new Set(capture!.calls.map((c) => `${c.destination.latitude},${c.destination.longitude}`));
     expect(distinct.size, 'every service saw the same persisted coordinate').toBe(1);
     expect([...distinct][0]).toBe(`${EXPECTED_LAT},${EXPECTED_LNG}`);
   });

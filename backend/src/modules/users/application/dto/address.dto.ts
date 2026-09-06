@@ -8,7 +8,27 @@ import {
   MinLength,
   ValidateIf,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { IsCoordinatePair } from '../validators/is-coordinate-pair.validator';
+import { IsIndonesianMobile } from '../validators/is-indonesian-mobile.validator';
+import { normalizeIndonesianMobile } from '../../../../common/utils/phone.util';
+
+/**
+ * Canonicalise the address phone to `628…` BEFORE validation, so what is
+ * validated is what is persisted (PAXELBOX-61AG.3.20).
+ *
+ * A value that cannot be normalised is passed through untouched: the validator
+ * then rejects it with a 400. Silently dropping or blanking it here would hide
+ * a bad number instead of refusing it.
+ */
+const toCanonicalMobile = ({ value }: { value: unknown }): unknown => {
+  if (typeof value !== 'string') return value;
+  try {
+    return normalizeIndonesianMobile(value);
+  } catch {
+    return value;
+  }
+};
 
 /**
  * True once the caller has supplied EITHER axis. Both fields validate together
@@ -26,8 +46,12 @@ export class CreateAddressDto {
   @MinLength(2)
   recipientName!: string;
 
+  // Normalised to canonical 628… then validated as an Indonesian MOBILE number.
+  // The courier calls this number and Mekari Qontak messages it on WhatsApp, so a
+  // landline or a malformed value is refused rather than stored (61AG.3.20).
+  @Transform(toCanonicalMobile)
   @IsString()
-  @Length(10, 15)
+  @IsIndonesianMobile()
   phone!: string;
 
   @IsString()
@@ -85,9 +109,12 @@ export class UpdateAddressDto {
   @MinLength(2)
   recipientName?: string;
 
+  // Same contract as create: omitted leaves the stored number alone; supplied is
+  // normalised to 628… and must be a valid Indonesian mobile.
   @IsOptional()
+  @Transform(toCanonicalMobile)
   @IsString()
-  @Length(10, 15)
+  @IsIndonesianMobile()
   phone?: string;
 
   @IsOptional()

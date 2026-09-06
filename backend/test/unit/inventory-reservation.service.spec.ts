@@ -2,10 +2,36 @@ import { BadRequestException } from '@nestjs/common';
 import { PaymentMethod, ReservationStatus } from '@prisma/client';
 import { InventoryReservationService } from '../../src/modules/inventory/inventory-reservation.service';
 
+/** The interpolated text of a Prisma.sql template. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function sqlText(sql: any): string {
+  return String(sql?.strings?.join(' ') ?? sql?.sql ?? '');
+}
+
+/**
+ * The legacy path issues TWO locking reads (BF-017): the Product row, then the
+ * RESERVED InventoryReservation rows. Held quantity used to come from a
+ * non-locking aggregate, which is exactly what let two checkouts sell the same
+ * unit — so these mocks route by SQL text instead of answering both reads alike.
+ *
+ * `reserved` may be a single number or a queue of successive values, for tests
+ * that need the second call to observe the first call's reservation.
+ */
+function rawMock(opts: { stock?: number; reserved?: number | number[] } = {}) {
+  const queue = Array.isArray(opts.reserved) ? [...opts.reserved] : null;
+  return jest.fn().mockImplementation(async (sql: unknown) => {
+    if (/InventoryReservation/i.test(sqlText(sql))) {
+      const held = queue ? (queue.shift() ?? 0) : ((opts.reserved as number) ?? 0);
+      return held > 0 ? [{ reservedQty: held }] : [];
+    }
+    return [{ stock: opts.stock ?? 10 }];
+  });
+}
+
 function buildTx(overrides: Record<string, unknown> = {}) {
   return {
     outlet: { findFirst: jest.fn().mockResolvedValue({ id: 'outlet-1' }) },
-    $queryRaw: jest.fn().mockResolvedValue([{ stock: 10 }]),
+    $queryRaw: rawMock(),
     inventoryReservation: {
       aggregate: jest.fn().mockResolvedValue({ _sum: { reservedQty: 0 } }),
       create: jest.fn().mockResolvedValue({ id: 'res-1' }),
@@ -57,11 +83,8 @@ describe('InventoryReservationService', () => {
   it('prevents overselling: throws when available < requested', async () => {
     // stock 10, already reserved 9 → available 1 < 2 requested.
     const tx = buildTx({
-      $queryRaw: jest.fn().mockResolvedValue([{ stock: 10 }]),
-      inventoryReservation: {
-        aggregate: jest.fn().mockResolvedValue({ _sum: { reservedQty: 9 } }),
-        create: jest.fn(),
-      },
+      $queryRaw: rawMock({ stock: 10, reserved: 9 }),
+      inventoryReservation: { create: jest.fn() },
       inventoryReservationHistory: { create: jest.fn() },
     });
     const { service } = svc();
@@ -73,13 +96,11 @@ describe('InventoryReservationService', () => {
 
   it('serializes concurrent checkouts: second reservation sees the first and is rejected', async () => {
     // Same product row (stock 3). First reserve sees 0 reserved → ok. Second sees 2 → available 1 < 2 → reject.
-    const aggregate = jest
-      .fn()
-      .mockResolvedValueOnce({ _sum: { reservedQty: 0 } })
-      .mockResolvedValueOnce({ _sum: { reservedQty: 2 } });
     const tx = buildTx({
-      $queryRaw: jest.fn().mockResolvedValue([{ stock: 3 }]),
-      inventoryReservation: { aggregate, create: jest.fn().mockResolvedValue({ id: 'r' }) },
+      // The second read must SEE the first reservation — that is the whole point,
+      // and reading it through a snapshot instead is what BF-017 was.
+      $queryRaw: rawMock({ stock: 3, reserved: [0, 2] }),
+      inventoryReservation: { create: jest.fn().mockResolvedValue({ id: 'r' }) },
     });
     const { service } = svc();
     await service.reserveForOrder(tx as never, { orderId: 'oA', items, paymentMethod: PaymentMethod.QRIS });
@@ -281,13 +302,13 @@ describe('InventoryReservationService', () => {
       const tx = buildTx({
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         $queryRaw: jest.fn().mockImplementation(async (sql: any) => {
+          // Record the PRODUCT lock only: the held-quantity read is also keyed by
+          // productId, and counting it would double every entry.
+          if (/InventoryReservation/i.test(sqlText(sql))) return [];
           lockOrder.push(sql.values[0] as string);
           return [{ stock: 100 }];
         }),
-        inventoryReservation: {
-          aggregate: jest.fn().mockResolvedValue({ _sum: { reservedQty: 0 } }),
-          create: jest.fn().mockResolvedValue({ id: 'res-x' }),
-        },
+        inventoryReservation: { create: jest.fn().mockResolvedValue({ id: 'res-x' }) },
         inventoryReservationHistory: { create: jest.fn() },
       });
       return { tx, lockOrder };
@@ -338,11 +359,10 @@ describe('InventoryReservationService', () => {
       // p1 has stock, p2 is exhausted → throws after locking in sorted order.
       const tx = buildTx({
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        $queryRaw: jest.fn().mockImplementation(async (sql: any) => [{ stock: sql.values[0] === 'p2' ? 0 : 100 }]),
-        inventoryReservation: {
-          aggregate: jest.fn().mockResolvedValue({ _sum: { reservedQty: 0 } }),
-          create: jest.fn().mockResolvedValue({ id: 'res-x' }),
-        },
+        $queryRaw: jest.fn().mockImplementation(async (sql: any) =>
+          /InventoryReservation/i.test(sqlText(sql)) ? [] : [{ stock: sql.values[0] === 'p2' ? 0 : 100 }],
+        ),
+        inventoryReservation: { create: jest.fn().mockResolvedValue({ id: 'res-x' }) },
         inventoryReservationHistory: { create: jest.fn() },
       });
       const { service } = svc();

@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardTitle } from '@/components/ui/card';
 import { AdminPromo } from '@/lib/admin';
+import { toDateTimeLocalValue } from '@/lib/business-time';
 
 export type PromoFormValues = {
   code: string;
@@ -53,8 +54,13 @@ export function PromoForm({
     minimumOrderAmount: initialValues?.minimumOrderAmount ?? undefined,
     maxUsageCount: initialValues?.maxUsageCount ?? undefined,
     isNewUserOnly: initialValues?.isNewUserOnly ?? false,
-    startDate: initialValues?.startDate ?? '',
-    endDate: initialValues?.endDate ?? '',
+    // The API returns full ISO instants, which a datetime-local input refuses
+    // outright (it sanitises anything carrying Z or an offset to ""), so an
+    // existing promo used to open with both date fields blank. Rendered as the
+    // Asia/Jakarta wall clock, which is what the admin typed in the first place
+    // and what the API reads a naked value back as.
+    startDate: toDateTimeLocalValue(initialValues?.startDate),
+    endDate: toDateTimeLocalValue(initialValues?.endDate),
     isActive: initialValues?.isActive ?? true,
   });
 

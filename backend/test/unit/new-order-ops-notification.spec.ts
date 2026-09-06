@@ -26,7 +26,7 @@ function order(over: Record<string, unknown> = {}) {
     id: ORDER_ID,
     orderNumber: 'BMS-20260827-ABC',
     totalPrice: 154_378,
-    paymentMethod: 'GATEWAY',
+    paymentMethod: 'BANK_TRANSFER',
     shippingProvider: 'paxel',
     shippingService: 'PAXEL_INSTANT',
     shippingServiceName: 'Paxel Instant',
@@ -37,7 +37,9 @@ function order(over: Record<string, unknown> = {}) {
   };
 }
 
-function build(cfgOver: Record<string, unknown> = {}) {
+const UPLOAD_TOKEN = 'a'.repeat(64); // 256-bit hex, as PaymentUploadTokenService issues
+
+function build(cfgOver: Record<string, unknown> = {}, orderOver: Record<string, unknown> = {}) {
   const created: Record<string, unknown>[] = [];
   const tx = {
     notificationOutbox: { create: jest.fn((a: { data: Record<string, unknown> }) => void created.push(a.data)) },
@@ -45,7 +47,7 @@ function build(cfgOver: Record<string, unknown> = {}) {
   };
   const prisma = {
     processedEvent: { findUnique: jest.fn().mockResolvedValue(null) },
-    order: { findUnique: jest.fn().mockResolvedValue(order()) },
+    order: { findUnique: jest.fn().mockResolvedValue(order(orderOver)) },
     $transaction: jest.fn().mockImplementation((cb: (t: unknown) => Promise<unknown>) => cb(tx)),
   };
   const config = {
@@ -60,8 +62,17 @@ function build(cfgOver: Record<string, unknown> = {}) {
   return { consumer, created, tx };
 }
 
-const run = (c: ReturnType<typeof build>) =>
-  c.consumer.process('msg-1', { name: 'order.created', payload: { orderId: ORDER_ID } });
+const run = (c: ReturnType<typeof build>, payload: Record<string, unknown> = {}) =>
+  c.consumer.process('msg-1', {
+    name: 'order.created',
+    payload: {
+      orderId: ORDER_ID,
+      // checkout emits the upload URL for BANK_TRANSFER/QRIS; the consumer takes
+      // its last segment as the raw token.
+      uploadUrl: `http://localhost:3000/payments/upload/${UPLOAD_TOKEN}`,
+      ...payload,
+    },
+  });
 
 const opsRow = (created: Record<string, unknown>[]) => created.find((r) => r.template === 'order.new');
 const customerRow = (created: Record<string, unknown>[]) => created.find((r) => r.template !== 'order.new');
@@ -118,8 +129,8 @@ describe('the internal alert is enqueued alongside the customer message', () => 
 
 // -------------------------------------------------------- template variables
 
-describe('the five template slots carry the meeting-specified values', () => {
-  it('carries order number, customer, total, payment and shipping', async () => {
+describe('the six template slots carry the contracted values', () => {
+  it('carries order number, customer, total, payment method, payment status and shipping', async () => {
     const c = build();
 
     await run(c);
@@ -128,8 +139,9 @@ describe('the five template slots carry the meeting-specified values', () => {
       orderNumber: 'BMS-20260827-ABC',   // {{1}}
       customerName: 'Budi',              // {{2}}
       grandTotal: 154_378,               // {{3}}
-      paymentSummary: 'GATEWAY · PENDING',        // {{4}}
-      shippingSummary: 'paxel · Paxel Instant',   // {{5}}
+      paymentMethod: 'BANK_TRANSFER',             // {{4}}
+      paymentStatus: 'PENDING',                   // {{5}}
+      shippingMethod: 'paxel · Paxel Instant',    // {{6}}
     });
   });
 
@@ -137,21 +149,24 @@ describe('the five template slots carry the meeting-specified values', () => {
     // shippingServiceName wins over the raw code (PAXELBOX-19 semantics).
     const c = build();
     await run(c);
-    expect((opsRow(c.created)!.payload as Record<string, string>).shippingSummary).toBe('paxel · Paxel Instant');
+    expect((opsRow(c.created)!.payload as Record<string, string>).shippingMethod).toBe('paxel · Paxel Instant');
   });
 });
 
 // ---------------------------------------------------------------- the button
 
 describe('the admin deep link uses the real route', () => {
-  it('links to /orders/:id keyed by Order.id', async () => {
+  it('passes the IDENTIFIER only — Order.id, never a full URL', async () => {
     const c = build();
 
     await run(c);
 
-    expect((opsRow(c.created)!.payload as Record<string, string>).adminOrderUrl).toBe(
-      `https://admin.example.test/orders/${ORDER_ID}`,
-    );
+    // The Qontak template already contains ".../orders/{{1}}". Passing a full
+    // URL here would render ".../orders/https://.../orders/<id>".
+    const ref = (opsRow(c.created)!.payload as Record<string, string>).adminOrderRef;
+    expect(ref).toBe(ORDER_ID);
+    expect(ref).not.toContain('http');
+    expect(ref).not.toContain('/orders/');
   });
 
   it('never uses orderNumber as the identifier', async () => {
@@ -159,25 +174,19 @@ describe('the admin deep link uses the real route', () => {
 
     await run(c);
 
-    expect((opsRow(c.created)!.payload as Record<string, string>).adminOrderUrl).not.toContain('BMS-');
+    // The admin route app/orders/[id] resolves Order.id via findUnique; it does
+    // not accept orderNumber.
+    expect((opsRow(c.created)!.payload as Record<string, string>).adminOrderRef).not.toContain('BMS-');
   });
 
-  it('trims a trailing slash on the configured base', async () => {
-    const c = build({ adminUrl: 'https://admin.example.test/' });
-
-    await run(c);
-
-    expect((opsRow(c.created)!.payload as Record<string, string>).adminOrderUrl).toBe(
-      `https://admin.example.test/orders/${ORDER_ID}`,
-    );
-  });
-
-  it('emits an empty link rather than a broken one when ADMIN_URL is unset', async () => {
+  it('does not depend on ADMIN_URL any more', async () => {
     const c = build({ adminUrl: undefined });
 
     await run(c);
 
-    expect((opsRow(c.created)!.payload as Record<string, string>).adminOrderUrl).toBe('');
+    // The identifier is intrinsic to the order, so an unset ADMIN_URL can no
+    // longer produce an empty button.
+    expect((opsRow(c.created)!.payload as Record<string, string>).adminOrderRef).toBe(ORDER_ID);
   });
 });
 
@@ -187,12 +196,12 @@ describe('the template resolves and renders through the existing abstraction', (
   const TEMPLATE_ID = 'b722adf6-5538-432b-a43a-fd0c15b44ea0';
 
   function registryWith(id?: string) {
-    const prev = process.env.QONTAK_NEW_ORDER_TEMPLATE_ID;
-    if (id === undefined) delete process.env.QONTAK_NEW_ORDER_TEMPLATE_ID;
-    else process.env.QONTAK_NEW_ORDER_TEMPLATE_ID = id;
+    const prev = process.env.QONTAK_ORDER_TEMPLATE_ID;
+    if (id === undefined) delete process.env.QONTAK_ORDER_TEMPLATE_ID;
+    else process.env.QONTAK_ORDER_TEMPLATE_ID = id;
     const registry = new TemplateRegistry();
-    if (prev === undefined) delete process.env.QONTAK_NEW_ORDER_TEMPLATE_ID;
-    else process.env.QONTAK_NEW_ORDER_TEMPLATE_ID = prev;
+    if (prev === undefined) delete process.env.QONTAK_ORDER_TEMPLATE_ID;
+    else process.env.QONTAK_ORDER_TEMPLATE_ID = prev;
     return registry;
   }
 
@@ -203,7 +212,7 @@ describe('the template resolves and renders through the existing abstraction', (
 
     expect(d.providerTemplateId).toBe(TEMPLATE_ID);
     expect(d.body?.map((b) => b.source)).toEqual([
-      'orderNumber', 'customerName', 'grandTotal', 'paymentSummary', 'shippingSummary',
+      'orderNumber', 'customerName', 'grandTotal', 'paymentMethod', 'paymentStatus', 'shippingMethod',
     ]);
   });
 
@@ -215,7 +224,7 @@ describe('the template resolves and renders through the existing abstraction', (
     );
   });
 
-  it('feeds the button from adminOrderUrl, not uploadToken', async () => {
+  it('feeds the button from adminOrderRef, not uploadToken', async () => {
     const sent: { body?: unknown }[] = [];
     const http = jest.fn(async (_url: string, init: { body?: unknown }) => {
       sent.push(init);
@@ -233,8 +242,8 @@ describe('the template resolves and renders through the existing abstraction', (
       recipient: { name: 'Ops', phone: OPS_PHONE },
       variables: {
         template: 'order.new', customerName: 'Budi', orderNumber: 'BMS-1', grandTotal: 154_378,
-        paymentSummary: 'GATEWAY · PENDING', shippingSummary: 'paxel · Paxel Instant',
-        adminOrderUrl: `https://admin.example.test/orders/${ORDER_ID}`,
+        paymentMethod: 'BANK_TRANSFER', paymentStatus: 'PENDING', shippingMethod: 'paxel · Paxel Instant',
+        adminOrderRef: ORDER_ID,
       },
       metadata: { notificationId: 'n1', idempotencyKey: 'n1', externalRequestId: 'x', providerTemplateId: TEMPLATE_ID },
     } as never);
@@ -242,10 +251,11 @@ describe('the template resolves and renders through the existing abstraction', (
     const body = JSON.parse(String(sent[0].body));
     expect(body.message_template_id).toBe(TEMPLATE_ID);
     expect(body.parameters.buttons).toEqual([
-      { index: '0', type: 'url', value: `https://admin.example.test/orders/${ORDER_ID}` },
+      // Identifier only: the Qontak template holds the ".../orders/" base.
+      { index: '0', type: 'url', value: ORDER_ID },
     ]);
     expect(body.parameters.body.map((b: { value: string }) => b.value)).toEqual([
-      'order_no', 'customer_name', 'total', 'payment', 'shipping',
+      'order_no', 'customer_name', 'total', 'payment_method', 'payment_status', 'shipping_method',
     ]);
   });
 

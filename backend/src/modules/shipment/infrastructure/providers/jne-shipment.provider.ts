@@ -52,20 +52,25 @@ export class JneShipmentProvider implements ShipmentProvider {
   readonly name = 'jne';
 
   /**
-   * PAXELBOX-38: JNE is quoted through the application but booked outside it.
-   * The operator arranges the consignment with JNE and records the cnote by
-   * hand, so the generic booking flow must never call `createShipment` for this
-   * courier — see AWAITING_MANUAL_FULFILMENT in ShipmentService.
+   * 61AG.3.31: JNE is now booked BY the application, automatically, as soon as a
+   * payment settles. This reverses PAXELBOX-38, where the operator arranged the
+   * consignment out-of-band and typed the cnote in by hand.
    *
-   * `createShipment` below is deliberately KEPT rather than removed: the method
-   * is still a truthful implementation of the JNE contract, and `cancelShipment`
-   * and `trackShipmentRaw` beside it remain fully in use — tracking runs on
-   * whatever cnote the operator entered, and PAXELBOX-36's cancel endpoint calls
-   * into this class. Deleting the create path would not make fulfilment more
-   * manual; it would only make the integration incomplete if the arrangement
-   * ever changes back.
+   * The reversal costs nothing structurally because `createShipment` below was
+   * deliberately kept and stayed a truthful implementation of the JNE contract
+   * throughout the manual period: it needs no human input, deriving everything
+   * from the order (number, service, weight, destination) and configuration
+   * (JNE_ORIGIN_CODE), and it returns the cnote as both trackingNumber and
+   * providerShipmentId.
+   *
+   * Enabling this makes JNE_ORIGIN_CODE load-bearing for the first time.
+   * JneOriginBootValidator already refuses to boot when JNE_ENABLED=true and the
+   * code is absent, and validates it against the ORIGIN master when that master
+   * has been imported — but it only WARNS when the master is missing, so a wrong
+   * code surfaces as a booking failure (shipment FAILED, retry available) rather
+   * than at startup.
    */
-  readonly supportsAutomaticBooking = false;
+  readonly supportsAutomaticBooking = true;
   private readonly logger = new Logger('JneShipmentProvider');
   private http: ShippingHttpClient = defaultShippingHttpClient;
 

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { isJneSandboxUrl } from '../../modules/shipping/shipping.config';
+import { isJneSandboxUrl, isValidTimeZone } from '../../modules/shipping/shipping.config';
 
 /** Known hardcoded development secrets that must never be used as real secrets. */
 const INSECURE_SECRETS = new Set(['development-only-secret', 'development-only-admin-secret']);
@@ -70,9 +70,18 @@ const baseSchema = z
     // Phase 13A.4 — gates the JWT cookie extractors. Default false → behavior is
     // identical to pre-13A.4 production (Bearer-only). Flip to true to accept cookies.
     AUTH_COOKIE_EXTRACTOR_ENABLED: boolFlag,
-    // Phase 13A.6 — stateless double-submit CSRF rollout. off (default) → no
-    // validation, report → log-only, enforce → 403 on mismatch.
-    CSRF_MODE: z.enum(['off', 'report', 'enforce']).default('off'),
+    // Stateless double-submit CSRF. report → log-only, off → no validation.
+    //
+    // Defaults to ENFORCE (61AG.3.26). It shipped defaulting to `off` for the
+    // 13A.6 rollout, which left every cookie-authenticated mutation forgeable
+    // unless an operator opted in — a security control that is off by default is
+    // a control the deployment does not have. Only cookie-authenticated unsafe
+    // methods are affected: Bearer clients, webhooks and safe methods bypass.
+    //
+    // Rolling this onto an EXISTING deployment: run `report` first and watch for
+    // "[CSRF report] would block", which surfaces any client not yet sending
+    // X-CSRF-Token, then switch to enforce.
+    CSRF_MODE: z.enum(['off', 'report', 'enforce']).default('enforce'),
 
     // WhatsApp (Mekari Qontak) notifications. Required (cross-field below) only when
     // the sender is enabled and the provider routes WhatsApp. No bank data in env.
@@ -105,6 +114,23 @@ const baseSchema = z
     // Parcel envelope for Paxel's required `dimension` (LxWxH cm, each side 1-50).
     // Paxel prices from it, so a bad value silently changes what customers pay.
     PAXEL_DEFAULT_DIMENSION: z.string().regex(/^\d{1,2}x\d{1,2}x\d{1,2}$/, 'PAXEL_DEFAULT_DIMENSION must be LxWxH in cm, e.g. 30x35x20').optional(),
+    // Automatic Paxel pickup scheduling (PAXELBOX-61AG.3.32). Paxel's create call
+    // requires a real appointment; these four values are the whole global rule.
+    // Absent or anything but 'true' means OFF - a courier is never committed to an
+    // invented pickup slot by an unset variable.
+    PAXEL_AUTO_PICKUP_ENABLED: boolFlag,
+    PAXEL_PICKUP_TIMEZONE: z.string().optional(),
+    // The latest payment VERIFICATION time still eligible for today's pickup -
+    // not the latest pickup time. With the business rule the pickup itself is
+    // deliberately later than this.
+    PAXEL_PICKUP_CUTOFF_TIME: z
+      .string()
+      .regex(/^([01]\d|2[0-3]):([0-5]\d)$/, 'PAXEL_PICKUP_CUTOFF_TIME must be HH:mm (24-hour), e.g. 17:00')
+      .optional(),
+    PAXEL_PICKUP_DEFAULT_TIME: z
+      .string()
+      .regex(/^([01]\d|2[0-3]):([0-5]\d)$/, 'PAXEL_PICKUP_DEFAULT_TIME must be HH:mm (24-hour), e.g. 19:00')
+      .optional(),
     // Server-side address geocoding (PAXELBOX-61AG.3). OFF by default: enabling
     // it makes address creation depend on Google, and a failure must surface
     // rather than persist a placeholder coordinate.
@@ -201,6 +227,22 @@ export const envSchema = baseSchema.superRefine((env, ctx) => {
   }
   if (env.PAXEL_ENABLED === 'true' && !env.PAXEL_DEFAULT_DIMENSION) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['PAXEL_DEFAULT_DIMENSION'], message: 'PAXEL_DEFAULT_DIMENSION is required when PAXEL_ENABLED=true' });
+  }
+  // Automatic pickup: switching it on makes all three values load-bearing, and
+  // none of them has a default. The format of each is checked by its own schema
+  // above; this is the cross-field "you turned it on, so state the rule" check.
+  if (env.PAXEL_AUTO_PICKUP_ENABLED === 'true') {
+    if (!env.PAXEL_PICKUP_TIMEZONE?.trim()) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['PAXEL_PICKUP_TIMEZONE'], message: 'PAXEL_PICKUP_TIMEZONE is required when PAXEL_AUTO_PICKUP_ENABLED=true' });
+    } else if (!isValidTimeZone(env.PAXEL_PICKUP_TIMEZONE)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['PAXEL_PICKUP_TIMEZONE'], message: `PAXEL_PICKUP_TIMEZONE is not a valid IANA timezone ('${env.PAXEL_PICKUP_TIMEZONE}')` });
+    }
+    if (!env.PAXEL_PICKUP_CUTOFF_TIME) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['PAXEL_PICKUP_CUTOFF_TIME'], message: 'PAXEL_PICKUP_CUTOFF_TIME is required when PAXEL_AUTO_PICKUP_ENABLED=true' });
+    }
+    if (!env.PAXEL_PICKUP_DEFAULT_TIME) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['PAXEL_PICKUP_DEFAULT_TIME'], message: 'PAXEL_PICKUP_DEFAULT_TIME is required when PAXEL_AUTO_PICKUP_ENABLED=true' });
+    }
   }
   if (env.JNE_ENABLED === 'true') {
     for (const key of ['JNE_API_KEY', 'JNE_USERNAME', 'JNE_ORIGIN_CODE'] as const) {

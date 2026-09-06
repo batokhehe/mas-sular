@@ -71,7 +71,8 @@
       "Bash(cd \"C:/Users/Naufal/OneDrive/Documents/Work/Mas Sular/workspace/workspace/backend\")",
       "Bash(cp src/modules/shipping/shipping.service.ts __TRACKED_VAR__/ACCEPTED-shipping.service.ts)",
       "Bash(cp src/modules/shipping/infrastructure/http/shipping-http-client.ts __TRACKED_VAR__/ACCEPTED-shipping-http-client.ts)",
-      "Bash(md5sum src/modules/shipping/shipping.service.ts src/modules/shipping/infrastructure/http/shipping-http-client.ts)"
+      "Bash(md5sum src/modules/shipping/shipping.service.ts src/modules/shipping/infrastructure/http/shipping-http-client.ts)",
+      "Bash(npx tsx *)"
     ]
   }
 }

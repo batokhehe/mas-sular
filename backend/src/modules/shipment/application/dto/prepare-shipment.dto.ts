@@ -12,9 +12,16 @@ export class PrepareShipmentDto {
   /**
    * The pickup slot the admin committed to, ISO-8601.
    *
-   * Required, and never defaulted: a courier pickup is a real appointment, and
-   * the application has no operating-hours model from which a sensible time
-   * could be derived. The exact value is stored and sent to Paxel unchanged.
+   * Required on THIS endpoint, and never defaulted here: it exists so a person
+   * can state an appointment explicitly, and the exact value is stored and sent
+   * to Paxel unchanged.
+   *
+   * Since PAXELBOX-61AG.3.32 the normal flow no longer comes through here — a
+   * settled payment resolves its own slot from the global cutoff rule and books
+   * automatically. This endpoint remains the OVERRIDE and recovery path: an
+   * explicitly-chosen slot always wins over the automatic one, and is never
+   * recomputed. There is still no operating-hours, weekend or holiday model in
+   * the application, and this endpoint does not invent one either.
    */
   @IsDateString()
   pickupAt!: string;

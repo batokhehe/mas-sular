@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { RegionFields } from '@/components/address/region-fields'
 import { isUsableCoordinate } from '@/lib/address/coordinates'
+import { formatMobileInput } from '@/lib/address/phone'
 import type { RegionValue } from '@/lib/address/region-value'
 import type { Address } from '@/lib/types/models'
 
@@ -137,7 +138,25 @@ export function AddressForm({ initial, pending, onSubmit }: Props) {
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="phone">Telepon</Label>
-          <Input id="phone" {...register('phone')} />
+          {/*
+            Mobile-oriented input (PAXELBOX-61AG.3.20): tel keyboard on mobile,
+            numeric hint, and live 0812-3456-7890 grouping. Typing and pasting go
+            through the same formatter, so +6281234567890 and 62 812 3456 7890
+            settle into one shape. This is UX only - the server normalises to
+            canonical 628... and decides what may be stored.
+          */}
+          <Input
+            id="phone"
+            type="tel"
+            inputMode="numeric"
+            autoComplete="tel"
+            placeholder="0812-3456-7890"
+            {...register('phone', {
+              onChange: (e) => {
+                e.target.value = formatMobileInput(e.target.value)
+              },
+            })}
+          />
           {errors.phone ? <p className="text-xs text-destructive">{errors.phone.message}</p> : null}
         </div>
       </div>

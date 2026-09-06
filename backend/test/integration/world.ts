@@ -222,7 +222,17 @@ export async function checkout(world: IntegrationWorld): Promise<{ scenario: See
       eventName: 'order.created',
       exchange: 'orders',
       routingKey: 'order.created',
-      payload: { orderId: scenario.order.id, orderNumber: scenario.order.orderNumber, totalPrice: scenario.order.totalPrice },
+      // Real checkout issues a single-use upload token for BANK_TRANSFER/QRIS and
+      // rides its URL along in order.created (orders.service.ts). Omitting it here
+      // made the fixture unfaithful: the consumer used to enqueue a transfer row
+      // that could never be built ("missing uploadToken") and was doomed to
+      // permanently FAIL — which is exactly what was observed on the dev database.
+      payload: {
+        orderId: scenario.order.id,
+        orderNumber: scenario.order.orderNumber,
+        totalPrice: scenario.order.totalPrice,
+        uploadUrl: `http://localhost:3000/payments/upload/${'0'.repeat(64)}`,
+      },
       occurredAt: new Date(),
     },
   })

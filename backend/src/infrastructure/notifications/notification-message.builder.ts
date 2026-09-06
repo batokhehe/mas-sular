@@ -33,13 +33,23 @@ export class NotificationMessageBuilder {
     const orderNumber = String(p.orderNumber ?? '');
     const totalPrice = Number(p.totalPrice ?? 0);
 
-    const recipient: NotificationRecipient = { name: customerName };
+    // `order.new` is the INTERNAL admin alert: its audience is the operator the
+    // row was addressed to, so it resolves from row.recipient ONLY. Never fall
+    // back to customerPhone/customerEmail here — a customer contact leaking into
+    // this branch would send an operational alert to the customer.
+    const internal = template === 'order.new';
+
+    const recipient: NotificationRecipient = { name: internal ? 'Admin' : customerName };
     // Always carry email when available so the email provider (NOTIFICATION_PROVIDER=email
     // failover) can deliver even for WhatsApp-origin rows.
-    const email = (p.customerEmail as string | undefined) ?? (channel === NotificationChannel.EMAIL ? row.recipient : undefined);
+    const email = internal
+      ? (channel === NotificationChannel.EMAIL ? row.recipient : undefined)
+      : ((p.customerEmail as string | undefined) ?? (channel === NotificationChannel.EMAIL ? row.recipient : undefined));
     if (email) recipient.email = email;
     if (channel === NotificationChannel.WHATSAPP) {
-      recipient.phone = normalizePhoneNumber((p.customerPhone as string | undefined) ?? row.recipient);
+      recipient.phone = normalizePhoneNumber(
+        internal ? row.recipient : ((p.customerPhone as string | undefined) ?? row.recipient),
+      );
     }
 
     let variables: NotificationVariables;
@@ -59,6 +69,10 @@ export class NotificationMessageBuilder {
         template,
         customerName,
         orderNumber,
+        // "Kurir" is the carrier alone. Providers register lower-case ids
+        // ('paxel', 'jne'); the customer-facing slot is the canonical upper-case
+        // name, and never the service code or its display label.
+        courier: String(p.shippingProvider ?? '').trim().toUpperCase(),
         shippingProvider: String(p.shippingProvider ?? ''),
         shippingService: String(p.shippingService ?? ''),
         trackingNumber: String(p.trackingNumber ?? ''),
@@ -72,9 +86,10 @@ export class NotificationMessageBuilder {
         customerName,
         orderNumber,
         grandTotal: Number(p.grandTotal ?? 0),
-        paymentSummary: String(p.paymentSummary ?? ''),
-        shippingSummary: String(p.shippingSummary ?? ''),
-        adminOrderUrl: String(p.adminOrderUrl ?? ''),
+        paymentMethod: String(p.paymentMethod ?? ''),
+        paymentStatus: String(p.paymentStatus ?? ''),
+        shippingMethod: String(p.shippingMethod ?? ''),
+        adminOrderRef: String(p.adminOrderRef ?? ''),
       };
     } else if (template === 'order.transfer') {
       const account = await this.accounts.getActiveAccount(); // → ConfigurationError if none active

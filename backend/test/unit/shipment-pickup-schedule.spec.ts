@@ -11,6 +11,14 @@ import { readPickupDatetime, withPickupDatetime } from '../../src/modules/shipme
  * reconciliation sweep) must be able to encounter an unscheduled shipment and
  * leave it alone, rather than attempt a booking that is guaranteed to fail and
  * mark it FAILED.
+ *
+ * STILL LIVE AFTER PAXELBOX-61AG.3.32, which added automatic scheduling from a
+ * global business rule. The service is constructed here WITHOUT a
+ * PaxelPickupScheduler, which is exactly the shape of a deployment with
+ * PAXEL_AUTO_PICKUP_ENABLED unset or false — so these cases now also pin that
+ * the feature flag genuinely falls back to this behaviour, unchanged. The
+ * automatic path has its own coverage in paxel-pickup-scheduler.spec.ts and
+ * courier-auto-booking.int-spec.ts.
  */
 
 const PICKUP = '2026-09-01T10:30:00.000Z';

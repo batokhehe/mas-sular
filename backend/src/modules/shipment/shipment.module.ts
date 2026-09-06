@@ -3,6 +3,7 @@ import { SHIPPING_CONFIG, assertJneEnvironment, loadShippingConfig } from '../sh
 import { JneShipmentProvider } from './infrastructure/providers/jne-shipment.provider';
 import { JneOriginBootValidator } from './jne-origin-boot.validator';
 import { PaxelShipmentProvider } from './infrastructure/providers/paxel-shipment.provider';
+import { PaxelPickupScheduler } from './paxel-pickup-scheduler';
 import { ShipmentAdminController } from './presentation/shipment-admin.controller';
 import { SHIPMENT_PROVIDERS, ShipmentProviderFactory } from './shipment-provider.factory';
 import { SHIPMENT_TRACKING_CONFIG, loadShipmentTrackingConfig } from './shipment-tracking.config';
@@ -45,6 +46,10 @@ import { ShipmentSyncService } from './shipment-sync.service';
       inject: [PaxelShipmentProvider, JneShipmentProvider],
     },
     ShipmentProviderFactory,
+    // Decides the automatic Paxel pickup appointment (PAXELBOX-61AG.3.32). A
+    // separate provider from PaxelShipmentProvider on purpose: the resolver
+    // determines the appointment, the provider only sends it.
+    PaxelPickupScheduler,
     ShipmentService,
     ShipmentStatusMapper,
     ShipmentSyncService,

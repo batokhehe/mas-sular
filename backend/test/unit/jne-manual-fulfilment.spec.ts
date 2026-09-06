@@ -66,7 +66,7 @@ function bookingHarness(provider: string) {
 
 // ------------------------------------------------------------ 8, 9, 10, 12
 
-describe('the generic booking flow never books JNE', () => {
+describe('a provider declaring supportsAutomaticBooking=false is never booked', () => {
   it('returns "awaiting manual fulfilment" instead of calling JNE CREATE', async () => {
     const { service, createShipment } = bookingHarness('jne');
 
@@ -123,22 +123,24 @@ describe('Paxel booking is unaffected', () => {
     expect(createShipment).not.toHaveBeenCalled(); // stopped by requiresPickupSchedule
   });
 
-  it('declares automatic booking (marker absent ⇒ enabled)', () => {
+  it('both couriers now declare automatic booking', () => {
     const cfg = { jne: { enabled: true }, paxel: { enabled: true } } as never;
     const jne = new JneShipmentProvider(cfg) as unknown as Record<string, unknown>;
     const paxel = new PaxelShipmentProvider(cfg) as unknown as Record<string, unknown>;
 
-    expect(jne.supportsAutomaticBooking).toBe(false);
-    // Paxel does not declare the property at all — absence IS the default, so no
-    // existing provider had to be edited to keep booking automatically.
+    // 61AG.3.31 reversed PAXELBOX-38: JNE books through the application now.
+    expect(jne.supportsAutomaticBooking).toBe(true);
+    // Paxel does not declare the property at all — absence IS the default.
     expect(paxel.supportsAutomaticBooking).toBeUndefined();
+    // Paxel still cannot book without a pickup slot: its API rejects the request
+    // without pickup_datetime, and no operating-hours model exists to derive one.
     expect(paxel.requiresPickupSchedule).toBe(true);
   });
 });
 
 // -------------------------------------------------------------------- 11
 
-describe('reconciliation cannot book JNE either', () => {
+describe('reconciliation skips a manual-fulfilment provider too', () => {
   function worker(error: string) {
     const shipments = { createForOrderSafe: jest.fn().mockResolvedValue({ ok: false, status: 'RATE_SELECTED', error }) };
     const metrics = { setPending: jest.fn(), success: jest.fn(), failure: jest.fn() };
@@ -172,7 +174,7 @@ describe('reconciliation cannot book JNE either', () => {
 
 // -------------------------------------------------------- 14, 15, 16, 21-25
 
-describe('the manual JNE flow: admin records the cnote, tracking picks it up', () => {
+describe('a manually recorded cnote is still tracked through the jne provider', () => {
   function syncHarness(cached: boolean) {
     const trackShipmentRaw = jest.fn(async () => ({ providerStatus: 'ON_PROCESS', rawPayload: { detail: 'live' } }));
     const jne = { name: 'jne', trackShipmentRaw, supportsAutomaticBooking: false };
@@ -263,7 +265,7 @@ describe('the manual JNE flow: admin records the cnote, tracking picks it up', (
 
 // ----------------------------------------------------- capabilities retained
 
-describe('JNE keeps every capability except automatic booking', () => {
+describe('JNE implements the full courier contract', () => {
   it('still implements create, cancel and track', () => {
     // createShipment is kept on purpose — see the class comment. Removing it
     // would not make fulfilment more manual, only the integration incomplete.

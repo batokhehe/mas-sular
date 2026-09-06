@@ -33,7 +33,12 @@ export function loadConsumersConfig(env: NodeJS.ProcessEnv = process.env): Consu
     maxAttempts: positiveInt(env.CONSUMER_MAX_ATTEMPTS, 5),
     retryDelayMs: positiveInt(env.CONSUMER_RETRY_DELAY_MS, 30_000),
     adminNotificationEmail: env.ADMIN_NOTIFICATION_EMAIL,
-    opsNotificationWhatsapp: env.OPS_NOTIFICATION_WHATSAPP,
+    // 61AG.3.28: QONTAK_ADMIN is the operational WhatsApp recipient. It was
+    // already configured but had NO runtime reference, while this read
+    // OPS_NOTIFICATION_WHATSAPP — which was never set, so the admin alert was
+    // silently skipped for every order. OPS_NOTIFICATION_WHATSAPP is still
+    // honoured as a fallback so an environment that set it keeps working.
+    opsNotificationWhatsapp: env.QONTAK_ADMIN ?? env.OPS_NOTIFICATION_WHATSAPP,
     adminUrl: env.ADMIN_URL,
   };
 }

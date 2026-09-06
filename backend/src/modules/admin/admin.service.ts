@@ -207,11 +207,21 @@ export class AdminService {
     return this.prisma.category.update({ where: { id }, data: { deletedAt: new Date() } });
   }
 
+  /**
+   * `startDate`/`endDate` arrive as real Dates: IsBusinessDateTime normalised
+   * them at the DTO boundary, reading a naked wall clock as Asia/Jakarta rather
+   * than as the server's own timezone. Nothing is parsed here — the previous
+   * `new Date(dto.startDate)` did read the process timezone, which is UTC in the
+   * container and Asia/Jakarta on a developer machine.
+   *
+   * Absent still means null on CREATE (a promo with no window), which is not the
+   * same as absent on UPDATE — see updatePromo.
+   */
   async createPromo(dto: CreatePromoDto) {
     const data = {
       ...dto,
-      startDate: dto.startDate ? new Date(dto.startDate) : null,
-      endDate: dto.endDate ? new Date(dto.endDate) : null,
+      startDate: dto.startDate ?? null,
+      endDate: dto.endDate ?? null,
     };
 
     return this.prisma.promo.create({ data });
@@ -227,6 +237,17 @@ export class AdminService {
     return promo;
   }
 
+  /**
+   * A PATCH is sparse: only the keys actually sent are written, so an omitted
+   * `startDate` leaves the stored window alone. That is why the dto is spread
+   * straight through rather than being defaulted to null the way create does —
+   * defaulting here would wipe the promo window on every unrelated edit.
+   *
+   * This is the method that produced "Invalid value for argument `startDate`:
+   * premature end of input": it passed the dto to Prisma untouched, so before
+   * IsBusinessDateTime the raw browser string "2026-09-12T09:59" went straight
+   * to the driver. The dates are now already Dates by the time they get here.
+   */
   async updatePromo(id: string, dto: UpdatePromoDto) {
     await this.getPromo(id);
     return this.prisma.promo.update({ where: { id }, data: dto });

@@ -51,9 +51,15 @@ export class NotificationsModule implements OnModuleInit {
     const mode = process.env.NOTIFICATION_PROVIDER ?? 'multi';
     if (mode === 'multi' || mode === 'qontak') {
       assertQontakConfigured(loadQontakConfig());
+      // Every automatic WhatsApp event, not just the two order-created ones:
+      // a missing shipped/delivered/admin template id used to surface only as a
+      // permanently FAILED outbox row hours later, at the moment it mattered.
       this.registry.assertResolvable([
         { channel: NotificationChannel.WHATSAPP, template: 'order.transfer' },
         { channel: NotificationChannel.WHATSAPP, template: 'order.cod' },
+        { channel: NotificationChannel.WHATSAPP, template: 'order.new' },
+        { channel: NotificationChannel.WHATSAPP, template: 'order.shipped' },
+        { channel: NotificationChannel.WHATSAPP, template: 'order.delivered' },
       ]);
     }
   }

@@ -50,8 +50,9 @@ export class TemplateRegistry {
     this.register(NotificationChannel.EMAIL, 'manual.custom', { providerTemplateId: 'manual.custom' });
 
     // WHATSAPP → Qontak template ids + parameter layout.
+    // CUSTOMER invoice: bank details + upload-proof button. QONTAK_INVOICE_TEMPLATE_ID.
     this.register(NotificationChannel.WHATSAPP, 'order.transfer', {
-      providerTemplateId: qontak.orderTemplateId ?? '',
+      providerTemplateId: qontak.invoiceTemplateId ?? '',
       body: [
         { key: '1', valueName: 'customer_name', source: 'customerName' },
         { key: '2', valueName: 'order_no', source: 'orderNumber' },
@@ -72,22 +73,24 @@ export class TemplateRegistry {
       ],
       button: false,
     });
-    // "Pesanan Anda telah dikirim. Kurir / Layanan / Nomor Resi"
+    // "Halo {{1}}, Pesanan Anda dengan nomor {{2}} sudah dikirim. Kurir {{3}}, Resi {{4}}"
     this.register(NotificationChannel.WHATSAPP, 'order.shipped', {
       providerTemplateId: qontak.shippedTemplateId ?? '',
       body: [
-        { key: '1', valueName: 'provider', source: 'shippingProvider' },
-        { key: '2', valueName: 'service', source: 'shippingService' },
-        { key: '3', valueName: 'tracking', source: 'trackingNumber' },
+        { key: '1', valueName: 'customer_name', source: 'customerName' },
+        { key: '2', valueName: 'order_no', source: 'orderNumber' },
+        // `courier`, not `shippingProvider`: the canonical carrier name only.
+        { key: '3', valueName: 'courier', source: 'courier' },
+        { key: '4', valueName: 'tracking', source: 'trackingNumber' },
       ],
       button: false,
     });
+    // "Halo {{1}}, Pesanan Anda dengan nomor {{2}} telah berhasil diterima."
     this.register(NotificationChannel.WHATSAPP, 'order.delivered', {
       providerTemplateId: qontak.deliveredTemplateId ?? '',
       body: [
-        { key: '1', valueName: 'provider', source: 'shippingProvider' },
-        { key: '2', valueName: 'service', source: 'shippingService' },
-        { key: '3', valueName: 'tracking', source: 'trackingNumber' },
+        { key: '1', valueName: 'customer_name', source: 'customerName' },
+        { key: '2', valueName: 'order_no', source: 'orderNumber' },
       ],
       button: false,
     });
@@ -102,23 +105,31 @@ export class TemplateRegistry {
       button: false,
     });
     /**
-     * INTERNAL operational alert — "Pesanan Baru Masuk". Goes to an operator,
-     * not a customer, and its button deep-links the admin order-detail page.
+     * ADMIN operational alert — "Pesanan Baru". Goes to QONTAK_ADMIN, never to a
+     * customer, and its button deep-links the admin order-detail page.
      * Registered like every other template so it inherits the same outbox,
      * sender worker and PAXELBOX-31 delivery gate; nothing about it bypasses
      * the checks a customer message goes through.
+     *
+     * QONTAK_ORDER_TEMPLATE_ID (61AG.3.28). Payment method and payment status are
+     * SEPARATE slots — they were previously one pre-joined "METHOD · STATUS"
+     * string, which no six-slot template can render.
      */
     this.register(NotificationChannel.WHATSAPP, 'order.new', {
-      providerTemplateId: qontak.newOrderTemplateId ?? '',
+      providerTemplateId: qontak.orderTemplateId ?? '',
       body: [
         { key: '1', valueName: 'order_no', source: 'orderNumber' },
         { key: '2', valueName: 'customer_name', source: 'customerName' },
         { key: '3', valueName: 'total', source: 'grandTotal', format: 'currency' },
-        { key: '4', valueName: 'payment', source: 'paymentSummary' },
-        { key: '5', valueName: 'shipping', source: 'shippingSummary' },
+        { key: '4', valueName: 'payment_method', source: 'paymentMethod' },
+        { key: '5', valueName: 'payment_status', source: 'paymentStatus' },
+        { key: '6', valueName: 'shipping_method', source: 'shippingMethod' },
       ],
       button: true,
-      buttonSource: 'adminOrderUrl',
+      // The Qontak template already carries the base URL as
+      // ".../orders/{{1}}", so the button value is the IDENTIFIER ONLY.
+      // Passing a full URL here would render ".../orders/https://.../orders/<id>".
+      buttonSource: 'adminOrderRef',
     });
     // Manual sends share ONE approved free-text Qontak template ({{1}} = message).
     // resolve() rejects them with ConfigurationError until QONTAK_MANUAL_TEMPLATE_ID

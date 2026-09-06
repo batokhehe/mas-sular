@@ -5,12 +5,19 @@ import { AdminOrder, PAXEL_SERVICE_OPTIONS, PrepareShipmentResult, prepareShipme
 import { distinctServices, serviceLabel } from '@/lib/orders/prepare-shipment';
 
 /**
- * Admin packing action.
+ * Admin packing action — the OVERRIDE and recovery path.
  *
- * The pickup date and time are the whole reason this panel exists: Paxel will
- * not book without them, and the application has no operating-hours model from
- * which a sensible slot could be derived, so a person states it. Nothing here
- * defaults the time.
+ * Since PAXELBOX-61AG.3.32 a settled payment books Paxel automatically, using
+ * the global cutoff rule (verified by PAXEL_PICKUP_CUTOFF_TIME -> that day's
+ * PAXEL_PICKUP_DEFAULT_TIME, otherwise the next day's). This panel is therefore
+ * no longer the only way a Paxel order gets booked; it is how an operator states
+ * a DIFFERENT appointment, or recovers an order whose automatic booking failed.
+ *
+ * The pickup date and time are still required and still never defaulted HERE: an
+ * explicitly-chosen slot beats the automatic one and is sent to Paxel verbatim,
+ * so a blank field must never silently become a real appointment. Nothing in
+ * this panel models operating hours, weekends or holidays — the application has
+ * no such model, then or now.
  *
  * Insurance is shown read-only. It is a server configuration
  * (PAXEL_NEED_INSURANCE) because it costs money per shipment, and letting an

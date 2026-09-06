@@ -62,8 +62,13 @@ export class InventoryReservationService {
 
   /**
    * Reserve stock for every order item in the caller's transaction. Each product
-   * row is locked FOR UPDATE so concurrent checkouts serialize (no overselling);
-   * insufficient available stock throws, rolling back the whole checkout.
+   * row is locked FOR UPDATE so concurrent checkouts serialize; insufficient
+   * available stock throws, rolling back the whole checkout.
+   *
+   * Serialising on the product row is necessary but NOT sufficient on its own:
+   * everything the availability predicate reads must also be a current read.
+   * Both branches below therefore read their held quantity with FOR UPDATE
+   * rather than through a snapshot query — see BF-017.
    */
   async reserveForOrder(tx: Prisma.TransactionClient, args: ReserveArgs): Promise<void> {
     const expiresAt = this.reservationExpiry(args.paymentMethod);
@@ -114,11 +119,21 @@ export class InventoryReservationService {
       const stock = rows[0]?.stock;
       if (stock === undefined) throw new BadRequestException('Product is unavailable');
 
-      const reserved = await tx.inventoryReservation.aggregate({
-        where: { productId, status: ReservationStatus.RESERVED },
-        _sum: { reservedQty: true },
-      });
-      if (stock - (reserved._sum.reservedQty ?? 0) < quantity) throw new BadRequestException('Insufficient available stock');
+      // LOCKING read, not an aggregate (BF-017). The Product row above is locked,
+      // but the availability predicate is about InventoryReservation rows — a
+      // different table. A plain aggregate is a consistent read, served from the
+      // snapshot this transaction took before the competing checkout committed,
+      // so the loser of the Product lock still saw reserved = 0 and both sold the
+      // last unit. `FOR UPDATE` makes this a current read of committed data, so
+      // whoever acquires the Product lock second sees the winner's reservation.
+      // Summed here rather than in SQL to keep the row lock unambiguous.
+      const held = await tx.$queryRaw<Array<{ reservedQty: number }>>(
+        Prisma.sql`SELECT reservedQty FROM InventoryReservation
+                   WHERE productId = ${productId} AND status = ${ReservationStatus.RESERVED}
+                   FOR UPDATE`,
+      );
+      const reservedQty = held.reduce((sum, row) => sum + Number(row.reservedQty), 0);
+      if (stock - reservedQty < quantity) throw new BadRequestException('Insufficient available stock');
 
       const reservation = await tx.inventoryReservation.create({
         data: { orderId: args.orderId, productId, outletId: args.outletId ?? legacyOutletId, reservedQty: quantity, status: ReservationStatus.RESERVED, expiresAt },

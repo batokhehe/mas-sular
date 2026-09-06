@@ -65,6 +65,12 @@ export type NotificationVariables =
     }
   | {
       template: 'order.shipped' | 'order.delivered';
+      /**
+       * Courier ALONE, canonical upper case: "PAXEL" / "JNE" (61AG.3.29).
+       * Deliberately separate from `shippingProvider`: the shipped template has a
+       * single "Kurir" slot, and the service code or label must never land in it.
+       */
+      courier: string;
       customerName: string;
       orderNumber: string;
       shippingProvider: string;
@@ -86,12 +92,18 @@ export type NotificationVariables =
       customerName: string;
       orderNumber: string;
       grandTotal: number;
-      /** "GATEWAY · PENDING" — method and payment state in one slot. */
-      paymentSummary: string;
-      /** "paxel · Paxel Instant" — provider and service in one slot. */
-      shippingSummary: string;
-      /** Deep link to the admin order-detail page; feeds the template button. */
-      adminOrderUrl: string;
+      /** Payment method alone, e.g. "BANK_TRANSFER". Its own template slot. */
+      paymentMethod: string;
+      /** Payment state alone, e.g. "PENDING". Its own template slot. */
+      paymentStatus: string;
+      /** Shipping provider + service, e.g. "paxel · Paxel Instant". */
+      shippingMethod: string;
+      /**
+       * IDENTIFIER ONLY (Order.id) for the template button — never a full URL.
+       * The Qontak template supplies the ".../orders/" prefix, and the admin
+       * route app/orders/[id] is keyed by Order.id, not orderNumber.
+       */
+      adminOrderRef: string;
     }
   | {
       template: ManualTemplate;

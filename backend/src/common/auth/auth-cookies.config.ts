@@ -30,9 +30,13 @@ export interface CookieConfig {
    */
   authCookieExtractorEnabled: boolean;
   /**
-   * Phase 13A.6 CSRF rollout mode (CSRF_MODE). off (default) → no validation,
-   * report → validate + log but never block, enforce → 403 on mismatch/missing.
-   * Stateless: governs the double-submit guard only; no persistence.
+   * CSRF_MODE. enforce (default) → 403 on mismatch/missing, report → validate +
+   * log but never block, off → no validation. Stateless: governs the
+   * double-submit guard only; no persistence.
+   *
+   * The default must match env.validation.ts. This loader is used outside Nest DI
+   * (the guard is constructed by hand in main.ts), so it does its own fallback
+   * and a mismatch here would silently disable CSRF for the guard alone.
    */
   csrfMode: CsrfMode;
 }
@@ -69,6 +73,6 @@ export function loadCookieConfig(env: NodeJS.ProcessEnv = process.env): CookieCo
     refreshMaxAgeMs: ttlToMs(env.JWT_REFRESH_TTL, 30 * DAY_MS),
     adminAccessMaxAgeMs: ttlToMs(env.JWT_ADMIN_ACCESS_TTL, DAY_MS),
     authCookieExtractorEnabled: env.AUTH_COOKIE_EXTRACTOR_ENABLED === 'true',
-    csrfMode: (env.CSRF_MODE as CsrfMode) ?? 'off',
+    csrfMode: (env.CSRF_MODE as CsrfMode) ?? 'enforce',
   };
 }

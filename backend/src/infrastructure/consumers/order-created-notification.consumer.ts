@@ -15,6 +15,19 @@ const ROUTING_KEY = 'order.created';
 const QUEUE = 'order.created.notifications';
 const RETRY_QUEUE = 'order.created.notifications.retry';
 const DLQ = 'order.created.notifications.dlq';
+
+/** NotificationOutbox.sourceMessageId is VarChar(36). */
+const SOURCE_MESSAGE_ID_MAX = 36;
+const OPS_SUFFIX = ':ops';
+
+/**
+ * Correlation id for the operator row: the customer row's id with an `:ops`
+ * marker, trimmed to fit the column. A 36-char uuid messageId plus the suffix
+ * would be 40 and the insert would throw, taking the whole transaction with it.
+ */
+export function opsSourceMessageId(messageId: string): string {
+  return `${messageId.slice(0, SOURCE_MESSAGE_ID_MAX - OPS_SUFFIX.length)}${OPS_SUFFIX}`;
+}
 const CONSUMER = 'order.notifications';
 
 type ProcessOutcome = 'enqueued' | 'duplicate' | 'skipped';
@@ -153,18 +166,34 @@ export class OrderCreatedNotificationConsumer implements OnApplicationBootstrap,
   }
 
   /**
-   * Deep link to the admin order-detail page.
+   * Which customer message (if any) an order-created event should produce.
    *
-   * The route is `/orders/:id` and it is keyed by Order.id — the admin page
-   * reads `params.id` straight into `GET /admin/orders/:id`, which does
-   * `findUnique({ where: { id } })`. orderNumber is NOT accepted there.
+   *   BANK_TRANSFER / QRIS → `order.transfer`: bank details plus the
+   *     upload-proof button. Requires the raw upload token checkout issued.
+   *   COD                  → `order.cod`: nothing to pay up front.
+   *   GATEWAY              → NONE. The customer is redirected to the hosted
+   *     payment page at checkout, so there are no transfer instructions to send
+   *     and no upload step to link to. Returning null skips the customer row
+   *     deliberately, instead of enqueueing a message that cannot be built.
    *
-   * Returns '' when ADMIN_URL is unset; the provider then simply omits the
-   * button rather than sending a broken link.
+   * A transfer-style method that somehow reaches here WITHOUT a token also
+   * returns null: better a logged skip than a row that is guaranteed to fail
+   * permanently in the builder.
    */
-  private adminOrderUrl(orderId: string): string {
-    const base = this.config.adminUrl?.replace(/\/+$/, '');
-    return base ? `${base}/orders/${orderId}` : '';
+  private customerTemplateFor(
+    method: PaymentMethod,
+    uploadToken: string | null,
+  ): 'order.transfer' | 'order.cod' | null {
+    if (method === PaymentMethod.COD) return 'order.cod';
+    if (method === PaymentMethod.GATEWAY) {
+      this.logger.log(`order.created: GATEWAY order — no transfer instruction message (hosted payment page)`);
+      return null;
+    }
+    if (!uploadToken) {
+      this.logger.warn(`order.created: ${method} order has no upload token; skipping the customer invoice message`);
+      return null;
+    }
+    return 'order.transfer';
   }
 
   /** Dedup + enqueue. ProcessedEvent insert shares the tx → exactly-once enqueue. */
@@ -199,32 +228,42 @@ export class OrderCreatedNotificationConsumer implements OnApplicationBootstrap,
     const phone = order.address?.phone ?? order.user.phone ?? null;
 
     // Channel = WHATSAPP; template chosen by payment method. The raw upload token is
-    // the last path segment of the emitted uploadUrl (non-COD only) — never the hash.
-    const isCod = order.paymentMethod === PaymentMethod.COD;
+    // the last path segment of the emitted uploadUrl — never the stored hash.
+    //
+    // 61AG.3.28: the selection used to be `isCod ? cod : transfer`, which sent
+    // GATEWAY orders down the bank-transfer invoice. That template needs an
+    // upload token, and checkout only issues one for BANK_TRANSFER/QRIS, so every
+    // GATEWAY order died in the builder with "missing uploadToken" and was marked
+    // permanently FAILED. GATEWAY has its own hosted payment page (checkout
+    // returns paymentInstruction and the customer is redirected to
+    // /payment/gateway/:paymentId), so a bank-transfer instruction message is not
+    // merely unsendable there — it would be wrong.
     const uploadUrl = event.payload?.uploadUrl as string | undefined;
     const uploadToken = uploadUrl ? (uploadUrl.split('/').pop() ?? null) : null;
-    const template = isCod ? 'order.cod' : 'order.transfer';
+    const customerTemplate = this.customerTemplateFor(order.paymentMethod, uploadToken);
 
     try {
       await this.prisma.$transaction(async (tx) => {
-        await tx.notificationOutbox.create({
-          data: {
-            channel: NotificationChannel.WHATSAPP,
-            recipient: phone ?? '',
-            template,
-            payload: {
-              orderId,
-              orderNumber: event.payload?.orderNumber ?? order.orderNumber,
-              totalPrice: event.payload?.totalPrice ?? order.totalPrice,
-              customerName: order.user!.name,
-              customerPhone: phone,
-              customerEmail: order.user!.email,
-              paymentMethod: order.paymentMethod,
-              uploadToken,
+        if (customerTemplate) {
+          await tx.notificationOutbox.create({
+            data: {
+              channel: NotificationChannel.WHATSAPP,
+              recipient: phone ?? '',
+              template: customerTemplate,
+              payload: {
+                orderId,
+                orderNumber: event.payload?.orderNumber ?? order.orderNumber,
+                totalPrice: event.payload?.totalPrice ?? order.totalPrice,
+                customerName: order.user!.name,
+                customerPhone: phone,
+                customerEmail: order.user!.email,
+                paymentMethod: order.paymentMethod,
+                uploadToken,
+              },
+              sourceMessageId: messageId,
             },
-            sourceMessageId: messageId,
-          },
-        });
+          });
+        }
         // PAXELBOX-37: the INTERNAL "new order arrived" alert, enqueued in the
         // same transaction so an operator alert can never exist without the
         // customer row that caused it (or vice versa).
@@ -246,17 +285,33 @@ export class OrderCreatedNotificationConsumer implements OnApplicationBootstrap,
                 orderNumber: order.orderNumber,
                 customerName: order.user!.name,
                 grandTotal: order.totalPrice,
-                paymentSummary: `${order.paymentMethod} · ${order.payment?.status ?? 'PENDING'}`,
-                shippingSummary: [order.shippingProvider, order.shippingServiceName ?? order.shippingService]
+                // Separate slots: the template renders "Metode Pembayaran" and
+                // "Status Pembayaran" on their own lines.
+                paymentMethod: order.paymentMethod,
+                paymentStatus: order.payment?.status ?? 'PENDING',
+                shippingMethod: [order.shippingProvider, order.shippingServiceName ?? order.shippingService]
                   .filter(Boolean)
                   .join(' · '),
-                adminOrderUrl: this.adminOrderUrl(orderId),
+                // Identifier only — the Qontak template supplies the base URL.
+                adminOrderRef: orderId,
                 // Marks the audience explicitly so this row can never be mistaken
                 // for a customer message by anything reading the outbox.
                 audience: 'internal',
               },
-              // Distinct from the customer row's key so the two never collide.
-              sourceMessageId: `${messageId}:ops`,
+              // Distinct from the customer row's key so the two never collide,
+              // and it MUST fit NotificationOutbox.sourceMessageId — VarChar(36).
+              //
+              // The relay sets messageId = OutboxEvent.id, a 36-char uuid, so the
+              // old `${messageId}:ops` was 40 characters and the insert threw
+              // "value too long", rolling back the WHOLE transaction — customer
+              // invoice included. It never fired in practice only because the
+              // operator number was unset, so this branch was dead; wiring
+              // QONTAK_ADMIN in 61AG.3.28 would have activated it.
+              //
+              // Truncating is safe: this column carries no unique constraint and
+              // is not the dedup key — exactly-once is enforced by ProcessedEvent
+              // (consumer, messageId), which is written in this same transaction.
+              sourceMessageId: opsSourceMessageId(messageId),
             },
           });
         }

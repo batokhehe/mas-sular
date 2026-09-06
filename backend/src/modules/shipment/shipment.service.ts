@@ -9,6 +9,7 @@ import { CreateShipmentInput, ShipmentItem } from './domain/shipment-provider.in
 import { ShipmentProviderFactory } from './shipment-provider.factory';
 import { trackingCacheKey } from './shipment-sync.service';
 import { readPickupDatetime, readShipmentMetadata, withPickupDatetime } from './shipment-metadata';
+import { PaxelPickupScheduler } from './paxel-pickup-scheduler';
 
 /** Region names only; ids mean nothing to a courier. */
 const ADDRESS_REGION_NAMES = {
@@ -70,6 +71,11 @@ export class ShipmentService {
     // Optional so the many positional test constructions keep working, and safe
     // to be absent — invalidation is best-effort, never a guard.
     @Optional() @Inject(CACHE_MANAGER) private readonly cache?: Cache,
+    // PAXELBOX-61AG.3.32: resolves the automatic Paxel pickup appointment.
+    // Optional for the same reason as `cache` — the many positional test
+    // constructions — and absent means the pre-3.32 behaviour EXACTLY: a courier
+    // that requires a pickup slot and has none waits for an admin.
+    @Optional() private readonly pickupScheduler?: PaxelPickupScheduler,
   ) {}
 
   private toNum(v: unknown): number | undefined {
@@ -94,6 +100,10 @@ export class ShipmentService {
         // province/city/district on both endpoints).
         address: { include: ADDRESS_REGION_NAMES.include },
         user: { select: { name: true, email: true, phone: true } },
+        // The authoritative settlement instant. It is what the automatic Paxel
+        // pickup schedule is computed FROM — never the clock at booking time,
+        // never the request, never the DB server's `now()`.
+        payment: { select: { verifiedAt: true } },
         // Widened from `{ quantity }`: the courier payload needs the whole line —
         // the physical SNAPSHOT taken at checkout plus the product's sku and
         // category. One query, not one per item.
@@ -152,13 +162,20 @@ export class ShipmentService {
       throw new Error('Order address is missing a postal code');
     }
 
-    // Some couriers cannot book without a pickup slot a human committed to
-    // (Paxel). Checked BEFORE the claim so an unscheduled shipment is left
-    // untouched for the admin packing flow rather than claimed, attempted and
-    // marked FAILED. Providers without the requirement are unaffected.
-    const pickupAtIso = readPickupDatetime(shipment.metadata);
+    // Some couriers cannot book without a pickup slot someone committed to
+    // (Paxel). Checked BEFORE the claim so a shipment that still has no slot is
+    // left untouched for the admin packing flow rather than claimed, attempted
+    // and marked FAILED. Providers without the requirement are unaffected.
+    //
+    // An EXPLICIT slot always wins (PAXELBOX-61AG.3.32 §12). It is a time a human
+    // committed to — read first, never recomputed, never overwritten. Automatic
+    // scheduling is strictly the fallback for a shipment that has none.
+    let pickupAtIso = readPickupDatetime(shipment.metadata);
     if (provider.requiresPickupSchedule && !pickupAtIso) {
-      return { ok: false, status: shipment.status, error: AWAITING_PICKUP_SCHEDULE };
+      pickupAtIso = await this.scheduleAutomaticPickup(shipment.id, order.payment?.verifiedAt ?? null, orderId);
+      if (!pickupAtIso) {
+        return { ok: false, status: shipment.status, error: AWAITING_PICKUP_SCHEDULE };
+      }
     }
 
     // CAS-claim the booking BEFORE the courier call (audit F3): exactly one caller
@@ -278,6 +295,52 @@ export class ShipmentService {
 
     this.logger.log({ event: 'shipment.created', orderId, provider: providerName, tracking: result.trackingNumber });
     return { ok: true, status: result.status, trackingNumber: result.trackingNumber };
+  }
+
+  /**
+   * The automatic pickup appointment for a courier that requires one, or null
+   * when there is none to be had — in which case the caller falls back to
+   * AWAITING_PICKUP_SCHEDULE, exactly as before this existed.
+   *
+   * Null (not an invented time) in all three of these cases:
+   *  - no scheduler wired at all — every existing positional test construction;
+   *  - PAXEL_AUTO_PICKUP_ENABLED is off — the pre-3.32 behaviour, unchanged;
+   *  - the payment carries no `verifiedAt`. The rule is defined in terms of the
+   *    payment verification instant, and there is no second-best source for it:
+   *    the clock at booking time is a different quantity, and using it would make
+   *    an admin retry days later resolve to a different appointment than the
+   *    settlement did. Booking only ever runs after settlement, so in the real
+   *    flow this is always present.
+   *
+   * The resolved slot is PERSISTED before the booking is attempted, for the same
+   * reason `prepareForOrder` persists the admin's: a crash between the two must
+   * leave the schedule intact, so the retry books the SAME appointment rather
+   * than computing a new one against a later clock.
+   */
+  private async scheduleAutomaticPickup(
+    shipmentId: string,
+    verifiedAt: Date | null,
+    orderId: string,
+  ): Promise<string | undefined> {
+    if (!this.pickupScheduler?.enabled) return undefined;
+    if (!verifiedAt) {
+      this.logger.warn({ event: 'shipment.pickup_reference_missing', orderId });
+      return undefined;
+    }
+
+    const pickupAtIso = this.pickupScheduler.resolveIso(verifiedAt);
+    // Merge, never replace — metadata also carries failure diagnostics from an
+    // earlier attempt, which are the only record of why a shipment is stuck.
+    const current = await this.prisma.shipment.findUnique({
+      where: { id: shipmentId },
+      select: { metadata: true },
+    });
+    await this.prisma.shipment.update({
+      where: { id: shipmentId },
+      data: { metadata: withPickupDatetime(current?.metadata, pickupAtIso) },
+    });
+    this.logger.log({ event: 'shipment.pickup_scheduled', orderId, pickupAtIso, source: 'automatic' });
+    return pickupAtIso;
   }
 
   /** Never-throwing variant used by the payment-verify flow and the retry endpoint.

@@ -16,6 +16,28 @@ export const JNE_SANDBOX_HOSTS = ['apiv2.jne.co.id:10202'];
 /** Which JNE tenant a configuration addresses. Any other value is an error. */
 export type JneEnvironment = 'sandbox' | 'production';
 
+/**
+ * The GLOBAL automatic pickup policy (PAXELBOX-61AG.3.32).
+ *
+ * Paxel's create endpoint requires `pickup_datetime`, and until this phase there
+ * was nothing in the application from which one could be derived, so Paxel could
+ * only be booked by an admin who had chosen a slot. The business has now stated a
+ * single rule for the whole shop, and these four values are its entire vocabulary.
+ *
+ * There is deliberately no START_TIME/END_TIME pair and no operating-hours,
+ * weekend or holiday model: none of those exist in this repository, and a
+ * placeholder for one would be shipped to a courier as if it were true.
+ */
+export interface PaxelAutoPickupConfig {
+  enabled: boolean;
+  /** IANA zone the cutoff and pickup times are wall-clock in (e.g. Asia/Jakarta). */
+  timeZone: string;
+  /** `HH:mm`. The latest payment VERIFICATION still eligible for today's pickup. */
+  cutoffTime: string;
+  /** `HH:mm`. The appointment itself — may legitimately fall after the cutoff. */
+  pickupTime: string;
+}
+
 export interface PaxelProviderConfig {
   enabled: boolean;
   baseUrl: string;
@@ -55,6 +77,16 @@ export interface PaxelProviderConfig {
    * quoted - keep it in config where it is visible, never inline in code.
    */
   defaultDimension: string;
+  /**
+   * Automatic pickup scheduling.
+   *
+   * ABSENT MEANS DISABLED, exactly like `JneProviderConfig.environment` absent
+   * means sandbox: a courier must never be committed to an automatically-invented
+   * appointment by an unset variable. `loadShippingConfig` always sets it
+   * explicitly; the field stays optional so a hand-built config (every existing
+   * test) keeps its safe meaning without being touched.
+   */
+  autoPickup?: PaxelAutoPickupConfig;
 }
 
 export interface JneProviderConfig {
@@ -137,6 +169,31 @@ export function isPaxelDimension(value: string | undefined): boolean {
   });
 }
 
+/**
+ * Minutes since local midnight for a `HH:mm` string, or null when it is not one.
+ *
+ * Lives here beside the other Paxel value-validators so that the boot guard and
+ * the pickup resolver agree on what a valid time is by construction, rather than
+ * by two regexes that could drift apart.
+ */
+export function parseHhMm(value: string | undefined): number | null {
+  if (!value) return null;
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(value.trim());
+  if (!match) return null;
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+/** True when the runtime's ICU recognises `timeZone` as an IANA zone. */
+export function isValidTimeZone(timeZone: string | undefined): boolean {
+  if (!timeZone || !timeZone.trim()) return false;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function loadShippingConfig(env: NodeJS.ProcessEnv = process.env): ShippingConfig {
   // Cast, not parse: an unrecognised value must survive to assertJneEnvironment()
   // and be REJECTED there. Coercing it to a default here would silently downgrade
@@ -157,6 +214,16 @@ export function loadShippingConfig(env: NodeJS.ProcessEnv = process.env): Shippi
       timeoutMs: positiveInt(env.PAXEL_TIMEOUT_MS, 8_000),
       maxRetry: positiveInt(env.PAXEL_MAX_RETRY, 2),
       defaultDimension: env.PAXEL_DEFAULT_DIMENSION ?? '30x35x20',
+      autoPickup: {
+        enabled: bool(env.PAXEL_AUTO_PICKUP_ENABLED),
+        // NO fallbacks. An automatic courier appointment is a real-world
+        // commitment, so every value behind it is stated explicitly or the boot
+        // guard rejects the configuration - a default timezone or a default
+        // cutoff would silently schedule pickups nobody agreed to.
+        timeZone: env.PAXEL_PICKUP_TIMEZONE ?? '',
+        cutoffTime: env.PAXEL_PICKUP_CUTOFF_TIME ?? '',
+        pickupTime: env.PAXEL_PICKUP_DEFAULT_TIME ?? '',
+      },
     },
     jne: {
       enabled: bool(env.JNE_ENABLED),
@@ -263,6 +330,24 @@ export function assertShippingConfigured(config: ShippingConfig): void {
   }
   if (config.paxel.enabled && !isPaxelDimension(config.paxel.defaultDimension)) {
     missing.push('PAXEL_DEFAULT_DIMENSION (expected LxWxH in cm, each side 1-50)');
+  }
+  // Automatic pickup scheduling (PAXELBOX-61AG.3.32). Checked whenever it is
+  // switched on, independently of PAXEL_ENABLED: a half-configured schedule is a
+  // boot error, not something to discover at the first settlement of the day.
+  const autoPickup = config.paxel.autoPickup;
+  if (autoPickup?.enabled) {
+    if (!isValidTimeZone(autoPickup.timeZone)) {
+      missing.push('PAXEL_PICKUP_TIMEZONE (expected an IANA timezone, e.g. Asia/Jakarta)');
+    }
+    if (parseHhMm(autoPickup.cutoffTime) === null) {
+      missing.push('PAXEL_PICKUP_CUTOFF_TIME (expected HH:mm, 24-hour)');
+    }
+    if (parseHhMm(autoPickup.pickupTime) === null) {
+      missing.push('PAXEL_PICKUP_DEFAULT_TIME (expected HH:mm, 24-hour)');
+    }
+    // NOT validated: that the pickup time falls after the cutoff. It legitimately
+    // may not - the cutoff is the last eligible VERIFICATION time, not the last
+    // pickup time - so ordering the two would reject the business's own rule.
   }
   if (config.jne.enabled) {
     if (!config.jne.apiKey) missing.push('JNE_API_KEY');

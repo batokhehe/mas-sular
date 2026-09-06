@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start -H 0.0.0.0",
     "lint": "eslint .",
-    "test": "node --test components/checkout/provider-logo-assets.test.ts lib/address/coordinates.test.ts lib/checkout/shipping-groups.test.ts lib/checkout/summary.test.ts lib/payments/payment-view.test.ts lib/payments/redirect-params.test.ts lib/payments/resume.test.ts"
+    "test": "node --test components/checkout/provider-logo-assets.test.ts lib/address/coordinates.test.ts lib/address/phone.test.ts lib/checkout/shipping-groups.test.ts lib/checkout/summary.test.ts lib/payments/payment-view.test.ts lib/payments/redirect-params.test.ts lib/payments/resume.test.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",
