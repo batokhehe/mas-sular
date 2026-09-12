@@ -37,6 +37,10 @@ const RULES: Rule[] = [
     resolve: (body) => m('orders', 'Order', body?.status === 'CANCELLED' ? 'CANCEL_ORDER' : 'UPDATE'),
   },
   { method: 'POST', pattern: /\/admin\/orders\/[^/]+\/shipment\/retry$/, resolve: () => m('shipping', 'Shipment', 'SHIP_ORDER') },
+  // P2 #14: its own entity so the Order row is not diffed against the link response
+  // (whose `invoiceUrl` is stripped from the snapshot - see audit-diff.util).
+  { method: 'POST', pattern: /\/admin\/orders\/[^/]+\/invoice-link$/, resolve: () => m('orders', 'OrderInvoiceLink', 'CREATE') },
+  { method: 'POST', pattern: /\/admin\/orders\/[^/]+\/invoice-link\/whatsapp$/, resolve: () => m('orders', 'OrderInvoiceLink', 'SEND_MANUAL_NOTIFICATION') },
   { method: 'POST', pattern: /\/admin\/shipments$/, resolve: () => m('shipping', 'Shipment', 'SHIP_ORDER') },
 
   { method: 'POST', pattern: /\/admin\/stock-transfers$/, resolve: () => m('inventory', 'StockTransfer', 'TRANSFER_STOCK') },

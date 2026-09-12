@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "mysql"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -143,9 +143,15 @@ model RolePermission {
   @@id([roleId, permissionId])
 }
 
+/// Customer refresh session. The presented token is `<selector>.<secret>`: the
+/// selector finds this row by unique index, and only this row's `tokenHash`
+/// (SHA-256 of the 256-bit secret) is compared - never a scan of other sessions.
+/// Rows issued before the selector existed have `selector` NULL and bcrypt hashes;
+/// they can no longer be presented and simply expire (production-readiness H2).
 model RefreshToken {
   id        String    @id @default(uuid())
   userId    String
+  selector  String?   @unique @db.VarChar(32)
   tokenHash String    @db.VarChar(255)
   familyId  String
   revokedAt DateTime?
@@ -368,7 +374,7 @@ model Category {
 model Product {
   id            String                 @id @default(uuid())
   slug          String                 @unique
-  sku           String                 @unique
+  sku           String?                @unique
   name          String
   description   String                 @db.Text
   price         Int
@@ -388,6 +394,10 @@ model Product {
   isFragile     Boolean                @default(false)
   isBestSeller  Boolean                @default(false)
   isNew         Boolean                @default(false)
+  // P2 #10: shown in the homepage "Promo Spesial Produk" section. Set in the Admin.
+  isPromoSpecial Boolean               @default(false)
+  // P2 #11: shown in the homepage "Trial Pack" section. Set in the Admin.
+  isTrialPack   Boolean                @default(false)
   status        ProductStatus          @default(ACTIVE)
   stock         Int                    @default(0)
   categoryId    String
@@ -403,6 +413,8 @@ model Product {
 
   @@index([categoryId, status])
   @@index([isBestSeller])
+  @@index([isPromoSpecial])
+  @@index([isTrialPack])
   @@index([deletedAt])
 }
 
@@ -434,12 +446,12 @@ model Promo {
   description           String         @db.Text
   imageUrl              String?
   voucherType           VoucherType    @default(PERCENTAGE_DISCOUNT)
-  discountPercentage    Int?           @db.UnsignedInt
-  discountAmount        Int?           @db.UnsignedInt
-  maxDiscountAmount     Int?           @db.UnsignedInt
-  freeShippingMaxAmount Int?           @db.UnsignedInt
+  discountPercentage    Int?
+  discountAmount        Int?
+  maxDiscountAmount     Int?
+  freeShippingMaxAmount Int?
   minimumOrderAmount    Int            @default(0)
-  maxUsageCount         Int?           @db.UnsignedInt
+  maxUsageCount         Int?
   currentUsageCount     Int            @default(0)
   isNewUserOnly         Boolean        @default(false)
   isActive              Boolean        @default(true)
@@ -496,8 +508,20 @@ model Order {
   subtotal                 Int
   voucherDiscountAmount    Int                    @default(0)
   deliveryFee              Int
-  /// Immutable customer-borne gateway fee selected at checkout; legacy orders are zero.
+  /// Customer-charged gateway fee ("Biaya Layanan") of the CURRENT payment attempt;
+  /// legacy orders are zero. See payment-service-fee.ts.
   paymentServiceFee        Int                    @default(0)
+  /// Applicable Midtrans fee for the current attempt's channel (recorded in both
+  /// PAYMENT_SERVICE_FEE_ENABLED modes). Invariant: calculated = charged + absorbed.
+  paymentServiceFeeCalculated Int                 @default(0)
+  /// Part of the applicable fee borne by the merchant.
+  paymentServiceFeeAbsorbed   Int                 @default(0)
+  /// PAYMENT_SERVICE_FEE_ENABLED when the fee was calculated; null = not a gateway order / legacy.
+  paymentServiceFeeEnabled    Boolean?
+  /// Channel the fee was calculated for.
+  paymentServiceFeeChannel    String?             @db.VarChar(32)
+  /// Rule snapshot (version, type, rate, fixed part, VAT, pass-through policy).
+  paymentServiceFeeRule       Json?
   totalPrice               Int
   paymentMethod            PaymentMethod
   notes                    String?
@@ -526,6 +550,7 @@ model Order {
   voucherUsage             VoucherUsage?
   reservations             InventoryReservation[]
   internalNotes            OrderNote[]
+  invoiceTokens            OrderInvoiceToken[]
   createdAt                DateTime               @default(now())
   updatedAt                DateTime               @updatedAt
   deletedAt                DateTime?
@@ -643,6 +668,28 @@ model PaymentUploadToken {
   @@index([expiresAt])
 }
 
+/// P2 #14: expiring, revocable capability token for the customer-facing invoice
+/// page (a link an admin sends over WhatsApp). Same primitives as
+/// PaymentUploadToken - a 256-bit random secret of which only the SHA-256 hash is
+/// stored - but deliberately NOT that table: an invoice link is read-only,
+/// re-openable (not single-use), longer-lived, and scoped to an ORDER; an upload
+/// token is a single-use write capability on a payment.
+model OrderInvoiceToken {
+  id          String    @id @default(uuid())
+  tokenHash   String    @unique @db.VarChar(64)
+  orderId     String
+  expiresAt   DateTime
+  /// Set when a newer link is issued for the same order (one active link per order).
+  revokedAt   DateTime?
+  /// Admin who issued the link.
+  createdById String?   @db.VarChar(36)
+  createdAt   DateTime  @default(now())
+  order       Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([expiresAt])
+}
+
 model PaymentAccount {
   id            String   @id @default(uuid())
   bankName      String
@@ -716,6 +763,15 @@ model PaymentGatewayTransaction {
   /// reject an unambiguously older notification (see the webhook fingerprint util).
   providerStatusAt      DateTime?
   grossAmount           Int
+  /// Payment service fee snapshot of THIS attempt (null on attempts created before
+  /// it existed). grossAmount = baseAmount + serviceFeeCustomer; the gateway is
+  /// charged grossAmount and webhooks are validated against it.
+  baseAmount            Int?
+  serviceFeeCalculated  Int                      @default(0)
+  serviceFeeCustomer    Int                      @default(0)
+  serviceFeeAbsorbed    Int                      @default(0)
+  serviceFeeEnabled     Boolean?
+  serviceFeeRule        Json?
   currency              String                   @default("IDR") @db.VarChar(3)
   redirectUrl           String?                  @db.VarChar(512)
   deeplinkUrl           String?                  @db.VarChar(512)
@@ -1000,8 +1056,8 @@ model OutboxEvent {
   payload       Json
   metadata      Json?
   status        OutboxStatus @default(PENDING)
-  attempts      Int          @default(0) @db.UnsignedInt
-  maxAttempts   Int          @default(10) @db.UnsignedInt
+  attempts      Int          @default(0)
+  maxAttempts   Int          @default(10)
   nextAttemptAt DateTime     @default(now())
   lockedUntil   DateTime?
   lockedBy      String?      @db.VarChar(64)
@@ -1032,7 +1088,7 @@ model IdempotencyKey {
   endpoint            String            @db.VarChar(128)
   requestFingerprint  String            @db.VarChar(64)
   status              IdempotencyStatus @default(PROCESSING)
-  fenceToken          Int               @default(1) @db.UnsignedInt
+  fenceToken          Int               @default(1)
   ownerId             String?           @db.VarChar(64)
   ownershipAcquiredAt DateTime?
   responseStatusCode  Int?
@@ -1189,7 +1245,7 @@ model PushSubscription {
   lastSeenAt DateTime @default(now())
   createdAt  DateTime @default(now())
 
-  @@unique([adminId, token(length: 191)])
+  @@unique([adminId, token])
   @@index([adminId])
   @@index([lastSeenAt])
 }
@@ -1244,7 +1300,7 @@ model NotificationOutbox {
   template          String              @db.VarChar(128)
   payload           Json
   status            NotificationStatus  @default(PENDING)
-  attempts          Int                 @default(0) @db.UnsignedInt
+  attempts          Int                 @default(0)
   nextAttemptAt     DateTime            @default(now())
   lockedUntil       DateTime?
   lockedBy          String?             @db.VarChar(64)

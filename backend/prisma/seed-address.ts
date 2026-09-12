@@ -97,12 +97,12 @@ async function bulkUpdate(
   for (const chunk of chunked(rows, 500)) {
     const assignments = columns.map((column, i) => {
       const cases = chunk.map((r) => Prisma.sql`WHEN ${r.code} THEN ${r.values[i]}`);
-      return Prisma.sql`${Prisma.raw(`\`${column}\``)} = CASE \`code\` ${Prisma.join(cases, ' ')} END`;
+      return Prisma.sql`${Prisma.raw(`"${column}"`)} = CASE "code" ${Prisma.join(cases, ' ')} END`;
     });
     await prisma.$executeRaw`
-      UPDATE ${Prisma.raw(`\`${table}\``)}
-         SET ${Prisma.join(assignments, ', ')}, \`updatedAt\` = NOW(3)
-       WHERE \`code\` IN (${Prisma.join(chunk.map((r) => r.code))})`;
+      UPDATE ${Prisma.raw(`"${table}"`)}
+         SET ${Prisma.join(assignments, ', ')}, "updatedAt" = now()
+       WHERE "code" IN (${Prisma.join(chunk.map((r) => r.code))})`;
   }
 }
 

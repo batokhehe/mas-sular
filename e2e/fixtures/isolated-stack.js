@@ -2,7 +2,7 @@
  * PAXELBOX-61AG.3.16 — the isolated E2E backend (B2).
  *
  * Runs as a CHILD PROCESS owned by Playwright's globalSetup. It provisions a
- * disposable MySQL 8.4 container, applies the repository's own Prisma migrations,
+ * disposable PostgreSQL 16 container, applies the repository's own Prisma migrations,
  * boots the smallest Nest graph the GEO tests need, replaces the Google and Paxel
  * HTTP transports with deterministic stubs, seeds minimal fixtures, and listens.
  *
@@ -49,7 +49,7 @@ const LNG = 107.6096701;
 const PAXEL_PRICE = 47321;
 
 const log = (s) => console.log('[e2e-stack] ' + s);
-let mysql = null;
+let postgres = null;
 
 const GOOGLE_BODY = JSON.stringify({
   status: 'OK',
@@ -62,7 +62,7 @@ const GOOGLE_BODY = JSON.stringify({
 async function fail(message, err) {
   log('FAILED: ' + message + (err ? ' :: ' + (err.message || err) : ''));
   try { fs.writeFileSync(FAILED_FILE, JSON.stringify({ message, detail: err ? String(err.message || err) : null })); } catch { /* best effort */ }
-  if (mysql) { try { await mysql.stop(); log('container destroyed after failure'); } catch { /* best effort */ } }
+  if (postgres) { try { await postgres.stop(); log('container destroyed after failure'); } catch { /* best effort */ } }
   process.exit(1);
 }
 
@@ -74,21 +74,21 @@ async function fail(message, err) {
     if (fs.existsSync(f)) fs.unlinkSync(f);
   }
 
-  // ---------- disposable MySQL ----------
-  log('starting disposable MySQL 8.4 ...');
-  const { MySqlContainer } = require(path.join(BACKEND, 'node_modules/@testcontainers/mysql'));
+  // ---------- disposable PostgreSQL ----------
+  log('starting disposable PostgreSQL 16 ...');
+  const { PostgreSqlContainer } = require(path.join(BACKEND, 'node_modules/@testcontainers/postgresql'));
   try {
-    mysql = await new MySqlContainer('mysql:8.4')
+    postgres = await new PostgreSqlContainer('postgres:16-alpine')
       .withDatabase('e2e_isolated')
       .withUsername('e2e')
       // Generated per run; never a repository or developer credential.
       .withUserPassword(require('crypto').randomBytes(18).toString('hex'))
       .start();
   } catch (e) {
-    await fail('could not start the disposable MySQL container (is Docker running?)', e);
+    await fail('could not start the disposable PostgreSQL container (is Docker running?)', e);
   }
-  const databaseUrl = mysql.getConnectionUri();
-  log('container ' + mysql.getId().slice(0, 12) + '  db=' + mysql.getDatabase() + '  (credentials generated, not logged)');
+  const databaseUrl = postgres.getConnectionUri();
+  log('container ' + postgres.getId().slice(0, 12) + '  db=' + postgres.getDatabase() + '  (credentials generated, not logged)');
 
   // Set BEFORE @prisma/client loads: dotenv semantics mean Prisma's own .env
   // injection cannot override an already-set value, so backend/.env can never win.
@@ -285,7 +285,7 @@ async function fail(message, err) {
       };
     } catch { /* the container may already be going away */ }
     try { await app.close(); } catch { /* best effort */ }
-    try { await mysql.stop(); mysql = null; } catch { /* best effort */ }
+    try { await postgres.stop(); postgres = null; } catch { /* best effort */ }
     fs.writeFileSync(TEARDOWN_FILE, JSON.stringify({ counters, countsAtShutdown: counts, containerDestroyed: true }, null, 2));
     log('backend stopped, container destroyed — stub invocations ' + JSON.stringify(counters));
     process.exit(0);

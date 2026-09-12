@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, Optional } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { CoverageType, OrderStatus, PaymentMethod, PaymentStatus, Prisma, Product, Promo, Topping, VoucherType } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { IdempotencyService, SupersededError } from '../../infrastructure/idempotency/idempotency.service';
@@ -24,7 +24,14 @@ import { PaymentInitiationService } from '../payments/gateway/payment-initiation
 import { PaymentChannelRegistry } from '../payments/gateway/payment-channel.registry';
 import { buildCheckoutGatewayPayload } from '../payments/gateway/domain/payment-instruction.builder';
 import { DEFAULT_PAYMENT_METHOD, isSelectablePaymentMethod, selectablePaymentMethods } from '../payments/gateway/domain/payment-channel';
-import { calculatePaymentServiceFee } from '../payments/gateway/domain/payment-service-fee';
+import { calculatePaymentServiceFee, PaymentServiceFeeBreakdown } from '../payments/gateway/domain/payment-service-fee';
+import { toCustomerOrder } from './domain/customer-order-view';
+import { withoutCourierInternals } from '../shipment/shipment-metadata';
+import {
+  loadPaymentServiceFeeConfig,
+  PAYMENT_SERVICE_FEE_CONFIG,
+  PaymentServiceFeeConfig,
+} from '../payments/gateway/payment-service-fee.config';
 
 type NormalizedCheckoutItem = {
   productId: string;
@@ -40,7 +47,7 @@ type PersistOrderArgs = {
   items: NormalizedCheckoutItem[];
   products: Product[];
   toppings: Topping[];
-  summary: Awaited<ReturnType<OrdersService['getSummary']>>;
+  summary: Awaited<ReturnType<OrdersService['computeSummary']>>;
   idempotencyRecordId: string | null;
   fenceToken: number | null;
 };
@@ -100,7 +107,14 @@ export class OrdersService {
     // Absent (tests / gateway module removed) → checkout behaves exactly as before.
     @Optional() private readonly paymentInitiation?: PaymentInitiationService,
     @Optional() private readonly paymentChannels?: PaymentChannelRegistry,
+    // PAYMENT_SERVICE_FEE_ENABLED. Optional so positional test construction keeps
+    // working; absent -> read from the environment (default: merchant absorbs).
+    @Optional() @Inject(PAYMENT_SERVICE_FEE_CONFIG) private readonly feeConfig?: PaymentServiceFeeConfig,
   ) {}
+
+  private paymentServiceFeeEnabled(): boolean {
+    return (this.feeConfig ?? loadPaymentServiceFeeConfig()).enabled;
+  }
 
   /**
    * Coverage gate for delivery. Delivery Coverage is ONLY responsible for the
@@ -576,7 +590,17 @@ export class OrdersService {
     }
   }
 
+  /**
+   * Customer-facing checkout summary. The internal fee breakdown (the merchant's
+   * absorbed cost and the rule snapshot) never leaves the server — only the
+   * customer-charged "Biaya Layanan" and whether that row applies.
+   */
   async getSummary(userId: string, dto: CheckoutSummaryDto) {
+    const { payment_service_fee_breakdown: _internal, ...customerSummary } = await this.computeSummary(userId, dto);
+    return customerSummary;
+  }
+
+  private async computeSummary(userId: string, dto: CheckoutSummaryDto) {
     const address = await this.assertAddress(userId, dto.address_id);
     const items = this.normalizeItems(dto.items);
     const { products, subtotal, totalItems } = await this.getCartPricing(items);
@@ -602,18 +626,31 @@ export class OrdersService {
       discount = this.calculateVoucherDiscount(voucher, subtotal, deliveryFee);
     }
 
+    // Product subtotal, discount and shipping are settled BEFORE the payment fee and
+    // are unaffected by it; the fee is calculated on this fee-exclusive base.
     const transactionBase = subtotal + deliveryFee - discount;
-    const paymentServiceFee = dto.payment_method === PaymentMethod.GATEWAY
-      ? calculatePaymentServiceFee({ paymentChannel: dto.payment_channel, transactionBase }).feeAmount
-      : 0;
+    // Gateway orders only. At checkout this is a PREVIEW for the chosen channel; the
+    // authoritative figure is recalculated per payment attempt at initiation.
+    const feeApplies = dto.payment_method === PaymentMethod.GATEWAY;
+    const fee: PaymentServiceFeeBreakdown | null = feeApplies
+      ? calculatePaymentServiceFee({
+          paymentChannel: dto.payment_channel,
+          transactionBase,
+          feeEnabled: this.paymentServiceFeeEnabled(),
+        })
+      : null;
 
     return {
       subtotal,
       shipping_cost: deliveryFee,
       delivery_fee: deliveryFee,
       discount,
-      payment_service_fee: paymentServiceFee,
-      grand_total: transactionBase + paymentServiceFee,
+      // Customer-charged fee: Rp0 when PAYMENT_SERVICE_FEE_ENABLED=false (merchant absorbs).
+      payment_service_fee: fee?.customerFee ?? 0,
+      // Whether the "Biaya Layanan" row belongs in the breakdown (shown even at Rp0).
+      payment_service_fee_applies: feeApplies,
+      grand_total: fee?.customerTotal ?? transactionBase,
+      payment_service_fee_breakdown: fee,
       total_items: totalItems,
       estimated_days: quote.estimatedDays,
       estimated_minutes: null as number | null,
@@ -686,7 +723,7 @@ export class OrdersService {
       where: { id: replay.resourceId },
       include: ORDER_CHECKOUT_INCLUDE,
     });
-    return order ?? replay.body;
+    return order ? toCustomerOrder(order) : replay.body;
   }
 
   /** Canonical projection of the checkout request that is hashed into the fingerprint. */
@@ -729,10 +766,11 @@ export class OrdersService {
     const items = this.normalizeItems(dto.items);
     const { products, toppings } = await this.getCartPricing(items);
     this.assertStock(items, products);
-    const summary = await this.getSummary(userId, dto);
+    const summary = await this.computeSummary(userId, dto);
 
     const order = await this.persistOrderWithRetry({ userId, dto, items, products, toppings, summary, idempotencyRecordId, fenceToken });
-    return this.withGatewayCharge(order, dto);
+    // The merchant's fee accounting stays server-side; the customer gets the rest.
+    return toCustomerOrder(await this.withGatewayCharge(order, dto));
   }
 
   /**
@@ -851,6 +889,19 @@ export class OrdersService {
           deliveryFee: summary.shipping_cost,
           voucherDiscountAmount: summary.discount,
           paymentServiceFee: summary.payment_service_fee,
+          // Fee breakdown of the checkout-time preview (gateway orders). Payment
+          // initiation replaces it with the authoritative per-attempt figures.
+          ...(summary.payment_service_fee_breakdown
+            ? {
+                paymentServiceFeeCalculated: summary.payment_service_fee_breakdown.calculatedFee,
+                paymentServiceFeeAbsorbed: summary.payment_service_fee_breakdown.merchantAbsorbedFee,
+                paymentServiceFeeEnabled: summary.payment_service_fee_breakdown.feeEnabled,
+                paymentServiceFeeChannel: summary.payment_service_fee_breakdown.channel,
+                ...(summary.payment_service_fee_breakdown.rule
+                  ? { paymentServiceFeeRule: summary.payment_service_fee_breakdown.rule as unknown as Prisma.InputJsonValue }
+                  : {}),
+              }
+            : {}),
           // Unique code lives only on Payment.amount; the service fee is part of
           // the immutable customer charge snapshot above.
           totalPrice: chargedTotal,
@@ -965,7 +1016,7 @@ export class OrdersService {
       if (idempotencyRecordId) {
         await this.idempotency.finalize(tx, idempotencyRecordId, fenceToken!, {
           statusCode: 201,
-          body: JSON.parse(JSON.stringify(createdOrder)) as Prisma.InputJsonValue,
+          body: JSON.parse(JSON.stringify(toCustomerOrder(createdOrder))) as Prisma.InputJsonValue,
           resourceType: 'Order',
           resourceId: createdOrder.id,
         });
@@ -1049,15 +1100,18 @@ export class OrdersService {
 
     // Present the latest attempt as `payment.gateway`; the relation name and its
     // array shape are an internal detail the frontend should not depend on.
-    return orders.map(({ payment, ...order }) => {
-      if (!payment) return { ...order, payment: null };
+    return orders.map(({ payment, shipment, ...orderRow }) => {
+      // The JNE webhook record (courier-reported ongkir, receiver details, delivery
+      // media) is courier-internal: it never reaches the customer.
+      const order = { ...orderRow, shipment: shipment ? { ...shipment, metadata: withoutCourierInternals(shipment.metadata) } : null };
+      if (!payment) return { ...toCustomerOrder(order), payment: null };
       const { gatewayTransactions, ...rest } = payment;
       const latest = gatewayTransactions[0];
       // Rebuild the summary field by field rather than spreading the row: the
       // narrow `select` above already limits it, but widening that clause later
       // must not silently start publishing provider data to every order.
       const gateway = latest ? { expiryAt: latest.expiryAt, status: latest.status } : null;
-      return { ...order, payment: { ...rest, gateway } };
+      return { ...toCustomerOrder(order), payment: { ...rest, gateway } };
     });
   }
 }

@@ -70,7 +70,8 @@ export interface Address {
 export interface Product {
   id: string
   slug: string
-  sku: string
+  // No `sku`: it is internal (the courier item code) and the public catalog API
+  // does not send it (P2 #5).
   name: string
   description: string
   price: number
@@ -81,6 +82,8 @@ export interface Product {
   spicyLevel?: number | null
   isBestSeller: boolean
   isNew: boolean
+  isPromoSpecial: boolean // P2 #10: homepage "Promo Spesial Produk" section
+  isTrialPack: boolean // P2 #11: homepage "Trial Pack" section
   status: ProductStatus
   stock: number
   categoryId: string
@@ -185,7 +188,10 @@ export interface CheckoutSummary {
   subtotal: number
   shipping_cost: number
   discount: number
+  /** Customer-charged "Biaya Layanan" (Rp0 when the merchant absorbs it). */
   payment_service_fee: number
+  /** True for gateway payments: the "Biaya Layanan" row is shown, even at Rp0. */
+  payment_service_fee_applies?: boolean
   grand_total: number
   estimated_days?: string
   voucher?: Promo | null

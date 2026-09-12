@@ -23,6 +23,9 @@ export class PrismaCatalogRepository implements CatalogRepository {
         status: ProductStatus.ACTIVE,
         deletedAt: null,
         category: query.category ? { slug: query.category } : undefined,
+        // P2 #10 / #11: same visibility rules as every other listing, plus the flag(s).
+        isPromoSpecial: query.promoSpecial,
+        isTrialPack: query.trialPack,
         OR: query.search
           ? [
               { name: { contains: query.search } },
@@ -31,6 +34,9 @@ export class PrismaCatalogRepository implements CatalogRepository {
           : undefined,
       },
       include: { category: true },
+      // P2 #5: SKU is internal (the courier item code) and never shown to customers,
+      // so the public catalog does not send it at all.
+      omit: { sku: true },
       orderBy,
     });
   }
@@ -42,6 +48,7 @@ export class PrismaCatalogRepository implements CatalogRepository {
         OR: [{ id: idOrSlug }, { slug: idOrSlug }],
       },
       include: { category: true },
+      omit: { sku: true }, // P2 #5: internal only - see listProducts
     });
     if (!product) throw new NotFoundException('Product not found');
     return product;

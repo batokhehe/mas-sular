@@ -44,13 +44,13 @@ describe('RedriveService', () => {
       const result = await service.redriveFailedOutboxEvents({ eventName: 'payment.paid', createdAfter: new Date(0) });
 
       const [sql, ...params] = prisma.$executeRawUnsafe.mock.calls[0];
-      expect(sql).toContain("`status` = 'PENDING'");
-      expect(sql).toContain('`attempts` = 0');
-      expect(sql).toContain('`lockedUntil` = NULL');
-      expect(sql).toContain('`lastError` = NULL');
-      expect(sql).toContain("WHERE `status` = 'FAILED'"); // safety: only FAILED
-      expect(sql).toContain('`eventName` = ?');
-      expect(sql).toContain('`createdAt` >= ?');
+      expect(sql).toContain(`"status" = 'PENDING'`);
+      expect(sql).toContain('"attempts" = 0');
+      expect(sql).toContain('"lockedUntil" = NULL');
+      expect(sql).toContain('"lastError" = NULL');
+      expect(sql).toContain(`WHERE "status" = 'FAILED'`); // safety: only FAILED
+      expect(sql).toContain('"eventName" = $2');
+      expect(sql).toContain('"createdAt" >= $3');
       expect(params[0]).toBeInstanceOf(Date); // nextAttemptAt = now
       expect(params).toContain('payment.paid');
       expect(result).toEqual({ matched: 0, redriven: 3, dryRun: false });
@@ -62,7 +62,7 @@ describe('RedriveService', () => {
       const result = await service.redriveFailedOutboxEvents({ id: 'evt-1', dryRun: true });
       const sql = prisma.$queryRawUnsafe.mock.calls[0][0] as string;
       expect(sql).toContain('SELECT COUNT(*)');
-      expect(sql).toContain("`status` = 'FAILED'");
+      expect(sql).toContain(`"status" = 'FAILED'`);
       expect(prisma.$executeRawUnsafe).not.toHaveBeenCalled();
       expect(result).toEqual({ matched: 9, redriven: 0, dryRun: true });
     });
@@ -81,10 +81,10 @@ describe('RedriveService', () => {
       const { service, prisma } = build();
       await service.redriveFailedNotifications({ template: 'order.received', channel: 'EMAIL' });
       const sql = prisma.$executeRawUnsafe.mock.calls[0][0] as string;
-      expect(sql).toContain('UPDATE `NotificationOutbox`');
-      expect(sql).toContain("WHERE `status` = 'FAILED'");
-      expect(sql).toContain('`template` = ?');
-      expect(sql).toContain('`channel` = ?');
+      expect(sql).toContain('UPDATE "NotificationOutbox"');
+      expect(sql).toContain(`WHERE "status" = 'FAILED'`);
+      expect(sql).toContain('"template" = $2');
+      expect(sql).toContain('"channel" = $3::"NotificationChannel"');
     });
   });
 

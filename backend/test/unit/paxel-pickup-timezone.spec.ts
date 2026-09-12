@@ -168,7 +168,6 @@ describe('C: persisted pickup metadata stays consistent', () => {
 describe('D: the Paxel create request carries the Jakarta wall-clock time', () => {
   function config(): ShippingConfig {
     return {
-      originPostalCode: '40111',
       allowMockRates: false,
       // RajaOngkir is the JNE rate source (PAXELBOX-45); disabled here so these
       // pre-existing cases keep exercising exactly what they always did.

@@ -6,11 +6,13 @@ import { useRouter } from 'next/navigation'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { AlertCircle, Loader2, MapPin, Banknote, CreditCard, Wallet, ChevronRight, Check } from 'lucide-react'
+import { AlertCircle, Loader2, MapPin, Banknote, CreditCard, Wallet, ChevronRight, Check, Plus } from 'lucide-react'
 import { StorefrontShell } from '@/components/storefront/shell'
 import { Empty } from '@/components/common/empty'
+import { AddressForm } from '@/components/account/address-form'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
@@ -29,8 +31,11 @@ import { useMe } from '@/lib/query/hooks/use-me'
 import { useCheckout } from '@/lib/query/hooks/use-checkout'
 import { useCheckoutSummary } from '@/lib/query/hooks/use-checkout-summary'
 import { useShippingOptions } from '@/lib/query/hooks/use-shipping-options'
-import { useCartStore } from '@/lib/stores/cart-store'
+import { useCreateAddress } from '@/lib/query/hooks/use-addresses'
+import { useCartStore, selectedLines, toCheckoutItems } from '@/lib/stores/cart-store'
+import { useCheckoutAddressStore } from '@/lib/stores/checkout-address-store'
 import { useLastOrderStore } from '@/lib/stores/last-order-store'
+import { ADDRESS_BOOK_FROM_CHECKOUT, resolveCheckoutAddressId } from '@/lib/address/checkout-address'
 import { ApiError } from '@/lib/api/client'
 import { formatIDR } from '@/lib/utils/format'
 import { formatAddressLine } from '@/lib/address/format-address'
@@ -39,7 +44,7 @@ import { groupShippingOptions, serviceLabel } from '@/lib/checkout/shipping-grou
 import { ProviderLogo } from '@/components/checkout/provider-logo'
 import { cn } from '@/lib/utils'
 import type { CreateOrderInput } from '@/lib/api/orders.api'
-import type { ShippingOption } from '@/lib/types/models'
+import type { Address, ShippingOption } from '@/lib/types/models'
 
 const schema = z.object({
   address_id: z.string().min(1, 'Select a delivery address'),
@@ -69,8 +74,13 @@ export default function CheckoutPage() {
   const router = useRouter()
   const { data: me, isLoading: meLoading } = useMe()
   const lines = useCartStore((s) => s.lines)
-  const clearCart = useCartStore((s) => s.clear)
+  const removeLines = useCartStore((s) => s.removeLines)
   const setLastOrder = useLastOrderStore((s) => s.setOrder)
+  const chosenAddressId = useCheckoutAddressStore((s) => s.addressId)
+  const chooseAddress = useCheckoutAddressStore((s) => s.choose)
+  const clearChosenAddress = useCheckoutAddressStore((s) => s.clear)
+  const createAddress = useCreateAddress()
+  const [addAddressOpen, setAddAddressOpen] = useState(false)
   const checkout = useCheckout()
 
   // Idempotency key — stable across retries; regenerated only on a 422 mismatch.
@@ -91,7 +101,13 @@ export default function CheckoutPage() {
   })
 
   const addresses = me?.addresses ?? []
-  const checkoutItems = useMemo(() => lines.map((l) => ({ product_id: l.productId, qty: l.qty })), [lines])
+  // P2 #6: checkout is ONLY the lines ticked in the cart. The selection is stored on
+  // the cart lines themselves, so a refresh or Back keeps the same subset; nothing
+  // here ever falls back to the whole cart. Quotes, the summary and the order all
+  // use this one list (ids + quantities - the server prices and validates them).
+  const checkoutLines = useMemo(() => selectedLines(lines), [lines])
+  const checkoutItems = useMemo(() => toCheckoutItems(lines), [lines])
+  const unselectedCount = lines.length - checkoutLines.length
 
   // 1) Shipping availability is the courier's answer, not ours. DeliveryCoverage
   //    is deactivated for this flow: it used to gate the quote request, so a
@@ -152,18 +168,26 @@ export default function CheckoutPage() {
   })
   const summaryRows = summaryQuery.data ? checkoutSummaryRows(summaryQuery.data) : []
 
-  // Preselect the default (or only) address once it loads; don't override a later
-  // manual choice.
+  // P2 #7: start from the customer's own choice (kept across an Address Book round
+  // trip), else their default address, else their only one. Runs only while nothing
+  // is selected, so it never overrides a choice made on this page.
   useEffect(() => {
     if (addresses.length > 0 && !getValues('address_id')) {
-      const preselect = addresses.find((a) => a.isDefault) ?? addresses[0]
-      setValue('address_id', preselect.id)
+      const preselect = resolveCheckoutAddressId(addresses, chosenAddressId)
+      if (preselect) setValue('address_id', preselect)
     }
-  }, [addresses, getValues, setValue])
+  }, [addresses, chosenAddressId, getValues, setValue])
+
+  // P2 #18: an address added from Checkout becomes the delivery address right away.
+  const onAddressCreated = (created: Address) => {
+    setValue('address_id', created.id, { shouldValidate: true })
+    chooseAddress(created.id)
+    setAddAddressOpen(false)
+  }
 
   const onSubmit = (values: FormValues) => {
     setConflict(null)
-    if (!selectedShipping) return
+    if (!selectedShipping || checkoutItems.length === 0) return
     const input: CreateOrderInput = {
       address_id: values.address_id,
       // courier kept for backward compatibility; provider+service drive the quote.
@@ -176,12 +200,16 @@ export default function CheckoutPage() {
       voucher_code: values.voucher_code || undefined,
       items: checkoutItems,
     }
+    // Exactly what this request buys - captured now, so a later selection change
+    // cannot alter which lines are removed.
+    const purchasedIds = input.items.map((item) => item.product_id)
     checkout.mutate(
       { input, idempotencyKey: idempotencyKey.current },
       {
         onSuccess: (order) => {
           setLastOrder(order)
-          clearCart()
+          removeLines(purchasedIds) // unselected items stay in the cart
+          clearChosenAddress() // the next checkout starts from the default address again
           // A gateway order carries its normalized instructions; send the customer
           // straight to the payment page. Everything else keeps the existing route.
           const gateway = order as unknown as { paymentInstruction?: unknown; payment?: { id?: string } }
@@ -241,6 +269,23 @@ export default function CheckoutPage() {
     )
   }
 
+  // Items in the cart but none ticked: nothing to buy. Never fall back to the cart.
+  if (checkoutLines.length === 0) {
+    return (
+      <StorefrontShell>
+        <Empty
+          title="No items selected"
+          description="Select the items you want to buy in your cart, then check out."
+          action={
+            <Button asChild className="mt-2">
+              <Link href="/cart">Back to cart</Link>
+            </Button>
+          }
+        />
+      </StorefrontShell>
+    )
+  }
+
   return (
     <StorefrontShell>
       <section className="mx-auto max-w-5xl px-4 py-8">
@@ -259,8 +304,8 @@ export default function CheckoutPage() {
                 {addresses.length === 0 ? (
                   <div className="space-y-2">
                     <p className="text-sm text-muted-foreground">You need a delivery address to check out.</p>
-                    <Button asChild variant="outline" size="sm">
-                      <Link href="/account/addresses">Add address first</Link>
+                    <Button type="button" size="sm" onClick={() => setAddAddressOpen(true)}>
+                      <Plus className="mr-1 size-4" /> Add address
                     </Button>
                   </div>
                 ) : (
@@ -271,7 +316,17 @@ export default function CheckoutPage() {
                       const selected = addresses.find((a) => a.id === field.value)
                       return (
                         <div className="space-y-2">
-                          <Select value={field.value} onValueChange={field.onChange}>
+                          <Select
+                            value={field.value}
+                            onValueChange={(id) => {
+                              // Radix's hidden native <select> reports '' while its options
+                              // are still mounting. That is not a customer choice, and it
+                              // used to wipe the preselected default address (P2 #7).
+                              if (!id) return
+                              field.onChange(id)
+                              chooseAddress(id)
+                            }}
+                          >
                             <SelectTrigger>
                               <SelectValue placeholder="Select an address" />
                             </SelectTrigger>
@@ -291,6 +346,14 @@ export default function CheckoutPage() {
                               <p className="mt-0.5 text-muted-foreground">{formatAddressLine(selected)}</p>
                             </div>
                           ) : null}
+                          <div className="flex flex-wrap gap-2">
+                            <Button type="button" variant="outline" size="sm" onClick={() => setAddAddressOpen(true)}>
+                              <Plus className="mr-1 size-4" /> Add address
+                            </Button>
+                            <Button asChild variant="outline" size="sm">
+                              <Link href={ADDRESS_BOOK_FROM_CHECKOUT}>Change address</Link>
+                            </Button>
+                          </div>
                         </div>
                       )
                     }}
@@ -300,11 +363,21 @@ export default function CheckoutPage() {
 
               </Card>
 
-              {/* Order items (real cart lines) */}
+              {/* Order items (the cart lines selected for this checkout) */}
               <Card className="space-y-3 p-4">
-                <h2 className="font-semibold">Order ({lines.length} items)</h2>
+                <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                  <h2 className="font-semibold">Order ({checkoutLines.length} items)</h2>
+                  {unselectedCount > 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      {unselectedCount} unselected {unselectedCount === 1 ? 'item stays' : 'items stay'} in your cart ·{' '}
+                      <Link href="/cart" className="font-medium text-primary hover:underline">
+                        Change selection
+                      </Link>
+                    </p>
+                  ) : null}
+                </div>
                 <ul className="space-y-3">
-                  {lines.map((line) => (
+                  {checkoutLines.map((line) => (
                     <li key={line.productId} className="flex items-center gap-3">
                       <div className="relative size-14 shrink-0 overflow-hidden rounded-lg bg-muted">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -526,6 +599,26 @@ export default function CheckoutPage() {
             </div>
           </div>
         </form>
+
+        {/*
+          Rendered OUTSIDE the checkout <form>: AddressForm is a form of its own, and a
+          portal still bubbles React's submit event to its React parents - inside, saving
+          an address would also submit the order.
+        */}
+        <Dialog open={addAddressOpen} onOpenChange={setAddAddressOpen}>
+          {/* Scrolls on short phones - the form is taller than a 667px screen. */}
+          <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>New address</DialogTitle>
+            </DialogHeader>
+            <AddressForm
+              pending={createAddress.isPending}
+              onSubmit={(values) =>
+                createAddress.mutate({ ...values, isDefault: values.isDefault ?? false }, { onSuccess: onAddressCreated })
+              }
+            />
+          </DialogContent>
+        </Dialog>
       </section>
     </StorefrontShell>
   )

@@ -95,10 +95,10 @@ export class PerformanceProfilerService {
   private async fetchRows(since: Date): Promise<PerfRow[]> {
     try {
       const rows = await this.prisma.$queryRaw<Array<PerfRow & { durationMs: unknown }>>(Prisma.sql`
-        SELECT module, action, method, path, statusCode, durationMs, createdAt
-        FROM \`SystemLog\`
-        WHERE durationMs IS NOT NULL AND createdAt >= ${since}
-        ORDER BY createdAt DESC
+        SELECT module, action, method, path, "statusCode", "durationMs", "createdAt"
+        FROM "SystemLog"
+        WHERE "durationMs" IS NOT NULL AND "createdAt" >= ${since}
+        ORDER BY "createdAt" DESC
         LIMIT ${MAX_ROWS}
       `);
       return rows.map((r) => ({ ...r, durationMs: Number(r.durationMs), createdAt: new Date(r.createdAt) }));

@@ -2,11 +2,11 @@ install:
 	pnpm install
 
 dev:
-	docker compose up -d mysql redis rabbitmq
+	docker compose up -d postgres redis rabbitmq
 	pnpm --parallel --filter backend --filter admin dev
 
 infra:
-	docker compose up -d mysql redis rabbitmq
+	docker compose up -d postgres redis rabbitmq
 
 migrate:
 	pnpm --filter backend prisma:migrate

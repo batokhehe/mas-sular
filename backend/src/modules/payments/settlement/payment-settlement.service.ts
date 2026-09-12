@@ -137,7 +137,7 @@ export class PaymentSettlementService {
       // status and blocks a concurrent cancel until this tx commits; on conflict
       // everything (incl. the payment flip above) rolls back.
       const rows = await tx.$queryRaw<Array<{ status: string }>>(
-        Prisma.sql`SELECT status FROM \`Order\` WHERE id = ${payment.orderId} FOR UPDATE`,
+        Prisma.sql`SELECT status FROM "Order" WHERE id = ${payment.orderId} FOR UPDATE`,
       );
       const orderStatus = rows[0]?.status;
       if (!orderStatus || orderStatus === OrderStatus.CANCELLED) {

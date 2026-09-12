@@ -12,11 +12,11 @@ const RECENT = new Date(Date.now() - 60_000); // 1 min ago → "recent"
 // Route each raw query by a distinctive token in its SQL.
 function queryRaw(arg: unknown): Promise<unknown[]> {
   const t = sqlText(arg);
-  if (t.includes("SUM(module = 'http')")) return Promise.resolve([{ requests: 100, avgMs: 42, warnings: 3, errors: 5 }]);
-  if (t.includes('DATE_FORMAT') && t.includes("module = 'http'")) return Promise.resolve([{ hour: '2026-07-07 10:00', c: 10, avgMs: 40 }]);
-  if (t.includes('DATE_FORMAT') && t.includes("level = 'ERROR'")) return Promise.resolve([{ hour: '2026-07-07 10:00', c: 2, avgMs: 0 }]);
+  if (t.includes("COUNT(*) FILTER (WHERE module = 'http')")) return Promise.resolve([{ requests: 100, avgMs: 42, warnings: 3, errors: 5 }]);
+  if (t.includes('to_char(') && t.includes("module = 'http'")) return Promise.resolve([{ hour: '2026-07-07 10:00', c: 10, avgMs: 40 }]);
+  if (t.includes('to_char(') && t.includes("level = 'ERROR'")) return Promise.resolve([{ hour: '2026-07-07 10:00', c: 2, avgMs: 0 }]);
   if (t.includes('COUNT(*) n FROM')) return Promise.resolve([{ n: 100 }]);
-  if (t.includes('ORDER BY durationMs ASC')) return Promise.resolve([{ d: 250 }]);
+  if (t.includes('ORDER BY "durationMs" ASC')) return Promise.resolve([{ d: 250 }]);
   if (t.includes('CONCAT(method')) return Promise.resolve([{ endpoint: 'GET /products', c: 50, avgMs: 30, maxMs: 120 }]);
   if (t.includes('GROUP BY LEFT(message')) return Promise.resolve([{ message: 'Voucher expired', c: 125 }]);
   if (t.includes('GROUP BY k')) return Promise.resolve([{ k: 'exception', c: 12 }]);
@@ -24,8 +24,8 @@ function queryRaw(arg: unknown): Promise<unknown[]> {
   if (t.includes("module LIKE 'worker.%'")) return Promise.resolve([{ module: 'worker.payment-lifecycle', success: 20, failure: 1, lastExecution: RECENT, avgMs: 15 }]);
   if (t.includes('totalOrders')) return Promise.resolve([{ totalOrders: 500, todayOrders: 12, todayPayments: 10, todayShipments: 8, totalCustomers: 300 }]);
   if (t.includes("path LIKE '%/checkout/order'")) return Promise.resolve([{ avgMs: 230 }]);
-  if (t.includes('FROM `OutboxEvent`')) return Promise.resolve([{ pending: 4, processing: 1, failed: 2, published: 10, oldestPending: RECENT, retryCount: 3, lastActivity: RECENT }]);
-  if (t.includes('FROM `NotificationOutbox`')) return Promise.resolve([{ pending: 2, processing: 0, failed: 1, published: 120, oldestPending: RECENT, retryCount: 2, lastActivity: RECENT }]);
+  if (t.includes('FROM "OutboxEvent"')) return Promise.resolve([{ pending: 4, processing: 1, failed: 2, published: 10, oldestPending: RECENT, retryCount: 3, lastActivity: RECENT }]);
+  if (t.includes('FROM "NotificationOutbox"')) return Promise.resolve([{ pending: 2, processing: 0, failed: 1, published: 120, oldestPending: RECENT, retryCount: 2, lastActivity: RECENT }]);
   return Promise.resolve([]);
 }
 

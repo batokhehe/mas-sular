@@ -20,7 +20,6 @@ const API_KEY = 'test-api-key-not-a-real-secret';
 
 function config(over: Partial<{ enabled: boolean; maxRetry: number; allowMockRates: boolean; dimension: string }> = {}): ShippingConfig {
   return {
-    originPostalCode: '40111',
     allowMockRates: over.allowMockRates ?? false,
     // RajaOngkir is the JNE rate source (PAXELBOX-45); disabled here so these
     // pre-existing cases keep exercising exactly what they always did.

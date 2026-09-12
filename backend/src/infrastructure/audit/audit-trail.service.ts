@@ -130,8 +130,8 @@ export class AuditTrailService {
     todayStart.setHours(0, 0, 0, 0);
     try {
       const rows = await this.prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
-        SELECT COUNT(*) total, SUM(success = 1) ok, SUM(success = 0) failed, COUNT(DISTINCT adminId) admins
-        FROM \`AuditTrail\` WHERE createdAt >= ${todayStart}
+        SELECT COUNT(*) total, COUNT(*) FILTER (WHERE success) ok, COUNT(*) FILTER (WHERE NOT success) failed, COUNT(DISTINCT "adminId") admins
+        FROM "AuditTrail" WHERE "createdAt" >= ${todayStart}
       `);
       const r = rows[0] ?? {};
       return { todayChanges: num(r.total), successful: num(r.ok), failed: num(r.failed), uniqueAdmins: num(r.admins) };

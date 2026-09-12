@@ -5,7 +5,7 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { LoggerModule } from 'nestjs-pino';
 import { appConfig } from './common/config/app.config';
 import { validateEnv } from './common/config/env.validation';
-import { redactSensitivePath } from './common/logging/redact';
+import { redactSensitiveParams, redactSensitivePath } from './common/logging/redact';
 import { DatabaseModule } from './database/database.module';
 import { CacheInfrastructureModule } from './infrastructure/cache/cache.module';
 import { ConsumersModule } from './infrastructure/consumers/consumers.module';
@@ -39,6 +39,7 @@ import { RegionsModule } from './modules/regions/regions.module';
 import { DeliveryCoverageModule } from './modules/delivery-coverage/delivery-coverage.module';
 import { HealthController } from './health.controller';
 import { UploadModule } from './modules/upload/upload.module';
+import { InvoicesModule } from './modules/invoices/invoices.module';
 
 @Module({
   imports: [
@@ -46,12 +47,17 @@ import { UploadModule } from './modules/upload/upload.module';
     LoggerModule.forRoot({
       pinoHttp: {
         level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
-        // Headers fully censored; the request URL is partially censored so the
-        // payment-upload token segment never reaches request logs.
+        // Headers fully censored; the request URL and the route params are partially
+        // censored so capability tokens (payment upload, P2 #14 invoice) never reach
+        // request logs - pino-http logs `req.params`, which carries the path too.
         redact: {
-          paths: ['req.headers.authorization', 'req.headers.cookie', 'req.url'],
-          censor: (value: unknown, path: string[]) =>
-            path[path.length - 1] === 'url' ? redactSensitivePath(String(value)) : '[Redacted]',
+          paths: ['req.headers.authorization', 'req.headers.cookie', 'req.url', 'req.params'],
+          censor: (value: unknown, path: string[]) => {
+            const field = path[path.length - 1];
+            if (field === 'url') return redactSensitivePath(String(value));
+            if (field === 'params') return redactSensitiveParams(value);
+            return '[Redacted]';
+          },
         },
       },
     }),
@@ -88,6 +94,7 @@ import { UploadModule } from './modules/upload/upload.module';
     CmsModule,
     AuditModule,
     UploadModule,
+    InvoicesModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

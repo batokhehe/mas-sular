@@ -1,6 +1,6 @@
 import { GatewayTransactionStatus, PaymentMethod } from '@prisma/client';
 import { PaymentChannelCode, PaymentChannelDescriptor } from './payment-channel';
-import { ChargeResult, PaymentInstructions } from './payment-provider.interface';
+import { amountBreakdownOf, ChargeResult, GatewayAmountBreakdown, PaymentInstructions } from './payment-provider.interface';
 
 /**
  * NORMALIZED, customer-facing payment instruction.
@@ -131,6 +131,12 @@ export interface CheckoutGatewayPayload {
   vaNumber: string | null;
   expiryAt: string | null;
   paymentInstruction: PaymentInstructionView;
+  /**
+   * Customer-facing breakdown of the charged amount (base + "Biaya Layanan" = total),
+   * straight from the attempt's snapshot. Null for manual transfer and for attempts
+   * recorded before the snapshot existed. Never carries the merchant's absorbed fee.
+   */
+  amountBreakdown: GatewayAmountBreakdown | null;
 }
 
 /** Normalize a ChargeResult into the checkout/payment-detail response block. */
@@ -152,6 +158,7 @@ export function buildCheckoutGatewayPayload(
     vaNumber: result.instructions.vaNumber ?? null,
     expiryAt: result.expiresAt ? result.expiresAt.toISOString() : null,
     paymentInstruction: instruction,
+    amountBreakdown: result.amountBreakdown ?? null,
   };
 }
 
@@ -161,6 +168,9 @@ export interface LedgerInstructionSource {
   provider: string;
   status: GatewayTransactionStatus;
   grossAmount: number;
+  /** Fee snapshot columns (absent/null on attempts recorded before they existed). */
+  baseAmount?: number | null;
+  serviceFeeCustomer?: number;
   vaNumber: string | null;
   qrString: string | null;
   redirectUrl: string | null;
@@ -209,5 +219,10 @@ export function buildGatewayPayloadFromLedger(
     vaNumber: row.vaNumber,
     expiryAt: row.expiryAt ? row.expiryAt.toISOString() : null,
     paymentInstruction: buildPaymentInstruction(channel, instructions),
+    amountBreakdown: amountBreakdownOf({
+      baseAmount: row.baseAmount ?? null,
+      serviceFeeCustomer: row.serviceFeeCustomer ?? 0,
+      grossAmount: row.grossAmount,
+    }),
   };
 }

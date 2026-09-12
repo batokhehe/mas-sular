@@ -1,10 +1,14 @@
 import { z } from 'zod';
 import { isJneSandboxUrl, isValidTimeZone } from '../../modules/shipping/shipping.config';
+import { TRUST_PROXY_MAX_HOPS } from '../http/trust-proxy';
 
 /** Known hardcoded development secrets that must never be used as real secrets. */
 const INSECURE_SECRETS = new Set(['development-only-secret', 'development-only-admin-secret']);
 
 const HOUR_MS = 60 * 60 * 1000;
+
+/** A value copied from production.env.example and never filled in. */
+const UNFILLED_PLACEHOLDER = /CHANGE_ME|<[A-Z][A-Z0-9_]*>/;
 
 const boolFlag = z.enum(['true', 'false']).default('false');
 
@@ -35,12 +39,19 @@ const baseSchema = z
     // CORS — validated cross-field below (required in non-local, no wildcard)
     CORS_ORIGINS: z.string().optional(),
 
+    // B3: reverse-proxy hops in front of the API (a hop COUNT, never "trust all").
+    // Required outside local (cross-field below); see common/http/trust-proxy.ts.
+    TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(TRUST_PROXY_MAX_HOPS).optional(),
+
     // Async pipeline toggles + their conditionally-required settings
     OUTBOX_RELAY_ENABLED: boolFlag,
     CONSUMERS_ENABLED: boolFlag,
     RABBITMQ_URL: z.string().optional(),
 
     NOTIFICATION_SENDER_ENABLED: boolFlag,
+    // B6: who may receive a delivered notification. `allowlist` (default) or `all`;
+    // `all` is production-only (cross-field below). See notification-delivery.gate.ts.
+    NOTIFICATION_RECIPIENT_POLICY: z.enum(['allowlist', 'all']).optional(),
     RESEND_API_KEY: z.string().optional(),
     EMAIL_FROM: z.string().optional(),
     ADMIN_NOTIFICATION_EMAIL: z.string().email('ADMIN_NOTIFICATION_EMAIL must be a valid email').optional(),
@@ -62,6 +73,10 @@ const baseSchema = z
     MIDTRANS_BASE_URL: z.string().url('MIDTRANS_BASE_URL must be a valid URL').optional(),
     MIDTRANS_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
     MIDTRANS_MAX_RETRY: z.coerce.number().int().nonnegative().optional(),
+    // Who bears the applicable gateway fee: "true" = added to the customer's total,
+    // "false" (default) = absorbed by the merchant. Independent of MIDTRANS_ENABLED;
+    // QRIS and cards never pass the fee on (payment-service-fee.ts).
+    PAYMENT_SERVICE_FEE_ENABLED: boolFlag,
 
     // Phase 13A — httpOnly auth cookies. All optional; cookie behavior is env-driven.
     COOKIE_DOMAIN: z.string().optional(),
@@ -114,10 +129,12 @@ const baseSchema = z
     // Parcel envelope for Paxel's required `dimension` (LxWxH cm, each side 1-50).
     // Paxel prices from it, so a bad value silently changes what customers pay.
     PAXEL_DEFAULT_DIMENSION: z.string().regex(/^\d{1,2}x\d{1,2}x\d{1,2}$/, 'PAXEL_DEFAULT_DIMENSION must be LxWxH in cm, e.g. 30x35x20').optional(),
-    // Automatic Paxel pickup scheduling (PAXELBOX-61AG.3.32). Paxel's create call
-    // requires a real appointment; these four values are the whole global rule.
-    // Absent or anything but 'true' means OFF - a courier is never committed to an
-    // invented pickup slot by an unset variable.
+    // Courier pickup rule (PAXELBOX-61AG.3.32, P1 #13). PAXEL_AUTO_PICKUP_ENABLED
+    // is Paxel's own booking switch: absent or anything but 'true' means OFF, so a
+    // courier is never booked automatically by an unset variable. The three times
+    // are OPTIONAL overrides of the shop-wide rule in shipping.config.ts
+    // (DEFAULT_PICKUP_POLICY: cut-off 15:00, pickup 17:00, Asia/Jakarta), which
+    // applies to every courier; they are only validated when set.
     PAXEL_AUTO_PICKUP_ENABLED: boolFlag,
     PAXEL_PICKUP_TIMEZONE: z.string().optional(),
     // The latest payment VERIFICATION time still eligible for today's pickup -
@@ -125,11 +142,11 @@ const baseSchema = z
     // deliberately later than this.
     PAXEL_PICKUP_CUTOFF_TIME: z
       .string()
-      .regex(/^([01]\d|2[0-3]):([0-5]\d)$/, 'PAXEL_PICKUP_CUTOFF_TIME must be HH:mm (24-hour), e.g. 17:00')
+      .regex(/^([01]\d|2[0-3]):([0-5]\d)$/, 'PAXEL_PICKUP_CUTOFF_TIME must be HH:mm (24-hour), e.g. 15:00')
       .optional(),
     PAXEL_PICKUP_DEFAULT_TIME: z
       .string()
-      .regex(/^([01]\d|2[0-3]):([0-5]\d)$/, 'PAXEL_PICKUP_DEFAULT_TIME must be HH:mm (24-hour), e.g. 19:00')
+      .regex(/^([01]\d|2[0-3]):([0-5]\d)$/, 'PAXEL_PICKUP_DEFAULT_TIME must be HH:mm (24-hour), e.g. 17:00')
       .optional(),
     // Server-side address geocoding (PAXELBOX-61AG.3). OFF by default: enabling
     // it makes address creation depend on Google, and a failure must surface
@@ -149,6 +166,9 @@ const baseSchema = z
     JNE_ORIGIN_CODE: z.string().optional(),
     JNE_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
     JNE_MAX_RETRY: z.coerce.number().int().nonnegative().optional(),
+    // Inbound JNE Webhook Status V2. OFF by default: JNE's V2 documentation defines no
+    // webhook authentication, so the endpoint is only reachable once deliberately enabled.
+    JNE_WEBHOOK_ENABLED: boolFlag,
 
     // Checkout idempotency. Optional locally; MUST be true in staging/production
     // (cross-field below) so duplicate checkout requests can never double-create.
@@ -180,6 +200,27 @@ export const envSchema = baseSchema.superRefine((env, ctx) => {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['CORS_ORIGINS'], message: 'wildcard "*" origin is not allowed with credentialed CORS' });
   }
 
+  // B4: production.env.example uses CHANGE_ME secrets and <PLACEHOLDER> values that
+  // are deliberately unbootable - several placeholder secrets are long enough to pass
+  // the 32-char rule, so without this a forgotten one would run on a public value.
+  if (!isLocal) {
+    for (const [key, value] of Object.entries(env as Record<string, unknown>)) {
+      if (typeof value === 'string' && UNFILLED_PLACEHOLDER.test(value)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: `${key} still holds a template placeholder (CHANGE_ME / <...>)` });
+      }
+    }
+  }
+
+  // B3: outside local the API runs behind a reverse proxy, and an unset hop count
+  // silently collapses every visitor into the proxy's rate-limit bucket. Explicit.
+  if (!isLocal && env.TRUST_PROXY_HOPS === undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['TRUST_PROXY_HOPS'],
+      message: 'TRUST_PROXY_HOPS must be set in staging/production (1 for a single reverse proxy in front of the API)',
+    });
+  }
+
   // M5: checkout idempotency must be enabled outside local (staging/production), so a
   // duplicate/retried checkout can never create duplicate orders/payments/reservations.
   // Development and test may disable it; staging follows production.
@@ -188,6 +229,17 @@ export const envSchema = baseSchema.superRefine((env, ctx) => {
       code: z.ZodIssueCode.custom,
       path: ['CHECKOUT_IDEMPOTENCY_ENABLED'],
       message: 'CHECKOUT_IDEMPOTENCY_ENABLED must be "true" in staging/production',
+    });
+  }
+
+  // B6: sending to every customer is a deliberate production decision. Development,
+  // test and staging stay on the allowlist so a local or staging stack can never
+  // message real customers.
+  if (env.NOTIFICATION_RECIPIENT_POLICY === 'all' && env.NODE_ENV !== 'production') {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['NOTIFICATION_RECIPIENT_POLICY'],
+      message: 'NOTIFICATION_RECIPIENT_POLICY=all is only allowed with NODE_ENV=production; use allowlist elsewhere',
     });
   }
 
@@ -228,21 +280,13 @@ export const envSchema = baseSchema.superRefine((env, ctx) => {
   if (env.PAXEL_ENABLED === 'true' && !env.PAXEL_DEFAULT_DIMENSION) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['PAXEL_DEFAULT_DIMENSION'], message: 'PAXEL_DEFAULT_DIMENSION is required when PAXEL_ENABLED=true' });
   }
-  // Automatic pickup: switching it on makes all three values load-bearing, and
-  // none of them has a default. The format of each is checked by its own schema
-  // above; this is the cross-field "you turned it on, so state the rule" check.
-  if (env.PAXEL_AUTO_PICKUP_ENABLED === 'true') {
-    if (!env.PAXEL_PICKUP_TIMEZONE?.trim()) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['PAXEL_PICKUP_TIMEZONE'], message: 'PAXEL_PICKUP_TIMEZONE is required when PAXEL_AUTO_PICKUP_ENABLED=true' });
-    } else if (!isValidTimeZone(env.PAXEL_PICKUP_TIMEZONE)) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['PAXEL_PICKUP_TIMEZONE'], message: `PAXEL_PICKUP_TIMEZONE is not a valid IANA timezone ('${env.PAXEL_PICKUP_TIMEZONE}')` });
-    }
-    if (!env.PAXEL_PICKUP_CUTOFF_TIME) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['PAXEL_PICKUP_CUTOFF_TIME'], message: 'PAXEL_PICKUP_CUTOFF_TIME is required when PAXEL_AUTO_PICKUP_ENABLED=true' });
-    }
-    if (!env.PAXEL_PICKUP_DEFAULT_TIME) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['PAXEL_PICKUP_DEFAULT_TIME'], message: 'PAXEL_PICKUP_DEFAULT_TIME is required when PAXEL_AUTO_PICKUP_ENABLED=true' });
-    }
+  // Pickup rule overrides: none is required (unset means the shop-wide default,
+  // cut-off 15:00 / pickup 17:00 Asia/Jakarta), but one that IS set must be valid
+  // - and regardless of PAXEL_AUTO_PICKUP_ENABLED, because JNE records the same
+  // slot either way. The HH:mm format of the two times is checked by their own
+  // schemas above; the timezone needs ICU, so it is checked here.
+  if (env.PAXEL_PICKUP_TIMEZONE?.trim() && !isValidTimeZone(env.PAXEL_PICKUP_TIMEZONE)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['PAXEL_PICKUP_TIMEZONE'], message: `PAXEL_PICKUP_TIMEZONE is not a valid IANA timezone ('${env.PAXEL_PICKUP_TIMEZONE}')` });
   }
   if (env.JNE_ENABLED === 'true') {
     for (const key of ['JNE_API_KEY', 'JNE_USERNAME', 'JNE_ORIGIN_CODE'] as const) {

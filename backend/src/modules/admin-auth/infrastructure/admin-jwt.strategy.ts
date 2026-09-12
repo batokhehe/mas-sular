@@ -84,16 +84,16 @@ export class AdminJwtStrategy extends PassportStrategy(Strategy, 'admin-jwt') {
       SELECT a.id            AS id,
              a.email         AS email,
              a.name          AS name,
-             r.name          AS roleName,
+             r.name          AS "roleName",
              p.subject       AS subject,
              p.action        AS action
-      FROM \`Admin\` a
-      LEFT JOIN \`AdminRole\` ar ON ar.adminId = a.id
-      LEFT JOIN \`Role\` r ON r.id = ar.roleId
-      LEFT JOIN \`Permission\` p
+      FROM "Admin" a
+      LEFT JOIN "AdminRole" ar ON ar."adminId" = a.id
+      LEFT JOIN "Role" r ON r.id = ar."roleId"
+      LEFT JOIN "Permission" p
         ON r.name = ${SUPER_ADMIN}
-        OR p.id IN (SELECT rp.permissionId FROM \`RolePermission\` rp WHERE rp.roleId = r.id)
-      WHERE a.id = ${payload.sub} AND a.isActive = true
+        OR p.id IN (SELECT rp."permissionId" FROM "RolePermission" rp WHERE rp."roleId" = r.id)
+      WHERE a.id = ${payload.sub} AND a."isActive" = true
     `);
 
     // Unchanged rejection: no row means no such admin, or isActive is false.

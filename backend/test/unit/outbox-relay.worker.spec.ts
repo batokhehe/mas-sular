@@ -79,8 +79,12 @@ describe('OutboxRelayWorker', () => {
 
       expect(prisma.$executeRawUnsafe).toHaveBeenCalledTimes(1);
       const sql = prisma.$executeRawUnsafe.mock.calls[0][0] as string;
-      expect(sql).toContain('UPDATE `OutboxEvent`');
-      expect(sql).toContain("`status` = 'PENDING'");
+      expect(sql).toContain('UPDATE "OutboxEvent"');
+      // PostgreSQL claim shape: no ORDER BY/LIMIT on UPDATE, so the batch is a
+      // sub-select, and SKIP LOCKED keeps two workers off the same rows.
+      expect(sql).toContain('FOR UPDATE SKIP LOCKED');
+      expect(sql).not.toContain('?');
+      expect(sql).toContain(`"status" = 'PENDING'`);
       expect(sql).toContain('LIMIT 50');
       expect(prisma.outboxEvent.findMany).toHaveBeenCalledWith(
         expect.objectContaining({

@@ -22,7 +22,7 @@
  * worker (SHIPMENT_TRACKING_ENABLED=true) against real courier APIs, the
  * notification sender (NOTIFICATION_SENDER_ENABLED + NOTIFICATION_DELIVERY_ENABLED
  * =true) against real Qontak, and Midtrans reconciliation against the real
- * gateway. Runtime verification therefore runs against disposable MySQL here.
+ * gateway. Runtime verification therefore runs against disposable PostgreSQL here.
  *
  * CREDENTIALS ARE DELIBERATELY FAKE and the base URLs deliberately unroutable —
  * belt and braces on top of the stubbed transport, so a mistake cannot reach a
@@ -41,15 +41,18 @@ import type { ShippingConfig } from '../../src/modules/shipping/shipping.config'
 import { TemplateRegistry } from '../../src/infrastructure/notifications/template-registry'
 import { NotificationMessageBuilder } from '../../src/infrastructure/notifications/notification-message.builder'
 import { QontakWhatsAppProvider } from '../../src/infrastructure/notifications/qontak-whatsapp.provider'
+import { buildAdminNotification } from '../../src/infrastructure/admin-notifications/admin-notification.builder'
 import { getWorld, IntegrationWorld } from './world'
 
 const CUSTOMER_PHONE = '628123456789'
 const SHIPPED_TPL = 'SHIPPED-TPL-3-33'
 
+/** The business pickup rule (P1 #13), stated as literals so the test pins it. */
+const PICKUP_RULE = { timeZone: 'Asia/Jakarta', cutoffTime: '15:00', pickupTime: '17:00' }
+
 /** Mirrors the developer's .env policy exactly; credentials are fake. */
 function shippingConfig(autoPickupEnabled = true): ShippingConfig {
   return {
-    originPostalCode: '40111',
     allowMockRates: false,
     rajaongkir: { enabled: false, baseUrl: 'https://rajaongkir.invalid/api/v1', timeoutMs: 1000, maxRetry: 0 },
     paxel: {
@@ -63,14 +66,11 @@ function shippingConfig(autoPickupEnabled = true): ShippingConfig {
       timeoutMs: 1000,
       maxRetry: 0,
       defaultDimension: '30x35x20',
-      // The four values read from the real backend/.env in Part 1.
-      autoPickup: {
-        enabled: autoPickupEnabled,
-        timeZone: 'Asia/Jakarta',
-        cutoffTime: '17:00',
-        pickupTime: '19:00',
-      },
+      // The business rule (P1 #13): cut-off 15:00 WIB, pickup 17:00 WIB.
+      autoPickup: { enabled: autoPickupEnabled, ...PICKUP_RULE },
     },
+    // The same rule for every courier, exactly as loadShippingConfig wires it.
+    pickupPolicy: PICKUP_RULE,
     jne: {
       enabled: true,
       environment: 'sandbox',
@@ -123,7 +123,9 @@ function jakartaMinutes(at: Date): number {
 
 /** The calendar date the business rule says a payment verified at `at` belongs to. */
 function expectedPickupDate(at: Date): string {
-  if (jakartaMinutes(at) <= 17 * 60) return jakartaDate(at)
+  // Independent re-statement of the rule (deliberately not the resolver): a
+  // verification at or before the 15:00 WIB cut-off is picked up the same day.
+  if (jakartaMinutes(at) <= 15 * 60) return jakartaDate(at)
   return jakartaDate(new Date(at.getTime() + 24 * 60 * 60 * 1000))
 }
 
@@ -230,7 +232,7 @@ describe('61AG.3.33 runtime verification — real couriers, stubbed transport', 
   const paymentOf = (orderId: string) => world.prisma.payment.findFirstOrThrow({ where: { orderId } })
   const shippedRows = (orderId: string) =>
     world.prisma.notificationOutbox.findMany({
-      where: { template: 'order.shipped', payload: { path: '$.orderId', equals: orderId } },
+      where: { template: 'order.shipped', payload: { path: ['orderId'], equals: orderId } },
     })
   const eventsOf = (orderId: string) =>
     world.prisma.orderEvent.findMany({ where: { orderId }, orderBy: { createdAt: 'asc' }, select: { status: true } })
@@ -302,7 +304,7 @@ describe('61AG.3.33 runtime verification — real couriers, stubbed transport', 
       if (providerName === 'paxel') {
         // Part 4/5: pickup_datetime exists and follows the business rule.
         const verifiedAt = (await paymentOf(order.id)).verifiedAt!
-        expect(body.pickup_datetime).toBe(`${expectedPickupDate(verifiedAt)} 19:00:00`)
+        expect(body.pickup_datetime).toBe(`${expectedPickupDate(verifiedAt)} 17:00:00`)
         expect(body.invoice_number).toBe(order.orderNumber)
         expect(body.service_type).toBe('NEXTDAY')
         // The instant sent is exactly the one persisted on the shipment.
@@ -313,6 +315,11 @@ describe('61AG.3.33 runtime verification — real couriers, stubbed transport', 
         expect(body.service_code).toBe(service)
         expect(body.origin_code).toBe('CGK10000')
         expect(body.pickup_datetime).toBeUndefined()
+        // P1 #13: the same rule, RECORDED for JNE (never on its wire, above).
+        const verifiedAt = (await paymentOf(order.id)).verifiedAt!
+        const recorded = readPickupDatetime(shipment.metadata, 'jne') as string
+        expect(jakartaDate(new Date(recorded))).toBe(expectedPickupDate(verifiedAt))
+        expect(jakartaMinutes(new Date(recorded))).toBe(17 * 60)
       }
 
       // --- AWB persisted ---
@@ -334,6 +341,19 @@ describe('61AG.3.33 runtime verification — real couriers, stubbed transport', 
       ])
       // The service code and its label must not leak into the customer message.
       expect(JSON.stringify(sent)).not.toContain(service === 'REG' ? 'REG Label' : 'PAXEL_NEXTDAY')
+
+      // --- P1 #15: the admin side, from the SAME raw courier AWB field ---
+      // (JNE cnote_no / Paxel airwaybill_code -> trackingNumber -> SHIPPED event).
+      const events = await world.prisma.outboxEvent.findMany({
+        where: { aggregateId: order.id, eventName: 'order.status_updated' },
+      })
+      expect(events).toHaveLength(1)
+      const event = events[0].payload as Record<string, unknown>
+      expect(event).toMatchObject({ status: 'SHIPPED', trackingNumber: awb, shippingProvider: providerName, shipmentId: shipment.id })
+      const bell = buildAdminNotification('order.status_updated', event)
+      expect(bell!.title).toBe('Order Shipped')
+      expect(bell!.message).toContain(`AWB ${awb}`)
+      expect(bell!.metadata).toMatchObject({ trackingNumber: awb, shippingProvider: providerName })
     })
   })
 
@@ -341,11 +361,13 @@ describe('61AG.3.33 runtime verification — real couriers, stubbed transport', 
 
   describe('PART 8: the exact pickup_datetime Paxel would receive', () => {
     it.each([
-      ['08:00', '2026-09-05T01:00:00.000Z', '2026-09-05 19:00:00'],
-      ['16:59', '2026-09-05T09:59:00.000Z', '2026-09-05 19:00:00'],
-      ['17:00', '2026-09-05T10:00:00.000Z', '2026-09-05 19:00:00'],
-      ['17:01', '2026-09-05T10:01:00.000Z', '2026-09-06 19:00:00'],
-      ['22:00', '2026-09-05T15:00:00.000Z', '2026-09-06 19:00:00'],
+      ['08:00', '2026-09-05T01:00:00.000Z', '2026-09-05 17:00:00'],
+      ['14:59', '2026-09-05T07:59:00.000Z', '2026-09-05 17:00:00'],
+      ['15:00', '2026-09-05T08:00:00.000Z', '2026-09-05 17:00:00'],
+      ['15:01', '2026-09-05T08:01:00.000Z', '2026-09-06 17:00:00'],
+      // 17:00 is the PICKUP time, not the cut-off: a verification then is next-day.
+      ['17:00', '2026-09-05T10:00:00.000Z', '2026-09-06 17:00:00'],
+      ['22:00', '2026-09-05T15:00:00.000Z', '2026-09-06 17:00:00'],
     ])('verified at %s WIB -> %s', async (_label, verifiedAtIso, expectedWire) => {
       const { order, payment } = await seed(PaymentMethod.BANK_TRANSFER, 'paxel', 'PAXEL_SAMEDAY')
       const { shipments, paxelCalls } = stack({ awb: 'PXL-CUTOFF' })

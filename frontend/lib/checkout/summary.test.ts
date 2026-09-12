@@ -53,6 +53,31 @@ test('checkout renders backend-provided Biaya Layanan without calculating it its
   assert.equal(rows.find((r) => r.key === 'grand_total')?.value, 105777)
 })
 
+test('PAYMENT_SERVICE_FEE_ENABLED=false: gateway checkout shows "Biaya Layanan Rp0" and the backend total', () => {
+  const rows = checkoutSummaryRows({
+    subtotal: 100000, shipping_cost: 15000, discount: 10000,
+    payment_service_fee: 0, payment_service_fee_applies: true, grand_total: 105000,
+  } as never)
+  assert.deepEqual(rows.find((r) => r.key === 'payment_service_fee'), { key: 'payment_service_fee', label: 'Biaya Layanan', value: 0 })
+  assert.equal(rowValue(rows, 'grand_total'), 105000)
+})
+
+test('PAYMENT_SERVICE_FEE_ENABLED=true: gateway checkout shows the charged fee in the backend total', () => {
+  const rows = checkoutSummaryRows({
+    subtotal: 100000, shipping_cost: 15000, discount: 10000,
+    payment_service_fee: 4000, payment_service_fee_applies: true, grand_total: 109000,
+  } as never)
+  assert.equal(rowValue(rows, 'payment_service_fee'), 4000)
+  assert.equal(rowValue(rows, 'grand_total'), 109000)
+})
+
+test('manual transfer shows no "Biaya Layanan" row at all', () => {
+  const rows = checkoutSummaryRows({
+    subtotal: 100000, shipping_cost: 15000, discount: 0, payment_service_fee: 0, payment_service_fee_applies: false, grand_total: 115000,
+  } as never)
+  assert.ok(!hasRow(rows, 'payment_service_fee'))
+})
+
 // Created-order fixture (POST /checkout/order response).
 const paidOrder = {
   totalPrice: 130000,

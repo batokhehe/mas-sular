@@ -67,13 +67,13 @@ export class RedriveService {
   // A. OutboxEvent FAILED -> PENDING
   async redriveFailedOutboxEvents(filter: OutboxRedriveFilter = {}): Promise<RedriveResult> {
     const { where, params } = buildOutboxWhere(filter);
-    return this.redriveFailedRows('OutboxEvent', '`OutboxEvent`', 'outbox', where, params, filter);
+    return this.redriveFailedRows('OutboxEvent', `"OutboxEvent"`, 'outbox', where, params, filter);
   }
 
   // B. NotificationOutbox FAILED -> PENDING
   async redriveFailedNotifications(filter: NotificationRedriveFilter = {}): Promise<RedriveResult> {
     const { where, params } = buildNotificationWhere(filter);
-    return this.redriveFailedRows('NotificationOutbox', '`NotificationOutbox`', 'notification', where, params, filter);
+    return this.redriveFailedRows('NotificationOutbox', `"NotificationOutbox"`, 'notification', where, params, filter);
   }
 
   private async redriveFailedRows(
@@ -97,9 +97,11 @@ export class RedriveService {
     for (let batch = 0; batch < maxBatches; batch += 1) {
       const affected = Number(
         await this.prisma.$executeRawUnsafe(
-          `UPDATE ${table} SET \`status\` = 'PENDING', \`attempts\` = 0, \`nextAttemptAt\` = ?, ` +
-            '`lockedUntil` = NULL, `lockedBy` = NULL, `lastError` = NULL ' +
-            `WHERE ${where} LIMIT ${limit}`,
+          // PostgreSQL: no LIMIT on UPDATE, so the batch is chosen by a sub-select on
+          // ctid. `now` is $1, so the caller-supplied predicate is renumbered from $2.
+          `UPDATE ${table} SET "status" = 'PENDING', "attempts" = 0, "nextAttemptAt" = $1, ` +
+            '"lockedUntil" = NULL, "lockedBy" = NULL, "lastError" = NULL ' +
+            `WHERE ctid IN (SELECT ctid FROM ${table} WHERE ${pgParams(where, 2)} LIMIT ${limit})`,
           now,
           ...whereParams,
         ),
@@ -161,7 +163,7 @@ export class RedriveService {
 
   private async countMatching(table: string, where: string, params: unknown[]): Promise<number> {
     const rows = await this.prisma.$queryRawUnsafe<Array<{ c: number | bigint }>>(
-      `SELECT COUNT(*) AS c FROM ${table} WHERE ${where}`,
+      `SELECT COUNT(*) AS c FROM ${table} WHERE ${pgParams(where, 1)}`,
       ...params,
     );
     return Number(rows[0]?.c ?? 0);
@@ -172,53 +174,66 @@ export class RedriveService {
   }
 }
 
+/**
+ * Renumber MySQL-style `?` placeholders into PostgreSQL `$n`, starting at `start`.
+ *
+ * The predicate builders below stay placeholder-agnostic because the SAME `where`
+ * string is used by two queries with different parameter offsets: the redrive
+ * UPDATE binds `now` as $1 and so starts its predicate at $2, while the dry-run
+ * COUNT has no leading parameter and starts at $1.
+ */
+function pgParams(sql: string, start: number): string {
+  let i = start;
+  return sql.replace(/\?/g, () => `$${i++}`);
+}
+
 function buildOutboxWhere(f: OutboxRedriveFilter): { where: string; params: unknown[] } {
-  const parts = ["`status` = 'FAILED'"];
+  const parts = [`"status" = 'FAILED'`];
   const params: unknown[] = [];
   if (f.id) {
-    parts.push('`id` = ?');
+    parts.push('"id" = ?');
     params.push(f.id);
   }
   if (f.eventName) {
-    parts.push('`eventName` = ?');
+    parts.push('"eventName" = ?');
     params.push(f.eventName);
   }
   if (f.createdAfter) {
-    parts.push('`createdAt` >= ?');
+    parts.push('"createdAt" >= ?');
     params.push(f.createdAfter);
   }
   if (f.createdBefore) {
-    parts.push('`createdAt` < ?');
+    parts.push('"createdAt" < ?');
     params.push(f.createdBefore);
   }
   return { where: parts.join(' AND '), params };
 }
 
 function buildNotificationWhere(f: NotificationRedriveFilter): { where: string; params: unknown[] } {
-  const parts = ["`status` = 'FAILED'"];
+  const parts = [`"status" = 'FAILED'`];
   const params: unknown[] = [];
   if (f.id) {
-    parts.push('`id` = ?');
+    parts.push('"id" = ?');
     params.push(f.id);
   }
   if (f.ids && f.ids.length > 0) {
-    parts.push(`\`id\` IN (${f.ids.map(() => '?').join(', ')})`);
+    parts.push(`"id" IN (${f.ids.map(() => '?').join(', ')})`);
     params.push(...f.ids);
   }
   if (f.template) {
-    parts.push('`template` = ?');
+    parts.push('"template" = ?');
     params.push(f.template);
   }
   if (f.channel) {
-    parts.push('`channel` = ?');
+    parts.push('"channel" = ?::"NotificationChannel"');
     params.push(f.channel);
   }
   if (f.createdAfter) {
-    parts.push('`createdAt` >= ?');
+    parts.push('"createdAt" >= ?');
     params.push(f.createdAfter);
   }
   if (f.createdBefore) {
-    parts.push('`createdAt` < ?');
+    parts.push('"createdAt" < ?');
     params.push(f.createdBefore);
   }
   return { where: parts.join(' AND '), params };

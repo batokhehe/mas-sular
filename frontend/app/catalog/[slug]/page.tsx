@@ -102,8 +102,6 @@ export default function ProductDetailPage() {
                 <dl className="grid grid-cols-2 gap-2 text-sm">
                   <dt className="text-muted-foreground">Stock</dt>
                   <dd>{product.stock > 0 ? `${product.stock} available` : 'Out of stock'}</dd>
-                  <dt className="text-muted-foreground">SKU</dt>
-                  <dd>{product.sku}</dd>
                 </dl>
 
                 <div>

@@ -1,5 +1,5 @@
 /**
- * Phase 5C — webhook idempotency against REAL MySQL.
+ * Phase 5C — webhook idempotency against REAL PostgreSQL.
  *
  * The unit suite proves the algorithm against a Prisma double. These specs prove the
  * part a double cannot: that the DATABASE enforces the invariant. Concurrent
@@ -48,7 +48,7 @@ const notification = (providerOrderId: string, gatewayTransactionId: string, ove
   ...over,
 })
 
-describe('Phase 5C. Webhook idempotency (real MySQL)', () => {
+describe('Phase 5C. Webhook idempotency (real PostgreSQL)', () => {
   it('first delivery records one event and refreshes the ledger snapshot', async () => {
     const orderId = `BMS-${randomUUID().slice(0, 8)}-aaaaaaaa`
     const { gtx, scenario } = await attempt(orderId)

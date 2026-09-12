@@ -81,9 +81,33 @@ const JNE: Record<string, ShipmentStatus> = {
   DELIVERED: ShipmentStatus.DELIVERED,
   POD: ShipmentStatus.DELIVERED,
   CANCELLED: ShipmentStatus.CANCELLED,
+  // KNOWN GAP - the tracking poller cannot tell a failed PICKUP from a failed shipment.
+  // The JNE tracking adapter exposes one free-text field, `cnote.pod_status`, and no
+  // JNE tracking status vocabulary exists in this codebase (these generic words carry
+  // no cited JNE source; the only real sample is 'DELIVERED'). So a pod_status of
+  // FAILED / RETURNED / UNDELIVERED stays the terminal FAILED it always was, even though
+  // the JNE WEBHOOK records FAILED PICKUP without a transition. Reconciling the two
+  // needs JNE's documented pod_status values (or a sandbox capture); inventing a
+  // mapping here could either fail a live parcel or hide a real failure.
+  // Pinned by test/unit/jne-poller-failure-vocabulary.spec.ts.
   FAILED: ShipmentStatus.FAILED,
   RETURNED: ShipmentStatus.FAILED,
   UNDELIVERED: ShipmentStatus.FAILED,
+
+  // --- JNE Webhook Status V2 summary statuses (documented) ---
+  // DELIVERED is shared with the list above.
+  SUCCESS_PICKUP: ShipmentStatus.PICKED_UP,
+  SHIPPED: ShipmentStatus.IN_TRANSIT, // in JNE's network, not yet delivered
+  // No returned state exists; FAILED is the existing precedent for a parcel going back
+  // to the sender (Paxel RTN, JNE RETURNED above) - the delivery has definitively failed.
+  RETURN_TO_SHIPPER: ShipmentStatus.FAILED,
+  // Deliberately ABSENT - both fall through to UNKNOWN, so the shipment keeps its last
+  // known state and the JNE webhook records the event instead of guessing:
+  //   FAILED PICKUP     an unsuccessful pickup ATTEMPT, not a failed shipment. FAILED is
+  //                     terminal (tracking stops; a later SUCCESS PICKUP or DELIVERED could
+  //                     never apply) and would tell the customer "gagal dikirim".
+  //   SHIPMENT PROBLEM  JNE does not say whether it is terminal; FAILED would end tracking
+  //                     and an in-transit state would hide the problem.
 };
 
 const DICTIONARIES: Record<string, Record<string, ShipmentStatus>> = { paxel: PAXEL, jne: JNE };

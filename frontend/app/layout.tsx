@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import { Plus_Jakarta_Sans, Geist_Mono } from 'next/font/google'
-import { Analytics } from '@vercel/analytics/next'
+import { SiteAnalytics } from '@/components/analytics'
 import { ThemeProvider } from '@/components/theme-provider'
 import { Providers } from '@/app/providers'
 import { Toaster } from 'sonner'
@@ -57,7 +57,7 @@ export default function RootLayout({
             <Toaster position="top-center" richColors />
           </ThemeProvider>
         </Providers>
-        {process.env.NODE_ENV === 'production' && <Analytics />}
+        {process.env.NODE_ENV === 'production' && <SiteAnalytics />}
       </body>
     </html>
   )

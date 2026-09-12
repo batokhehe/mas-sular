@@ -1,5 +1,5 @@
 /**
- * Integration "world": real MySQL + RabbitMQ via Testcontainers, real Prisma,
+ * Integration "world": real PostgreSQL + RabbitMQ via Testcontainers, real Prisma,
  * real RabbitConnectionManager, and the real relay / consumers / lifecycle worker
  * (NO mocks). Constructed once (singleton) and shared across the integration specs
  * (jest runs them with maxWorkers=1). Containers are reaped by Testcontainers' Ryuk
@@ -10,7 +10,7 @@
 import { execSync } from 'node:child_process'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { MySqlContainer, StartedMySqlContainer } from '@testcontainers/mysql'
+import { PostgreSqlContainer, StartedPostgreSqlContainer } from '@testcontainers/postgresql'
 import { RabbitMQContainer, StartedRabbitMQContainer } from '@testcontainers/rabbitmq'
 import type { Order, Payment } from '@prisma/client'
 
@@ -43,7 +43,7 @@ export interface IntegrationWorld {
   cancellation: OrderCancellationService
   admin: AdminService
   payments: PaymentsService
-  mysql: StartedMySqlContainer
+  postgres: StartedPostgreSqlContainer
   rabbitmq: StartedRabbitMQContainer
 }
 
@@ -55,14 +55,14 @@ export function getWorld(): Promise<IntegrationWorld> {
 }
 
 async function boot(): Promise<IntegrationWorld> {
-  const mysql = await new MySqlContainer('mysql:8.4')
+  const postgres = await new PostgreSqlContainer('postgres:16-alpine')
     .withDatabase('app')
     .withUsername('app')
-    .withUserPassword('app')
+    .withPassword('app')
     .start()
   const rabbitmq = await new RabbitMQContainer('rabbitmq:3.13-management').start()
 
-  const databaseUrl = mysql.getConnectionUri()
+  const databaseUrl = postgres.getConnectionUri()
   const amqpUrl = rabbitmq.getAmqpUrl()
   process.env.DATABASE_URL = databaseUrl
   process.env.RABBITMQ_URL = amqpUrl
@@ -132,7 +132,7 @@ async function boot(): Promise<IntegrationWorld> {
     cancellation,
     admin,
     payments,
-    mysql,
+    postgres,
     rabbitmq,
   }
 }
@@ -165,6 +165,13 @@ export interface SeededScenario {
   productId: string
   userId: string
   email: string
+  /**
+   * The phone the seeded address carries. Exposed because the customer-facing
+   * order notifications are WHATSAPP rows addressed to the phone, not the email
+   * (order-created-notification.consumer: `recipient: phone ?? ''`), so a spec
+   * asserting the recipient needs this rather than a hardcoded literal.
+   */
+  phone: string
   order: Order & { payment: Payment | null }
   payment: Payment
 }
@@ -181,9 +188,11 @@ export async function seedScenario(world: IntegrationWorld, opts: SeedOptions = 
     data: { slug: `p-${uid}`, sku: `sku-${uid}`, name: 'Bakso', description: 'x', price: 30000, imageUrl: '/x.png', stock, categoryId: category.id },
   })
   const email = `u-${uid}@test.local`
+  // Hoisted so the address row and the returned scenario cannot drift apart.
+  const phone = '0812345678'
   const user = await prisma.user.create({ data: { email, name: 'Jane' } })
   const address = await prisma.address.create({
-    data: { userId: user.id, label: 'Home', recipientName: 'Jane', phone: '0812345678', fullAddress: 'Jl Test 1', latitude: 0, longitude: 0 },
+    data: { userId: user.id, label: 'Home', recipientName: 'Jane', phone, fullAddress: 'Jl Test 1', latitude: 0, longitude: 0 },
   })
 
   const order = await prisma.order.create({
@@ -209,7 +218,7 @@ export async function seedScenario(world: IntegrationWorld, opts: SeedOptions = 
     include: { payment: true, items: true },
   })
 
-  return { uid, productId: product.id, userId: user.id, email, order, payment: order.payment! }
+  return { uid, productId: product.id, userId: user.id, email, phone, order, payment: order.payment! }
 }
 
 /** Mirror the checkout write (order+payment+outbox order.created) in ONE real transaction. */

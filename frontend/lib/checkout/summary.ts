@@ -26,7 +26,9 @@ export function checkoutSummaryRows(summary: CheckoutSummary): SummaryRow[] {
   if (summary.discount > 0) {
     rows.push({ key: 'discount', label: 'Discount', value: -summary.discount })
   }
-  if (summary.payment_service_fee > 0) {
+  // Gateway payments always show "Biaya Layanan" — Rp0 when the merchant absorbs
+  // the fee. Older responses without the flag fall back to "shown when charged".
+  if (summary.payment_service_fee_applies ?? summary.payment_service_fee > 0) {
     rows.push({ key: 'payment_service_fee', label: 'Biaya Layanan', value: summary.payment_service_fee })
   }
   rows.push({ key: 'grand_total', label: 'Grand total', value: summary.grand_total })

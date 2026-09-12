@@ -60,7 +60,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // so local cleanup always runs afterward.
     await authApi.logout().catch(() => undefined)
     removeLegacyCustomerCookies()
-    qc.removeQueries({ queryKey: qk.me })
+    // Write `null` into the cache; do NOT removeQueries() first. `removeQueries`
+    // destroys the cache entry this provider's mounted `meQuery` observer is bound
+    // to WITHOUT notifying it, and the `setQueryData` below then builds a brand new,
+    // unobserved entry — so the observer kept serving the logged-in user and the
+    // header only showed the logged-out state after a full reload rebuilt it.
+    // Symmetric with `loginWithGoogle` above, which seeds the cache for the same
+    // reason. See lib/auth/logout-cache.test.ts.
     qc.setQueryData(qk.me, null)
   }, [qc])
 

@@ -96,9 +96,13 @@ describe('NotificationSenderWorker', () => {
       const { worker, prisma } = build(cfg({ batchSize: 50 }));
       await worker.processBatch();
       const sql = prisma.$executeRawUnsafe.mock.calls[0][0] as string;
-      expect(sql).toContain('UPDATE `NotificationOutbox`');
-      expect(sql).toContain("`status` = 'PENDING'");
-      expect(sql).toContain('`lockedUntil` IS NULL OR `lockedUntil` < ?'); // lease recovery predicate
+      expect(sql).toContain('UPDATE "NotificationOutbox"');
+      // PostgreSQL claim shape: no ORDER BY/LIMIT on UPDATE, so the batch is a
+      // sub-select, and SKIP LOCKED keeps two workers off the same rows.
+      expect(sql).toContain('FOR UPDATE SKIP LOCKED');
+      expect(sql).not.toContain('?');
+      expect(sql).toContain(`"status" = 'PENDING'`);
+      expect(sql).toContain('"lockedUntil" IS NULL OR "lockedUntil" < $4'); // lease recovery predicate
       expect(sql).toContain('LIMIT 50');
       const token = prisma.$executeRawUnsafe.mock.calls[0][2] as string;
       expect(prisma.notificationOutbox.findMany.mock.calls[0][0].where.lockedBy).toBe(token);

@@ -5,14 +5,10 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { useQueryClient } from '@tanstack/react-query'
 import { AlertCircle, Loader2 } from 'lucide-react'
 import { useAuth } from '@/lib/auth/auth-context'
+import { safeRedirect } from '@/lib/auth/safe-redirect'
 import { GoogleSignInButton } from '@/components/auth/google-sign-in-button'
 import { qk } from '@/lib/query/keys'
 import type { User } from '@/lib/types/models'
-
-function safeRedirect(value: string | null): string {
-  // Only allow internal paths (avoid open redirects).
-  return value && value.startsWith('/') && !value.startsWith('//') ? value : '/'
-}
 
 function LoginInner() {
   const router = useRouter()
@@ -64,7 +60,7 @@ function LoginInner() {
           </div>
 
           <h1 className="mb-4 text-4xl font-bold leading-tight xl:text-5xl">
-            Bakso Premium
+            Bakso Bumbu Rujak
             <br />
             Langsung ke
             <br />

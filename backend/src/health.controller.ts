@@ -38,9 +38,9 @@ export class HealthController {
 
     try {
       await this.prisma.$queryRaw`SELECT 1`;
-      checks.mysql = 'ok';
+      checks.postgres = 'ok';
     } catch (error) {
-      checks.mysql = 'failed';
+      checks.postgres = 'failed';
     }
 
     try {

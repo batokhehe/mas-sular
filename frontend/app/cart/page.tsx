@@ -6,16 +6,22 @@ import { StorefrontShell } from '@/components/storefront/shell'
 import { Empty } from '@/components/common/empty'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Separator } from '@/components/ui/separator'
 import { formatIDR } from '@/lib/utils/format'
-import { useCartStore, cartSubtotal } from '@/lib/stores/cart-store'
+import { useCartStore, selectedLines, selectedSubtotal } from '@/lib/stores/cart-store'
 
 export default function CartPage() {
   const lines = useCartStore((s) => s.lines)
   const setQty = useCartStore((s) => s.setQty)
   const remove = useCartStore((s) => s.remove)
   const clear = useCartStore((s) => s.clear)
-  const subtotal = cartSubtotal(lines)
+  const setSelected = useCartStore((s) => s.setSelected)
+  const setAllSelected = useCartStore((s) => s.setAllSelected)
+  // P2 #6: only ticked lines go to checkout, and only they count in the subtotal.
+  const selectedCount = selectedLines(lines).length
+  const allSelected = lines.length > 0 && selectedCount === lines.length
+  const subtotal = selectedSubtotal(lines)
 
   if (lines.length === 0) {
     return (
@@ -49,10 +55,31 @@ export default function CartPage() {
         <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
           {/* Items */}
           <div className="space-y-3">
+            <div className="flex items-center gap-3 px-1">
+              <Checkbox
+                id="cart-select-all"
+                checked={allSelected}
+                onCheckedChange={(checked) => setAllSelected(checked === true)}
+              />
+              <label htmlFor="cart-select-all" className="cursor-pointer text-sm font-medium">
+                Select all
+              </label>
+              <span className="text-sm text-muted-foreground">
+                ({selectedCount} of {lines.length} selected)
+              </span>
+            </div>
             {lines.map((line) => (
               <Card key={line.productId} className="flex gap-4 p-4">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={line.imageUrl} alt={line.name} className="size-20 shrink-0 rounded-xl object-cover" />
+                <div className="flex items-center gap-3">
+                  <Checkbox
+                    className="size-5"
+                    checked={line.selected}
+                    onCheckedChange={(checked) => setSelected(line.productId, checked === true)}
+                    aria-label={`Select ${line.name}`}
+                  />
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={line.imageUrl} alt={line.name} className="size-20 shrink-0 rounded-xl object-cover" />
+                </div>
                 <div className="flex flex-1 flex-col">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
@@ -108,19 +135,33 @@ export default function CartPage() {
             <Card className="space-y-4 p-5">
               <h2 className="font-semibold">Order summary</h2>
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Subtotal ({lines.length} items)</span>
+                <span className="text-muted-foreground">
+                  Subtotal ({selectedCount} of {lines.length} items)
+                </span>
                 <span className="font-medium">{formatIDR(subtotal)}</span>
               </div>
               <p className="text-xs text-muted-foreground">
                 Shipping and discounts are calculated by the server at checkout.
               </p>
               <Separator />
-              <Button asChild size="lg" className="w-full rounded-full">
-                <Link href="/checkout">
-                  Proceed to checkout
-                  <ChevronRight className="ml-1 size-4" />
-                </Link>
-              </Button>
+              {selectedCount > 0 ? (
+                <Button asChild size="lg" className="w-full rounded-full">
+                  <Link href="/checkout">
+                    Proceed to checkout
+                    <ChevronRight className="ml-1 size-4" />
+                  </Link>
+                </Button>
+              ) : (
+                <>
+                  <Button size="lg" className="w-full rounded-full" disabled>
+                    Proceed to checkout
+                    <ChevronRight className="ml-1 size-4" />
+                  </Button>
+                  <p role="status" className="text-center text-sm text-muted-foreground">
+                    Select at least one item to check out.
+                  </p>
+                </>
+              )}
             </Card>
           </div>
         </div>

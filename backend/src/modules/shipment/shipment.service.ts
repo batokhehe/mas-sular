@@ -5,11 +5,14 @@ import { NotificationChannel, OrderStatus, Prisma, ShipmentStatus } from '@prism
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../database/prisma.service';
 import { orderStatusSourcesFor } from '../orders/domain/order-status-transitions';
+import { decideShipmentTransition } from './domain/shipment-transition';
+import { recordRejectedObservation } from './shipment-observation.recorder';
 import { CreateShipmentInput, ShipmentItem } from './domain/shipment-provider.interface';
 import { ShipmentProviderFactory } from './shipment-provider.factory';
 import { trackingCacheKey } from './shipment-sync.service';
 import { readPickupDatetime, readShipmentMetadata, withPickupDatetime } from './shipment-metadata';
 import { PaxelPickupScheduler } from './paxel-pickup-scheduler';
+import { buildOutboxEvent } from '../../infrastructure/outbox/outbox-event.builder';
 
 /** Region names only; ids mean nothing to a courier. */
 const ADDRESS_REGION_NAMES = {
@@ -178,6 +181,15 @@ export class ShipmentService {
       }
     }
 
+    // JNE has no pickup contract - `generatecnote` carries no pickup field - yet the
+    // shop's single pickup rule applies to it all the same (P1 #13), so the slot is
+    // RECORDED on the shipment for operations. Informational only: it never reaches
+    // the JNE payload (`pickupAtIso` above stays Paxel's) and can never block or fail
+    // the booking. An already-recorded slot is kept, never recomputed.
+    if (provider.name === 'jne' && !readPickupDatetime(shipment.metadata, 'jne')) {
+      await this.recordJnePickupSlot(shipment.id, order.payment?.verifiedAt ?? null, orderId);
+    }
+
     // CAS-claim the booking BEFORE the courier call (audit F3): exactly one caller
     // (verify auto-create / admin retry / reconciliation worker) flips the row to
     // PENDING; everyone else loses the claim and never reaches the provider — no
@@ -288,6 +300,32 @@ export class ShipmentService {
           service: order.shippingServiceName ?? order.shippingService ?? shipment.service,
           tracking: result.trackingNumber,
         });
+        // P1 #15: the order's SHIPPED transition, announced on the same contract an
+        // admin-driven transition uses, so the admin "Order Shipped" notification
+        // fires for automatic bookings too - carrying the OFFICIAL AWB the courier
+        // just returned. Inside this branch on purpose: it commits atomically with
+        // the CAS'd SHIPPED flip, so it is emitted exactly once, never on a failed
+        // booking, and never for an order cancelled while the courier call was in
+        // flight. Only the admin consumer listens to it (the customer's shipped
+        // WhatsApp is the row enqueued above), so nobody is notified twice.
+        await tx.outboxEvent.create({
+          data: buildOutboxEvent({
+            aggregateType: 'order',
+            aggregateId: order.id,
+            eventName: 'order.status_updated',
+            exchange: 'orders',
+            routingKey: 'order.status_updated',
+            payload: {
+              orderId: order.id,
+              orderNumber: order.orderNumber,
+              status: OrderStatus.SHIPPED,
+              shipmentId: shipment.id,
+              trackingNumber: result.trackingNumber,
+              shippingProvider: providerName,
+            },
+            metadata: { source: 'shipment.auto_booking' },
+          }),
+        });
       } else {
         this.logger.warn({ event: 'shipment.order_not_shippable', orderId: order.id, tracking: result.trackingNumber });
       }
@@ -317,6 +355,39 @@ export class ShipmentService {
    * leave the schedule intact, so the retry books the SAME appointment rather
    * than computing a new one against a later clock.
    */
+  /**
+   * Record the shop-wide pickup slot on a JNE shipment (P1 #13). Never throws: a
+   * missing verification time, or any failure while recording, is logged and the
+   * booking proceeds exactly as it did before the rule existed. Merges into
+   * metadata like every other write here, so failure diagnostics survive.
+   */
+  private async recordJnePickupSlot(shipmentId: string, verifiedAt: Date | null, orderId: string): Promise<void> {
+    if (!this.pickupScheduler) return;
+    if (!verifiedAt) {
+      this.logger.warn({ event: 'shipment.pickup_reference_missing', orderId, provider: 'jne' });
+      return;
+    }
+    try {
+      const pickupAtIso = this.pickupScheduler.resolvePolicyIso(verifiedAt);
+      const current = await this.prisma.shipment.findUnique({
+        where: { id: shipmentId },
+        select: { metadata: true },
+      });
+      await this.prisma.shipment.update({
+        where: { id: shipmentId },
+        data: { metadata: withPickupDatetime(current?.metadata, pickupAtIso, 'jne') },
+      });
+      this.logger.log({ event: 'shipment.pickup_recorded', orderId, provider: 'jne', pickupAtIso });
+    } catch (err) {
+      this.logger.warn({
+        event: 'shipment.pickup_record_failed',
+        orderId,
+        provider: 'jne',
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   private async scheduleAutomaticPickup(
     shipmentId: string,
     verifiedAt: Date | null,
@@ -519,11 +590,31 @@ export class ShipmentService {
         const result = await provider.trackShipment(shipment.trackingNumber);
         if (result.status === shipment.status) continue;
 
-        await this.prisma.$transaction(async (tx) => {
-          await tx.shipment.update({
-            where: { id: shipment.id },
+        // Backward protection - the same shared rule as ShipmentSyncService and the
+        // JNE webhook: a stale answer never moves a shipment backwards or out of a
+        // terminal state; it is recorded instead of applied.
+        const decision = decideShipmentTransition({ current: shipment.status, target: result.status });
+        if (!decision.apply) {
+          await recordRejectedObservation(this.prisma, shipment.id, {
+            source: 'poll',
+            provider: shipment.provider,
+            // trackShipment returns an already-mapped status, not the courier's word.
+            providerStatus: result.status,
+            mappedStatus: result.status,
+            shipmentStatus: shipment.status,
+            reason: decision.reason,
+          });
+          continue;
+        }
+
+        const moved = await this.prisma.$transaction(async (tx) => {
+          // CAS on the status this poll READ: a concurrent move (e.g. a JNE webhook)
+          // wins, and this stale poll then writes nothing.
+          const claimed = await tx.shipment.updateMany({
+            where: { id: shipment.id, status: shipment.status },
             data: { status: result.status, providerPayload: this.json(result.rawPayload) },
           });
+          if (claimed.count !== 1) return false;
           if (result.status === ShipmentStatus.DELIVERED) {
             // Legal-transition CAS (audit F4): never resurrect a CANCELLED order.
             const flip = await tx.order.updateMany({
@@ -547,8 +638,9 @@ export class ShipmentService {
               });
             }
           }
+          return true;
         });
-        updated += 1;
+        if (moved) updated += 1;
       } catch (err) {
         this.logger.warn({ event: 'shipment.track_failed', shipmentId: shipment.id, error: err instanceof Error ? err.message : String(err) });
       }

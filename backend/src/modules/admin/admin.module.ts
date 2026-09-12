@@ -18,11 +18,13 @@ import { AdminService } from './admin.service';
 import { CustomerCommunicationService } from './customer-communication.service';
 import { ExecutiveDashboardService } from './executive-dashboard.service';
 import { AdminOrderNotesService } from './admin-order-notes.service';
+import { InvoicesModule } from '../invoices/invoices.module';
+import { AdminInvoiceLinkService } from './admin-invoice-link.service';
 
 @Module({
-  imports: [ShipmentModule, LifecycleModule, PaymentSettlementModule],
+  imports: [ShipmentModule, LifecycleModule, PaymentSettlementModule, InvoicesModule],
   controllers: [AdminCatalogController, AdminCmsController, AdminOperationsController, AdminSystemLogController, AdminQueueController, AdminIncidentController, AdminNotificationCenterController, AdminCommunicationController, AdminAuditController, AdminBellController, AdminPushController],
-  providers: [AdminService, ExecutiveDashboardService, AdminOrderNotesService, OrderCancellationService, CustomerCommunicationService, PermissionGuard],
+  providers: [AdminService, ExecutiveDashboardService, AdminOrderNotesService, OrderCancellationService, CustomerCommunicationService, AdminInvoiceLinkService, PermissionGuard],
   exports: [AdminService],
 })
 export class AdminModule {}

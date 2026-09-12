@@ -5,6 +5,9 @@ import { JneOriginBootValidator } from './jne-origin-boot.validator';
 import { PaxelShipmentProvider } from './infrastructure/providers/paxel-shipment.provider';
 import { PaxelPickupScheduler } from './paxel-pickup-scheduler';
 import { ShipmentAdminController } from './presentation/shipment-admin.controller';
+import { JneWebhookController } from './presentation/jne-webhook.controller';
+import { JNE_WEBHOOK_CONFIG, loadJneWebhookConfig } from './jne-webhook.config';
+import { JneWebhookService } from './jne-webhook.service';
 import { SHIPMENT_PROVIDERS, ShipmentProviderFactory } from './shipment-provider.factory';
 import { SHIPMENT_TRACKING_CONFIG, loadShipmentTrackingConfig } from './shipment-tracking.config';
 import { ShipmentTrackingWorker } from './shipment-tracking.worker';
@@ -16,7 +19,7 @@ import { ShipmentStatusMapper } from './shipment-status.mapper';
 import { ShipmentSyncService } from './shipment-sync.service';
 
 @Module({
-  controllers: [ShipmentAdminController],
+  controllers: [ShipmentAdminController, JneWebhookController],
   providers: [
     // Provider credentials (same env as quotation; env.validation asserts at boot).
     //
@@ -59,6 +62,9 @@ import { ShipmentSyncService } from './shipment-sync.service';
     ShipmentReconciliationMetrics,
     { provide: SHIPMENT_RECONCILIATION_CONFIG, useFactory: () => loadShipmentReconciliationConfig() },
     ShipmentReconciliationWorker,
+    // JNE Webhook Status V2 (inbound pushes). Off unless JNE_WEBHOOK_ENABLED=true.
+    { provide: JNE_WEBHOOK_CONFIG, useFactory: () => loadJneWebhookConfig() },
+    JneWebhookService,
   ],
   exports: [ShipmentService, ShipmentSyncService, ShipmentStatusMapper],
 })

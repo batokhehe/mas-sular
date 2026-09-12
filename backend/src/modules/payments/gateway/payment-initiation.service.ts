@@ -1,13 +1,16 @@
-import { ConflictException, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { ConflictException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { GatewayTransactionStatus, PaymentMethod, PaymentStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../database/prisma.service';
 import { LogService } from '../../../infrastructure/logging/log.service';
 import { PaymentChannelDescriptor } from './domain/payment-channel';
-import { ChargeResult, ProviderStatus } from './domain/payment-provider.interface';
+import { amountBreakdownOf, ChargeResult, ProviderStatus } from './domain/payment-provider.interface';
 import { CheckoutGatewayPayload, buildGatewayPayloadFromLedger } from './domain/payment-instruction.builder';
 import { PaymentGatewayPersistenceService } from './payment-gateway-persistence.service';
+import { PaymentAttemptPricingService } from './payment-attempt-pricing.service';
 import { PaymentChannelRegistry } from './payment-channel.registry';
 import { PaymentProviderFactory } from './payment-provider.factory';
+import { calculatePaymentServiceFee } from './domain/payment-service-fee';
+import { loadPaymentServiceFeeConfig, PAYMENT_SERVICE_FEE_CONFIG, PaymentServiceFeeConfig } from './payment-service-fee.config';
 
 /** Provider name assumed for rows created before gateways existed (Payment.provider is null). */
 const DEFAULT_PROVIDER = 'manual';
@@ -38,11 +41,11 @@ export interface PaymentInstructionsResult {
  * Phase 2 flow: validate payment → resolve channel → open a PENDING ledger row →
  * call the provider → persist the provider response → return the ChargeResult.
  *
- * It writes ONLY to PaymentGatewayTransaction. The `Payment` row is never touched
- * here: moving a payment to PAID/FAILED remains the exclusive job of the existing
- * CAS-guarded flows (admin verify/reject, expiry worker). Nothing calls
- * `initiate()` yet — no endpoint is exposed until a later phase — so the live
- * manual-transfer flow is completely unaffected.
+ * It never changes a payment's STATUS: moving a payment to PAID/FAILED remains
+ * the exclusive job of the existing CAS-guarded flows (admin verify/reject,
+ * expiry worker, webhook applier). The one Payment/Order write it can cause is a
+ * gateway attempt's payable amount + fee breakdown (PaymentAttemptPricingService,
+ * PENDING payments only). A manual transfer writes only the ledger, as before.
  */
 @Injectable()
 export class PaymentInitiationService {
@@ -52,6 +55,11 @@ export class PaymentInitiationService {
     private readonly providers: PaymentProviderFactory,
     private readonly ledger: PaymentGatewayPersistenceService,
     @Optional() private readonly logs?: LogService,
+    // PAYMENT_SERVICE_FEE_ENABLED (who bears the fee). Optional for positional test
+    // construction; absent -> read from the environment (default: merchant absorbs).
+    @Optional() @Inject(PAYMENT_SERVICE_FEE_CONFIG) private readonly feeConfig?: PaymentServiceFeeConfig,
+    // Opens gateway attempts with their fee. Optional for positional test construction.
+    @Optional() private readonly pricing?: PaymentAttemptPricingService,
   ) {}
 
   /**
@@ -72,6 +80,10 @@ export class PaymentInitiationService {
         order: {
           select: {
             orderNumber: true,
+            // Fee-exclusive base = totalPrice - paymentServiceFee (the invariant every
+            // writer keeps): subtotal + shipping - discount, untouched by the fee.
+            totalPrice: true,
+            paymentServiceFee: true,
             user: { select: { name: true, email: true, phone: true } },
           },
         },
@@ -85,18 +97,52 @@ export class PaymentInitiationService {
     const { channel, provider } = this.channels.resolve(channelCode);
     this.assertMethodMatches(channel, payment.method);
 
+    // The AUTHORITATIVE payment service fee, for the channel actually being
+    // initiated — never the checkout-time preview, which may have been for another
+    // channel. Gateway payments only; a manual transfer carries no gateway fee.
+    const transactionBase = payment.order.totalPrice - payment.order.paymentServiceFee;
+    if (payment.method === PaymentMethod.GATEWAY && !(Number.isInteger(transactionBase) && transactionBase > 0)) {
+      // Never open (or charge) a gateway attempt for a zero/invalid amount.
+      throw new ConflictException('Payment has no valid amount to charge');
+    }
+    const fee =
+      payment.method === PaymentMethod.GATEWAY
+        ? calculatePaymentServiceFee({
+            paymentChannel: channel.code,
+            transactionBase,
+            feeEnabled: (this.feeConfig ?? loadPaymentServiceFeeConfig()).enabled,
+          })
+        : null;
+
     // 3. Open the ledger row BEFORE calling the provider, so a charge that
     //    succeeds at the gateway but crashes on the way back is still traceable
     //    (the same "record the attempt first" rule the outbox and shipment
     //    booking claim already follow). Idempotent per payment+provider+channel.
-    const transaction = await this.ledger.createPendingTransaction({
+    //    A new gateway attempt records its fee snapshot and moves the payable
+    //    amount to it atomically; a replayed live attempt keeps its own snapshot.
+    const attempt = {
       paymentId: payment.id,
       provider: provider.name,
       channelCode: channel.code,
-      grossAmount: payment.amount,
       providerOrderId: payment.order.orderNumber,
       metadata: { method: payment.method, channel: channel.code },
-    });
+    };
+    const transaction = fee
+      ? await (this.pricing ?? new PaymentAttemptPricingService(this.prisma)).openPricedAttempt({
+          ...attempt,
+          grossAmount: fee.customerTotal,
+          serviceFee: {
+            orderId: payment.orderId,
+            baseAmount: fee.transactionBase,
+            calculatedFee: fee.calculatedFee,
+            customerFee: fee.customerFee,
+            merchantAbsorbedFee: fee.merchantAbsorbedFee,
+            feeEnabled: fee.feeEnabled,
+            channel: channel.code,
+            rule: fee.rule as unknown as Prisma.InputJsonValue | null,
+          },
+        })
+      : await this.ledger.createPendingTransaction({ ...attempt, grossAmount: payment.amount });
 
     // 4. Call the provider (manual transfer performs no external I/O).
     let result: ChargeResult;
@@ -105,7 +151,9 @@ export class PaymentInitiationService {
         paymentId: payment.id,
         orderId: payment.orderId,
         orderNumber: payment.order.orderNumber,
-        amount: payment.amount,
+        // Exactly the amount recorded on this attempt — the same figure webhook and
+        // reconciliation amount checks validate against.
+        amount: transaction.grossAmount,
         channel: channel.code,
         customer: {
           name: payment.order.user?.name ?? null,
@@ -152,7 +200,10 @@ export class PaymentInitiationService {
       metadata: { provider: provider.name, channel: channel.code, status: result.status, gatewayTransactionId: transaction.id },
     });
 
-    return result;
+    // Customer-facing amount breakdown of THIS attempt (never the merchant's absorbed
+    // share). Absent for manual transfer and for attempts recorded before snapshots.
+    const breakdown = amountBreakdownOf(transaction);
+    return breakdown ? { ...result, amountBreakdown: breakdown } : result;
   }
 
   /**

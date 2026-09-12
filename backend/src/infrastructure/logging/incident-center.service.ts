@@ -231,8 +231,8 @@ export class IncidentCenterService {
   private async requestSignals(since: Date) {
     try {
       const rows = await this.prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
-        SELECT COUNT(*) count, SUM(statusCode >= 500) errors FROM \`SystemLog\`
-        WHERE module = 'http' AND createdAt >= ${since}
+        SELECT COUNT(*) count, COUNT(*) FILTER (WHERE "statusCode" >= 500) errors FROM "SystemLog"
+        WHERE module = 'http' AND "createdAt" >= ${since}
       `);
       return { count: num(rows[0]?.count), errors: num(rows[0]?.errors) };
     } catch {
@@ -244,10 +244,10 @@ export class IncidentCenterService {
     try {
       const rows = await this.prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
         SELECT module,
-          SUM(action = 'tick.failed') failures,
-          MAX(CASE WHEN action = 'tick.failed' THEN createdAt END) lastFailure,
-          MAX(CASE WHEN action = 'tick' THEN createdAt END) lastSuccess
-        FROM \`SystemLog\` WHERE module LIKE 'worker.%' AND createdAt >= ${since} GROUP BY module
+          COUNT(*) FILTER (WHERE action = 'tick.failed') failures,
+          MAX("createdAt") FILTER (WHERE action = 'tick.failed') "lastFailure",
+          MAX("createdAt") FILTER (WHERE action = 'tick') "lastSuccess"
+        FROM "SystemLog" WHERE module LIKE 'worker.%' AND "createdAt" >= ${since} GROUP BY module
       `);
       return rows.map((r) => ({
         key: String(r.module).slice('worker.'.length),
@@ -263,9 +263,9 @@ export class IncidentCenterService {
   private async outboxSignals() {
     try {
       const rows = await this.prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
-        SELECT SUM(status = 'PENDING') pending, SUM(status = 'FAILED') failed,
-               MIN(CASE WHEN status = 'PENDING' THEN createdAt END) oldestPending
-        FROM \`OutboxEvent\`
+        SELECT COUNT(*) FILTER (WHERE status = 'PENDING') pending, COUNT(*) FILTER (WHERE status = 'FAILED') failed,
+               MIN("createdAt") FILTER (WHERE status = 'PENDING') "oldestPending"
+        FROM "OutboxEvent"
       `);
       const oldest = rows[0]?.oldestPending ? new Date(rows[0].oldestPending as string) : null;
       return { pending: num(rows[0]?.pending), failed: num(rows[0]?.failed), oldestPendingAgeMs: oldest ? Date.now() - oldest.getTime() : null };
@@ -277,7 +277,7 @@ export class IncidentCenterService {
   private async notificationSignals() {
     try {
       const rows = await this.prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
-        SELECT SUM(status = 'PENDING') pending, SUM(status = 'FAILED') failed FROM \`NotificationOutbox\`
+        SELECT COUNT(*) FILTER (WHERE status = 'PENDING') pending, COUNT(*) FILTER (WHERE status = 'FAILED') failed FROM "NotificationOutbox"
       `);
       return { pending: num(rows[0]?.pending), failed: num(rows[0]?.failed) };
     } catch {
@@ -297,10 +297,10 @@ export class IncidentCenterService {
   private async checkoutP95(since: Date): Promise<number> {
     try {
       const rows = await this.prisma.$queryRaw<Array<{ d: unknown }>>(Prisma.sql`
-        SELECT durationMs d FROM \`SystemLog\`
+        SELECT "durationMs" d FROM "SystemLog"
         WHERE module = 'http' AND method = 'POST' AND path LIKE '%/checkout/order'
-          AND durationMs IS NOT NULL AND createdAt >= ${since}
-        ORDER BY durationMs ASC LIMIT 5000
+          AND "durationMs" IS NOT NULL AND "createdAt" >= ${since}
+        ORDER BY "durationMs" ASC LIMIT 5000
       `);
       return percentile(rows.map((r) => num(r.d)), 95);
     } catch {

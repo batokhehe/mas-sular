@@ -34,7 +34,6 @@ const REAL_BODY = JSON.stringify({
 
 const config = (): ShippingConfig =>
   ({
-    originPostalCode: '40111',
     // ON, so "no mock reached checkout" is asserted under the condition that
     // would actually expose one.
     allowMockRates: true,

@@ -24,9 +24,16 @@ export function ProductCard({ product }: { product: Product }) {
 
   return (
     <Card className="flex flex-col overflow-hidden p-0">
-      <Link href={`/catalog/${product.slug}`} className="relative block aspect-square bg-muted">
+      {/*
+        P2 #4: the image area is ALWAYS a square set by the card's width. The <img> is
+        taken out of flow (absolute) so its intrinsic size cannot take part in layout -
+        before, a portrait source image pushed this "square" taller (aspect-ratio is
+        only a preferred size) and the grid row stretched every neighbouring card.
+        object-cover keeps the existing look: fills the square, never distorts.
+      */}
+      <Link href={`/catalog/${product.slug}`} className="relative block aspect-square overflow-hidden bg-muted">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={product.imageUrl} alt={product.name} className="size-full object-cover" />
+        <img src={product.imageUrl} alt={product.name} className="absolute inset-0 size-full object-cover" />
 
         {/* Badges (real flags) */}
         <div className="absolute left-2 top-2 flex flex-col gap-1">

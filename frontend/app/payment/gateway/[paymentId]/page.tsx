@@ -245,6 +245,24 @@ export default function GatewayPaymentPage({ params }: { params: Promise<{ payme
             <InstructionView instruction={gateway.paymentInstruction} expired={countdownDone} />
           </Card>
 
+          {/* Backend-recorded split of this attempt; no client-side money math. */}
+          {gateway.amountBreakdown ? (
+            <Card className="space-y-1 p-4 text-sm">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Total pesanan</span>
+                <span>{formatIDR(gateway.amountBreakdown.baseAmount)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Biaya Layanan</span>
+                <span>{formatIDR(gateway.amountBreakdown.serviceFee)}</span>
+              </div>
+              <div className="flex justify-between border-t pt-1 font-semibold">
+                <span>Total pembayaran</span>
+                <span>{formatIDR(gateway.amountBreakdown.total)}</span>
+              </div>
+            </Card>
+          ) : null}
+
           <Button asChild variant="outline" className="w-full rounded-full">
             <Link href="/orders">Lihat Status Pesanan</Link>
           </Button>

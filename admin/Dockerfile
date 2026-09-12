@@ -30,6 +30,15 @@ ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL} \
     NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+# Production-readiness B4 - the admin URL contract, enforced at BUILD time. The
+# admin client appends request paths straight onto this value, so it must be the
+# API base INCLUDING the version prefix: https://<API_DOMAIN>/api/v1. (The
+# storefront's NEXT_PUBLIC_API_URL is the opposite: the bare origin.) A wrong or
+# empty value used to build fine and ship an admin whose every call 404'd.
+RUN case "${NEXT_PUBLIC_API_URL}" in \
+      http://*/api/v1|https://*/api/v1) ;; \
+      *) echo "ERROR: admin NEXT_PUBLIC_API_URL must be an absolute http(s) URL ending in /api/v1, got '${NEXT_PUBLIC_API_URL}'"; exit 1 ;; \
+    esac
 RUN pnpm build
 # Fail the BUILD, not the container, if standalone lands somewhere unexpected.
 # Next nests output under the package path when it detects a monorepo root

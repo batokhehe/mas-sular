@@ -58,7 +58,7 @@ export default function LoginPage() {
             </div>
 
             <h1 className="text-4xl xl:text-5xl font-bold leading-tight mb-4">
-              Bakso Premium<br />
+              Bakso Bumbu Rujak<br />
               Langsung ke<br />
               Rumah Anda
             </h1>

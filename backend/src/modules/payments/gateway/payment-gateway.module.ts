@@ -9,11 +9,13 @@ import { MidtransPaymentProvider } from './infrastructure/providers/midtrans-pay
 import { MIDTRANS_CONFIG, MidtransConfig, assertMidtransConfigured, loadMidtransConfig } from './midtrans.config';
 import { PaymentChannelRegistry } from './payment-channel.registry';
 import { PaymentGatewayPersistenceService } from './payment-gateway-persistence.service';
+import { PaymentAttemptPricingService } from './payment-attempt-pricing.service';
 import { PaymentInitiationService } from './payment-initiation.service';
 import { PAYMENT_PROVIDERS, PaymentProviderFactory } from './payment-provider.factory';
 import { PaymentChannelsController } from './presentation/payment-channels.controller';
 import { PaymentWebhookController } from './presentation/payment-webhook.controller';
 import { PaymentWebhookService } from './payment-webhook.service';
+import { loadPaymentServiceFeeConfig, PAYMENT_SERVICE_FEE_CONFIG } from './payment-service-fee.config';
 
 /**
  * Payment gateway module (Phases 1-3): provider abstraction, channel catalog,
@@ -54,6 +56,8 @@ import { PaymentWebhookService } from './payment-webhook.service';
     PaymentProviderFactory,
     PaymentChannelRegistry,
     PaymentGatewayPersistenceService,
+    // Prices gateway attempts (Payment/Order amount + fee). Initiation only — never the webhook.
+    PaymentAttemptPricingService,
     PaymentInitiationService,
     PaymentWebhookService,
     // === Phase 5E ===
@@ -61,7 +65,15 @@ import { PaymentWebhookService } from './payment-webhook.service';
     GatewayStatusApplier,
     { provide: MIDTRANS_RECONCILIATION_CONFIG, useFactory: () => loadMidtransReconciliationConfig() },
     MidtransReconciliationWorker,
+    // Who bears the payment service fee. Independent of MIDTRANS_CONFIG on purpose.
+    { provide: PAYMENT_SERVICE_FEE_CONFIG, useFactory: () => loadPaymentServiceFeeConfig() },
   ],
-  exports: [PaymentInitiationService, PaymentChannelRegistry, PaymentProviderFactory, PaymentGatewayPersistenceService],
+  exports: [
+    PaymentInitiationService,
+    PaymentChannelRegistry,
+    PaymentProviderFactory,
+    PaymentGatewayPersistenceService,
+    PAYMENT_SERVICE_FEE_CONFIG,
+  ],
 })
 export class PaymentGatewayModule {}

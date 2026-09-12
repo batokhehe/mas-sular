@@ -30,7 +30,6 @@ const OK_BODY = JSON.stringify({
 
 function config(over: Partial<JneProviderConfig> = {}): ShippingConfig {
   return {
-    originPostalCode: '40111',
     // Deliberately TRUE: the native path must never produce a mock quote even
     // when the mock switch is on, which is the state development runs in.
     allowMockRates: true,

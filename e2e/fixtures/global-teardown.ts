@@ -32,7 +32,7 @@ export default async function globalTeardown(): Promise<void> {
       // Surfaced loudly: a leaked container is a real cost, not a nuisance.
       console.error(
         '[e2e] WARNING: the isolated stack did not confirm shutdown within 120s. ' +
-          'Check for a stray mysql:8.4 container: docker ps --filter ancestor=mysql:8.4',
+          'Check for a stray postgres:16-alpine container: docker ps --filter ancestor=postgres:16-alpine',
       );
       return;
     }

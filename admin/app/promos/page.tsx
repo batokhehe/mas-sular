@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardTitle } from '@/components/ui/card';
 import { ROUTE_PERMISSIONS } from '@/lib/access';
 import { fetchAdminPromos, AdminPromo } from '@/lib/admin';
+import { formatPromoUsage } from '@/lib/promos/usage-display';
 
 const activeOptions = ['ALL', 'ACTIVE', 'INACTIVE'] as const;
 
@@ -104,7 +105,7 @@ export default function PromosPage() {
                         : `Free Shipping${promo.freeShippingMaxAmount ? `, max Rp ${promo.freeShippingMaxAmount.toLocaleString('id-ID')}` : ''}`}
                     </td>
                     <td className="py-4 text-gray-500">Rp {promo.minimumOrderAmount.toLocaleString('id-ID')}</td>
-                    <td className="py-4 text-gray-500">{promo.currentUsageCount}{promo.maxUsageCount ? ` / ${promo.maxUsageCount}` : ' / ∞'}</td>
+                    <td className="py-4 text-gray-500">{formatPromoUsage(promo.currentUsageCount, promo.maxUsageCount)}</td>
                     <td className="py-4">
                       <Badge tone={promo.isActive ? 'success' : 'neutral'}>{promo.isActive ? 'Active' : 'Inactive'}</Badge>
                     </td>

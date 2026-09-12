@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { useAuth } from '@/lib/auth/auth-context'
+import { safeRedirect } from '@/lib/auth/safe-redirect'
 import { useCreateAddress } from '@/lib/query/hooks/use-addresses'
 import { qk } from '@/lib/query/keys'
 import type { User } from '@/lib/types/models'
@@ -42,11 +43,6 @@ type AddressFormData = z.infer<typeof addressSchema>
 // distance-priced couriers (Paxel) receive these placeholder coordinates,
 // exactly as they did for no-pin submissions before.
 const DEFAULT_LOCATION = { lat: -6.2088, lng: 106.8456 }
-
-// Same internal-path guard used by the login page (avoids open redirects).
-function safeRedirect(value: string | null): string {
-  return value && value.startsWith('/') && !value.startsWith('//') ? value : '/'
-}
 
 function OnboardingInner() {
   const router = useRouter()

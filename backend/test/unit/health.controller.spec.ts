@@ -21,9 +21,9 @@ function mockRes(): ResStub {
   return res;
 }
 
-function build(over: { mysqlOk?: boolean; redisOk?: boolean } = {}) {
+function build(over: { postgresOk?: boolean; redisOk?: boolean } = {}) {
   const prisma = {
-    $queryRaw: jest.fn().mockImplementation(() => (over.mysqlOk === false ? Promise.reject(new Error('db down')) : Promise.resolve([{ '1': 1 }]))),
+    $queryRaw: jest.fn().mockImplementation(() => (over.postgresOk === false ? Promise.reject(new Error('db down')) : Promise.resolve([{ '1': 1 }]))),
   };
   const cache = {
     set: jest.fn().mockResolvedValue(undefined),
@@ -51,7 +51,7 @@ describe('HealthController.ready — RabbitMQ-aware readiness', () => {
     const http = mockRes();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await controller.ready(http as any);
-    expect(res).toEqual({ status: 'ready', checks: { mysql: 'ok', redis: 'ok', rabbitmq: 'skipped' } });
+    expect(res).toEqual({ status: 'ready', checks: { postgres: 'ok', redis: 'ok', rabbitmq: 'skipped' } });
     expect(http.code).toBe(200);
     expect(mockConnect).not.toHaveBeenCalled();
   });
@@ -94,11 +94,11 @@ describe('HealthController.ready — RabbitMQ-aware readiness', () => {
   });
 
   it('NOT ready when MySQL is down', async () => {
-    const { controller } = build({ mysqlOk: false });
+    const { controller } = build({ postgresOk: false });
     const http = mockRes();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await controller.ready(http as any);
-    expect(res.checks.mysql).toBe('failed');
+    expect(res.checks.postgres).toBe('failed');
     expect(res.status).toBe('not_ready');
     expect(http.code).toBe(503);
   });
@@ -133,7 +133,7 @@ describe('HealthController.ready — HTTP status code is the readiness signal (F
   });
 
   it('sets 503 when MySQL is down, and still returns the per-dependency detail', async () => {
-    const { controller } = build({ mysqlOk: false });
+    const { controller } = build({ postgresOk: false });
     const http = mockRes();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await controller.ready(http as any);
@@ -141,7 +141,7 @@ describe('HealthController.ready — HTTP status code is the readiness signal (F
     // The body is what the runbook reads; 503 must not flatten it away.
     expect(res).toEqual({
       status: 'not_ready',
-      checks: { mysql: 'failed', redis: 'ok', rabbitmq: 'skipped' },
+      checks: { postgres: 'failed', redis: 'ok', rabbitmq: 'skipped' },
     });
   });
 
@@ -164,7 +164,7 @@ describe('HealthController.ready — HTTP status code is the readiness signal (F
   });
 
   it('liveness is unaffected — /health and /live never signal dependency state', () => {
-    const { controller } = build({ mysqlOk: false, redisOk: false });
+    const { controller } = build({ postgresOk: false, redisOk: false });
     expect(controller.health().status).toBe('ok');
     expect(controller.live()).toEqual({ status: 'live' });
   });

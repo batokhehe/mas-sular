@@ -44,7 +44,7 @@ describe('AdminService.getOrderOperations', () => {
     expect(auditWhere.OR).toEqual(expect.arrayContaining([{ entity: 'Order', entityId: 'o1' }, { entity: 'Payment', entityId: 'pay1' }]));
     expect(ops.auditLogs).toEqual(AUDIT);
     // Notifications filtered by the order id embedded in the JSON payload.
-    expect(prisma.notificationOutbox.findMany.mock.calls[0][0].where).toEqual({ payload: { path: '$.orderId', equals: 'o1' } });
+    expect(prisma.notificationOutbox.findMany.mock.calls[0][0].where).toEqual({ payload: { path: ['orderId'], equals: 'o1' } });
     expect(ops.notifications).toEqual(NOTIFS);
   });
 

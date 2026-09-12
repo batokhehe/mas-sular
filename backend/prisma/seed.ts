@@ -1,6 +1,10 @@
 import * as bcrypt from 'bcryptjs';
 import { PrismaClient, ProductStatus } from '@prisma/client';
+import { assertDevSeedAllowed } from './bootstrap/dev-seed-guard';
+import { ensureRbac } from './bootstrap/rbac';
 
+// DEVELOPMENT ONLY. Production databases are initialised with
+// prisma/bootstrap-production.ts; this seed refuses NODE_ENV=production (B5).
 const prisma = new PrismaClient();
 
 const categories = [
@@ -19,22 +23,26 @@ const products = [
   ['es-teh-manis', 'Es Teh Manis', 8000, null, '/products/es-teh.jpg', 'minuman', 4.5, 445, null, false, false, 200],
 ] as const;
 
-async function main(): Promise<void> {
-  const roles = [
-    'SUPER_ADMIN',
-    'ADMIN',
-    'MANAGER',
-    'STAFF',
-    'CUSTOMER',
-  ];
+/**
+ * P2 #10: the three initial "Promo Spesial Produk" products (local/dev seed only).
+ * Existing seeded products, chosen by slug so the choice is deterministic.
+ */
+const PROMO_SPECIAL_SLUGS = ['baso-urat-jumbo', 'frozen-baso-urat-20pcs', 'baso-keju-mozarella'] as const;
 
-  for (const role of roles) {
-    await prisma.role.upsert({
-      where: { name: role },
-      update: {},
-      create: { name: role },
-    });
-  }
+/**
+ * P2 #11: the four initial "Trial Pack" products (local/dev seed only) - the four
+ * bakso products, so a customer can try the range. Es Teh Manis (a drink add-on)
+ * is left out. Existing seeded products, chosen by slug.
+ */
+const TRIAL_PACK_SLUGS = ['baso-urat-jumbo', 'baso-mercon-super-pedas', 'baso-keju-mozarella', 'frozen-baso-urat-20pcs'] as const;
+
+async function main(): Promise<void> {
+  // Before ANY database access.
+  assertDevSeedAllowed(process.env);
+
+  // Roles, permissions and SUPER_ADMIN's grants - the same catalogue the production
+  // bootstrap uses (prisma/bootstrap/rbac.ts).
+  const rbac = await ensureRbac(prisma);
 
   for (const [index, category] of categories.entries()) {
     await prisma.category.upsert({
@@ -65,11 +73,24 @@ async function main(): Promise<void> {
         spicyLevel,
         isBestSeller,
         isNew,
+        isPromoSpecial: (PROMO_SPECIAL_SLUGS as readonly string[]).includes(slug),
+        isTrialPack: (TRIAL_PACK_SLUGS as readonly string[]).includes(slug),
         stock,
         status: ProductStatus.ACTIVE,
       },
     });
   }
+
+  // Idempotent for databases seeded before the flags existed: each call sets ONLY
+  // its own flag, only on its own products. No other product or field is touched.
+  await prisma.product.updateMany({
+    where: { slug: { in: [...PROMO_SPECIAL_SLUGS] } },
+    data: { isPromoSpecial: true },
+  });
+  await prisma.product.updateMany({
+    where: { slug: { in: [...TRIAL_PACK_SLUGS] } },
+    data: { isTrialPack: true },
+  });
 
   for (const topping of [
     ['Mie Kuning', 5000],
@@ -119,88 +140,6 @@ async function main(): Promise<void> {
     },
   });
 
-  const permissionsList = [
-    { subject: 'Dashboard', action: 'read' },
-    { subject: 'Product', action: 'read' },
-    { subject: 'Product', action: 'create' },
-    { subject: 'Product', action: 'update' },
-    { subject: 'Product', action: 'delete' },
-    { subject: 'Category', action: 'read' },
-    { subject: 'Category', action: 'create' },
-    { subject: 'Category', action: 'update' },
-    { subject: 'Category', action: 'delete' },
-    { subject: 'Promo', action: 'read' },
-    { subject: 'Promo', action: 'create' },
-    { subject: 'Promo', action: 'update' },
-    { subject: 'Promo', action: 'delete' },
-    { subject: 'Banner', action: 'read' },
-    { subject: 'Banner', action: 'create' },
-    { subject: 'Banner', action: 'update' },
-    { subject: 'Banner', action: 'delete' },
-    { subject: 'Order', action: 'read' },
-    { subject: 'Order', action: 'update' },
-    { subject: 'Payment', action: 'read' },
-    { subject: 'Payment', action: 'verify' },
-    { subject: 'Payment', action: 'reject' },
-    { subject: 'Shipment', action: 'read' },
-    { subject: 'Shipment', action: 'create' },
-    { subject: 'Shipment', action: 'update' },
-    { subject: 'Shipment', action: 'delete' },
-    { subject: 'User', action: 'read' },
-    { subject: 'User', action: 'update' },
-    { subject: 'Role', action: 'read' },
-    { subject: 'Role', action: 'create' },
-    { subject: 'Role', action: 'update' },
-    { subject: 'Role', action: 'delete' },
-    { subject: 'DeliveryCoverage', action: 'read' },
-    { subject: 'DeliveryCoverage', action: 'create' },
-    { subject: 'DeliveryCoverage', action: 'update' },
-    { subject: 'DeliveryCoverage', action: 'delete' },
-    { subject: 'SystemLog', action: 'read' },
-    { subject: 'Queue', action: 'read' },
-    { subject: 'Queue', action: 'retry' },
-    { subject: 'Incident', action: 'read' },
-    { subject: 'Incident', action: 'manage' },
-    { subject: 'Notification', action: 'read' },
-    { subject: 'Notification', action: 'resend' },
-    { subject: 'Notification', action: 'send' },
-    { subject: 'Audit', action: 'read' },
-    { subject: 'Audit', action: 'export' },
-    { subject: 'Notification', action: 'manage' },
-    { subject: 'dashboard', action: 'view' },
-    { subject: 'products', action: 'view' },
-    { subject: 'products', action: 'create' },
-    { subject: 'products', action: 'update' },
-    { subject: 'products', action: 'delete' },
-    { subject: 'categories', action: 'view' },
-    { subject: 'categories', action: 'create' },
-    { subject: 'categories', action: 'update' },
-    { subject: 'categories', action: 'delete' },
-    { subject: 'orders', action: 'view' },
-    { subject: 'orders', action: 'update' },
-    { subject: 'customers', action: 'view' },
-    { subject: 'roles', action: 'view' },
-    { subject: 'roles', action: 'create' },
-    { subject: 'roles', action: 'update' },
-    { subject: 'roles', action: 'delete' },
-    { subject: 'paymentAccounts', action: 'view' },
-    { subject: 'paymentAccounts', action: 'create' },
-    { subject: 'paymentAccounts', action: 'update' },
-    { subject: 'paymentAccounts', action: 'delete' },
-    { subject: 'paymentAccounts', action: 'activate' },
-    { subject: 'Outlet', action: 'read' },
-    { subject: 'Outlet', action: 'create' },
-    { subject: 'Outlet', action: 'update' },
-    { subject: 'Outlet', action: 'delete' },
-    { subject: 'Outlet', action: 'activate' },
-    { subject: 'InventoryReservation', action: 'read' },
-    { subject: 'ProductInventory', action: 'read' },
-    { subject: 'ProductInventory', action: 'update' },
-    { subject: 'StockTransfer', action: 'read' },
-    { subject: 'StockTransfer', action: 'create' },
-    { subject: 'StockTransfer', action: 'update' },
-  ];
-
   // One active, visible payment account so checkout WhatsApp notifications resolve.
   await prisma.paymentAccount.upsert({
     where: { accountNumber: '1234567890' },
@@ -216,62 +155,47 @@ async function main(): Promise<void> {
     },
   });
 
-  const dbPermissions = [];
-  for (const perm of permissionsList) {
-    const dbPerm = await prisma.permission.upsert({
-      where: {
-        action_subject: {
-          action: perm.action,
-          subject: perm.subject,
-        },
-      },
-      update: {},
-      create: {
-        action: perm.action,
-        subject: perm.subject,
-        description: `Permission for ${perm.subject} ${perm.action}`,
-      },
-    });
-    dbPermissions.push(dbPerm);
-  }
-
-  const superAdminRole = await prisma.role.findUnique({
-    where: { name: 'SUPER_ADMIN' },
+  // DEVELOPMENT-ONLY outlet.
+  //
+  // OutletBootValidator refuses to boot the API when a shipping provider is
+  // enabled (PAXEL_ENABLED/JNE_ENABLED) but no ACTIVE outlet exists — correctly,
+  // because providers use the active outlet as the shipping origin. Outlets are
+  // otherwise created through the admin UI, so a freshly migrated database had
+  // no way to reach a bootable state and `docker compose up` crash-looped.
+  //
+  // Deliberately minimal: only what the validator needs (an active outlet) plus
+  // the origin address and postal code the environment is ALREADY configured with
+  // (SHIPPING_ORIGIN_POSTAL_CODE=40286). No coordinates, region ids or phone are
+  // invented here — a real outlet is registered by an operator through the admin
+  // UI, which overwrites nothing below because this row is keyed on its own id.
+  //
+  // Idempotent via a deterministic id (the same approach the toppings above use),
+  // since Outlet has no unique column other than the primary key. `update: {}` so
+  // re-seeding never clobbers edits an operator made to this row.
+  await prisma.outlet.upsert({
+    where: { id: 'local-dev-outlet' },
+    update: {},
+    create: {
+      id: 'local-dev-outlet',
+      name: 'Local Dev Outlet',
+      addressDetail:
+        'Jl. Saturnus Sel. No.3, Margasari, Kec. Buahbatu, Kota Bandung, Jawa Barat 40286',
+      postalCode: '40286',
+      isActive: true,
+    },
   });
 
-  if (superAdminRole) {
-    // Link permissions to SUPER_ADMIN role
-    for (const perm of dbPermissions) {
-      await prisma.rolePermission.upsert({
-        where: {
-          roleId_permissionId: {
-            roleId: superAdminRole.id,
-            permissionId: perm.id,
-          },
-        },
-        update: {},
-        create: {
-          roleId: superAdminRole.id,
-          permissionId: perm.id,
-        },
-      });
-    }
-
-    // Link admin user to SUPER_ADMIN role
-    await prisma.adminRole.upsert({
-      where: {
-        adminId_roleId: {
-          adminId: adminUser.id,
-          roleId: superAdminRole.id,
-        },
-      },
-      update: {},
-      create: {
-        adminId: adminUser.id,
-        roleId: superAdminRole.id,
-      },
-    });
-  }
+  // Link the development admin to SUPER_ADMIN (grants come from ensureRbac above).
+  await prisma.adminRole.upsert({
+    where: { adminId_roleId: { adminId: adminUser.id, roleId: rbac.superAdminRoleId } },
+    update: {},
+    create: { adminId: adminUser.id, roleId: rbac.superAdminRoleId },
+  });
 }
 
-main().finally(async () => prisma.$disconnect());
+main()
+  .catch((err: unknown) => {
+    console.error(`[seed] ${err instanceof Error ? err.message : String(err)}`);
+    process.exitCode = 1;
+  })
+  .finally(async () => prisma.$disconnect());

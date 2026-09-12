@@ -1,10 +1,10 @@
 import { Injectable, UnauthorizedException, Logger, BadRequestException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import * as bcrypt from 'bcryptjs';
 import { StringValue } from 'ms';
 import { randomUUID } from 'crypto';
 import { OAuth2Client } from 'google-auth-library';
 import { PrismaService } from '../../database/prisma.service';
+import { generateRefreshToken, parseRefreshToken, refreshSecretMatches } from './refresh-token.util';
 
 @Injectable()
 export class AuthService {
@@ -142,12 +142,14 @@ export class AuthService {
       this.logger.log('[TOKEN GENERATION] Access token signed');
       
       this.logger.log('[TOKEN GENERATION] Creating refresh token...');
-      const refreshToken = randomUUID();
+      // H2: `<selector>.<secret>`; the row stores the selector and SHA-256(secret).
+      const { token: refreshToken, selector, verifierHash } = generateRefreshToken();
       await this.prisma.refreshToken.create({
         data: {
           userId,
           familyId,
-          tokenHash: await bcrypt.hash(refreshToken, 12),
+          selector,
+          tokenHash: verifierHash,
           expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
         },
       });
@@ -161,16 +163,37 @@ export class AuthService {
     }
   }
 
-  async rotateRefreshToken(refreshToken: string) {
-    const candidates = await this.prisma.refreshToken.findMany({
-      where: { revokedAt: null, expiresAt: { gt: new Date() } },
+  /**
+   * H2: the presented token's selector finds exactly one row by unique index, and
+   * only that row's hash is checked (constant-time SHA-256). Returns null for a
+   * malformed/legacy token (no DB round trip), an unknown selector, a revoked or
+   * expired row, or a wrong secret - callers cannot tell these apart.
+   */
+  private async findActiveRefreshToken(presented: string) {
+    const parsed = parseRefreshToken(presented);
+    if (!parsed) return null;
+    const record = await this.prisma.refreshToken.findUnique({
+      where: { selector: parsed.selector },
       include: { user: { include: { roles: { include: { role: true } } } } },
-      take: 100,
-      orderBy: { createdAt: 'desc' },
     });
-    const record = candidates.find((token) => bcrypt.compareSync(refreshToken, token.tokenHash));
+    if (!record || record.revokedAt || record.expiresAt <= new Date()) return null;
+    return refreshSecretMatches(parsed.secret, record.tokenHash) ? record : null;
+  }
+
+  /** Revoke one row only if it is still active. True for exactly one concurrent caller. */
+  private async claimRefreshToken(id: string): Promise<boolean> {
+    const { count } = await this.prisma.refreshToken.updateMany({
+      where: { id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    return count === 1;
+  }
+
+  async rotateRefreshToken(refreshToken: string) {
+    const record = await this.findActiveRefreshToken(refreshToken);
     if (!record) throw new UnauthorizedException('Invalid refresh token');
-    await this.prisma.refreshToken.update({ where: { id: record.id }, data: { revokedAt: new Date() } });
+    // Single use: two concurrent refreshes with the same token cannot both rotate.
+    if (!(await this.claimRefreshToken(record.id))) throw new UnauthorizedException('Invalid refresh token');
     if (!record.user.isActive || record.user.deletedAt) {
       this.logger.warn(`[ACCOUNT STATUS] Refusing refresh rotation for disabled user ${record.userId}`);
       throw new UnauthorizedException('Account is disabled');
@@ -185,13 +208,8 @@ export class AuthService {
    * family-wide revoke.
    */
   async revokeRefreshToken(refreshToken: string): Promise<void> {
-    const candidates = await this.prisma.refreshToken.findMany({
-      where: { revokedAt: null, expiresAt: { gt: new Date() } },
-      take: 100,
-      orderBy: { createdAt: 'desc' },
-    });
-    const record = candidates.find((token) => bcrypt.compareSync(refreshToken, token.tokenHash));
-    if (!record) return; // missing or already revoked → no-op
-    await this.prisma.refreshToken.update({ where: { id: record.id }, data: { revokedAt: new Date() } });
+    const record = await this.findActiveRefreshToken(refreshToken);
+    if (!record) return; // missing, malformed or already revoked → no-op
+    await this.claimRefreshToken(record.id);
   }
 }

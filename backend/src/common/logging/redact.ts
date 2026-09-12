@@ -1,12 +1,33 @@
 // Capability secrets that must never reach logs. The payment upload token rides
-// in the URL path (GET/POST /payments/upload/:token); redact that segment so it
-// does not land in pino-http request logs or error logs.
+// in the URL path (GET/POST /payments/upload/:token), and so does the P2 #14
+// customer invoice token (GET /invoices/:token); redact those segments so they do
+// not land in pino-http request logs, the SystemLog request log or error logs.
 const UPLOAD_TOKEN_PATH = /(\/payments\/upload\/)[^/?#]+/g;
+const INVOICE_TOKEN_PATH = /(\/invoices\/)[^/?#]+/g;
 
-/** Replace the payment-upload token segment with [REDACTED], preserving the rest of the URL. */
+/** Replace capability-token path segments with [REDACTED], preserving the rest of the URL. */
 export function redactSensitivePath<T extends string | undefined>(url: T): T {
   if (!url) return url;
-  return url.replace(UPLOAD_TOKEN_PATH, '$1[REDACTED]') as T;
+  return url.replace(UPLOAD_TOKEN_PATH, '$1[REDACTED]').replace(INVOICE_TOKEN_PATH, '$1[REDACTED]') as T;
+}
+
+/**
+ * pino-http also logs the matched route params, and under URI versioning Express
+ * exposes the whole path there (`params.path = ['v1', 'invoices', '<token>']`), so
+ * the URL redaction alone did not keep the capability tokens out of request logs.
+ * Path segments are re-joined and passed through redactSensitivePath; any param
+ * whose NAME looks like a token is masked outright. Everything else is kept.
+ */
+export function redactSensitiveParams(params: unknown): unknown {
+  if (params === null || typeof params !== 'object' || Array.isArray(params)) return params;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(params as Record<string, unknown>)) {
+    if (/token/i.test(key)) out[key] = '[REDACTED]';
+    else if (Array.isArray(value)) out[key] = redactSensitivePath(`/${value.map(String).join('/')}`).slice(1).split('/');
+    else if (typeof value === 'string') out[key] = redactSensitivePath(`/${value}`).slice(1);
+    else out[key] = value;
+  }
+  return out;
 }
 
 // Query-string keys whose VALUES must never be persisted (the SSE stream carries

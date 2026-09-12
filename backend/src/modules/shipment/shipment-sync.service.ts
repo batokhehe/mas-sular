@@ -6,6 +6,8 @@ import { randomUUID } from 'crypto';
 import { PrismaService } from '../../database/prisma.service';
 import { orderStatusSourcesFor } from '../orders/domain/order-status-transitions';
 import type { RawTrackingResult, ShipmentProvider } from './domain/shipment-provider.interface';
+import { decideShipmentTransition } from './domain/shipment-transition';
+import { recordRejectedObservation } from './shipment-observation.recorder';
 import { ShipmentProviderFactory } from './shipment-provider.factory';
 import { SHIPMENT_TRACKING_CONFIG, ShipmentTrackingConfig } from './shipment-tracking.config';
 import { ShipmentStatusMapper } from './shipment-status.mapper';
@@ -165,6 +167,35 @@ export class ShipmentSyncService {
         // Idempotency: ignore duplicate provider responses — only write on a real change.
         if (mapped === shipment.status) continue;
 
+        // Backward protection - the SAME rule the JNE webhook uses
+        // (domain/shipment-transition). A poll carries no event time, so lifecycle
+        // order and terminal states decide: a stale answer (the cache can hold one
+        // for up to two hours) never moves a shipment backwards. The observation is
+        // kept, once, instead of being applied.
+        const decision = decideShipmentTransition({ current: shipment.status, target: mapped });
+        if (!decision.apply) {
+          const recorded = await recordRejectedObservation(this.prisma, shipment.id, {
+            source: 'poll',
+            provider: shipment.provider,
+            providerStatus: raw.providerStatus,
+            mappedStatus: mapped,
+            shipmentStatus: shipment.status,
+            reason: decision.reason,
+          });
+          if (recorded) {
+            this.logger.warn({
+              event: 'shipment.transition_rejected',
+              shipmentId: shipment.id,
+              provider: shipment.provider,
+              providerStatus: raw.providerStatus,
+              from: shipment.status,
+              to: mapped,
+              reason: decision.reason,
+            });
+          }
+          continue;
+        }
+
         await this.applyTransition(shipment, mapped, raw.providerStatus, raw.rawPayload);
         changed += 1;
       } catch (err) {
@@ -177,101 +208,129 @@ export class ShipmentSyncService {
   }
 
   private async applyTransition(
-    shipment: {
-      id: string;
-      provider: string;
-      service: string;
-      /** The status this run READ — the CAS below claims the transition on it. */
-      status: ShipmentStatus;
-      trackingNumber: string | null;
-      order: {
-        id: string;
-        orderNumber: string;
-        status: string;
-        /** Authoritative service the customer paid for; see the select above. */
-        shippingService: string | null;
-        shippingServiceName: string | null;
-        user: { name: string; email: string; phone: string | null } | null;
-        address: { phone: string | null } | null;
-      };
-    },
+    shipment: TransitionShipment,
     mapped: ShipmentStatus,
     providerStatus: string,
     rawPayload: unknown,
   ): Promise<void> {
-    const orderStatus = this.mapper.toOrderStatus(mapped);
-    await this.prisma.$transaction(async (tx) => {
-      // Claim the transition with a CAS on the status we actually read, the
-      // same idiom the order flip below and the booking claim in
-      // ShipmentService already use.
-      //
-      // The in-process `running` guard only serialises ticks within ONE
-      // instance. Two instances polling the same shipment would both observe
-      // the old status, and everything after this point — the history row and
-      // the customer notification — would run twice, contradicting the "notify
-      // exactly once per transition" intent below. Losing the CAS means another
-      // run already recorded this exact transition, so there is nothing to add.
-      const applied = await tx.shipment.updateMany({
-        where: { id: shipment.id, status: shipment.status },
-        data: { status: mapped, providerPayload: this.json(rawPayload) },
-      });
-      if (applied.count !== 1) return;
-
-      // Append-only audit of the transition.
-      await tx.shipmentHistory.create({
-        data: {
-          shipmentId: shipment.id,
-          providerStatus,
-          mappedStatus: mapped,
-          changedAt: new Date(),
-        },
-      });
-
-      // Advance the order only via a legal transition (audit F4): CAS over the
-      // allowed source statuses so a CANCELLED/COMPLETED order is never revived by
-      // a late courier update. A lost CAS just skips the advance (shipment status
-      // and history above are still recorded).
-      if (orderStatus && orderStatus !== shipment.order.status) {
-        const flip = await tx.order.updateMany({
-          where: { id: shipment.order.id, status: { in: orderStatusSourcesFor(orderStatus) } },
-          data: { status: orderStatus },
-        });
-        if (flip.count === 1) {
-          await tx.orderEvent.create({
-            data: { orderId: shipment.order.id, status: orderStatus, note: `Shipment ${mapped} (${shipment.provider})` },
-          });
-        }
-      }
-
-      // Notify exactly once per transition (only for the notifiable statuses).
-      if (this.mapper.shouldNotify(mapped)) {
-        const phone = shipment.order.address?.phone ?? shipment.order.user?.phone ?? null;
-        await tx.notificationOutbox.create({
-          data: {
-            channel: NotificationChannel.WHATSAPP,
-            recipient: phone ?? '',
-            template: 'shipment.status',
-            payload: {
-              orderId: shipment.order.id,
-              orderNumber: shipment.order.orderNumber,
-              customerName: shipment.order.user?.name ?? 'Pelanggan',
-              customerPhone: phone,
-              customerEmail: shipment.order.user?.email ?? null,
-              shipmentStatus: mapped,
-              statusLabel: this.mapper.label(mapped),
-              shippingProvider: shipment.provider,
-              shippingService:
-                shipment.order.shippingServiceName ??
-                shipment.order.shippingService ??
-                shipment.service,
-              trackingNumber: shipment.trackingNumber ?? '',
-            },
-            sourceMessageId: randomUUID(),
-          },
-        });
-      }
-    });
-
+    await this.prisma.$transaction((tx) => this.applyTransitionInTx(tx, shipment, mapped, providerStatus, rawPayload));
     this.logger.log({ event: 'shipment.transition', shipmentId: shipment.id, providerStatus, mapped });
   }
+
+  /**
+   * THE single place a courier status becomes a shipment transition, shared by the
+   * tracking poller and the JNE webhook: CAS the shipment status → append the
+   * ShipmentHistory audit row → advance the order through a legal transition →
+   * enqueue the customer notification exactly once. Runs inside the caller's
+   * transaction. Returns false when the CAS was lost (another run already recorded
+   * this transition), in which case nothing else was written.
+   *
+   * `changedAt` defaults to now (the poller has no event time); the webhook passes
+   * the courier's own event instant.
+   */
+  async applyTransitionInTx(
+    tx: Prisma.TransactionClient,
+    shipment: TransitionShipment,
+    mapped: ShipmentStatus,
+    providerStatus: string,
+    rawPayload: unknown,
+    changedAt: Date = new Date(),
+  ): Promise<boolean> {
+    // Final guard for EVERY caller: the shared rule without event times (the caller
+    // may already have applied a stricter, time-aware check). A move out of a
+    // terminal state or backwards through the lifecycle writes nothing.
+    if (!decideShipmentTransition({ current: shipment.status, target: mapped }).apply) return false;
+
+    const orderStatus = this.mapper.toOrderStatus(mapped);
+    // Claim the transition with a CAS on the status we actually read, the
+    // same idiom the order flip below and the booking claim in
+    // ShipmentService already use.
+    //
+    // The in-process `running` guard only serialises ticks within ONE
+    // instance. Two instances polling the same shipment would both observe
+    // the old status, and everything after this point — the history row and
+    // the customer notification — would run twice, contradicting the "notify
+    // exactly once per transition" intent below. Losing the CAS means another
+    // run already recorded this exact transition, so there is nothing to add.
+    const applied = await tx.shipment.updateMany({
+      where: { id: shipment.id, status: shipment.status },
+      data: { status: mapped, providerPayload: this.json(rawPayload) },
+    });
+    if (applied.count !== 1) return false;
+
+    // Append-only audit of the transition.
+    await tx.shipmentHistory.create({
+      data: {
+        shipmentId: shipment.id,
+        providerStatus,
+        mappedStatus: mapped,
+        changedAt,
+      },
+    });
+
+    // Advance the order only via a legal transition (audit F4): CAS over the
+    // allowed source statuses so a CANCELLED/COMPLETED order is never revived by
+    // a late courier update. A lost CAS just skips the advance (shipment status
+    // and history above are still recorded).
+    if (orderStatus && orderStatus !== shipment.order.status) {
+      const flip = await tx.order.updateMany({
+        where: { id: shipment.order.id, status: { in: orderStatusSourcesFor(orderStatus) } },
+        data: { status: orderStatus },
+      });
+      if (flip.count === 1) {
+        await tx.orderEvent.create({
+          data: { orderId: shipment.order.id, status: orderStatus, note: `Shipment ${mapped} (${shipment.provider})` },
+        });
+      }
+    }
+
+    // Notify exactly once per transition (only for the notifiable statuses).
+    if (this.mapper.shouldNotify(mapped)) {
+      const phone = shipment.order.address?.phone ?? shipment.order.user?.phone ?? null;
+      await tx.notificationOutbox.create({
+        data: {
+          channel: NotificationChannel.WHATSAPP,
+          recipient: phone ?? '',
+          template: 'shipment.status',
+          payload: {
+            orderId: shipment.order.id,
+            orderNumber: shipment.order.orderNumber,
+            customerName: shipment.order.user?.name ?? 'Pelanggan',
+            customerPhone: phone,
+            customerEmail: shipment.order.user?.email ?? null,
+            shipmentStatus: mapped,
+            statusLabel: this.mapper.label(mapped),
+            shippingProvider: shipment.provider,
+            shippingService:
+              shipment.order.shippingServiceName ??
+              shipment.order.shippingService ??
+              shipment.service,
+            trackingNumber: shipment.trackingNumber ?? '',
+          },
+          sourceMessageId: randomUUID(),
+        },
+      });
+    }
+    return true;
+  }
+}
+
+/** The shipment shape a transition needs (status is the one the caller READ). */
+export interface TransitionShipment {
+  id: string;
+  provider: string;
+  service: string;
+  /** The status this run READ — the CAS claims the transition on it. */
+  status: ShipmentStatus;
+  trackingNumber: string | null;
+  order: {
+    id: string;
+    orderNumber: string;
+    status: string;
+    /** Authoritative service the customer paid for (Shipment.service is a snapshot). */
+    shippingService: string | null;
+    shippingServiceName: string | null;
+    user: { name: string; email: string; phone: string | null } | null;
+    address: { phone: string | null } | null;
+  };
 }

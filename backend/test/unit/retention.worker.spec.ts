@@ -38,27 +38,27 @@ describe('RetentionWorker', () => {
       const { worker } = build();
       const byName = Object.fromEntries(worker.policies().map((p) => [p.name, p]));
 
-      expect(byName['OutboxEvent.PUBLISHED'].table).toBe('`OutboxEvent`');
-      expect(byName['OutboxEvent.PUBLISHED'].where).toBe("`status` = 'PUBLISHED' AND `lockedUntil` IS NULL AND `createdAt` < ?");
+      expect(byName['OutboxEvent.PUBLISHED'].table).toBe('"OutboxEvent"');
+      expect(byName['OutboxEvent.PUBLISHED'].where).toBe(`"status" = 'PUBLISHED' AND "lockedUntil" IS NULL AND "createdAt" < $1`);
       expect(byName['OutboxEvent.PUBLISHED'].cutoff.getTime()).toBe(NOW - 7 * DAY);
 
-      expect(byName['OutboxEvent.FAILED'].where).toBe("`status` = 'FAILED' AND `lockedUntil` IS NULL AND `createdAt` < ?");
+      expect(byName['OutboxEvent.FAILED'].where).toBe(`"status" = 'FAILED' AND "lockedUntil" IS NULL AND "createdAt" < $1`);
       expect(byName['OutboxEvent.FAILED'].cutoff.getTime()).toBe(NOW - 90 * DAY);
 
-      expect(byName['ProcessedEvent'].where).toBe('`processedAt` < ?');
+      expect(byName['ProcessedEvent'].where).toBe('"processedAt" < $1');
       expect(byName['ProcessedEvent'].cutoff.getTime()).toBe(NOW - 30 * DAY);
 
-      expect(byName['NotificationOutbox.SENT'].where).toBe("`status` = 'SENT' AND `lockedUntil` IS NULL AND `sentAt` < ?");
+      expect(byName['NotificationOutbox.SENT'].where).toBe(`"status" = 'SENT' AND "lockedUntil" IS NULL AND "sentAt" < $1`);
       expect(byName['NotificationOutbox.SENT'].cutoff.getTime()).toBe(NOW - 30 * DAY);
 
-      expect(byName['NotificationOutbox.FAILED'].where).toBe("`status` = 'FAILED' AND `lockedUntil` IS NULL AND `createdAt` < ?");
+      expect(byName['NotificationOutbox.FAILED'].where).toBe(`"status" = 'FAILED' AND "lockedUntil" IS NULL AND "createdAt" < $1`);
 
-      expect(byName['IdempotencyKey'].where).toBe('`expiresAt` < ?');
+      expect(byName['IdempotencyKey'].where).toBe('"expiresAt" < $1');
       expect(byName['IdempotencyKey'].cutoff.getTime()).toBe(NOW); // expiresAt < now
 
       // PaymentUploadToken: expiresAt < now - 14d, so active/recently-expired tokens are safe.
-      expect(byName['PaymentUploadToken'].table).toBe('`PaymentUploadToken`');
-      expect(byName['PaymentUploadToken'].where).toBe('`expiresAt` < ?');
+      expect(byName['PaymentUploadToken'].table).toBe('"PaymentUploadToken"');
+      expect(byName['PaymentUploadToken'].where).toBe('"expiresAt" < $1');
       expect(byName['PaymentUploadToken'].cutoff.getTime()).toBe(NOW - 14 * DAY);
     });
 
@@ -93,7 +93,7 @@ describe('RetentionWorker', () => {
 
       expect(prisma.$executeRawUnsafe).toHaveBeenCalledTimes(2);
       const sql = prisma.$executeRawUnsafe.mock.calls[0][0] as string;
-      expect(sql).toContain('DELETE FROM `NotificationOutbox`');
+      expect(sql).toContain('DELETE FROM "NotificationOutbox"');
       expect(sql).toContain('LIMIT 1000');
       expect(prisma.$executeRawUnsafe.mock.calls[0][1]).toBe(sent.cutoff); // parameterized cutoff
       expect(result.deletedCount).toBe(1007);
@@ -123,7 +123,7 @@ describe('RetentionWorker', () => {
 
       expect(prisma.$executeRawUnsafe).toHaveBeenCalledTimes(2);
       const sql = prisma.$executeRawUnsafe.mock.calls[0][0] as string;
-      expect(sql).toContain('DELETE FROM `PaymentUploadToken`');
+      expect(sql).toContain('DELETE FROM "PaymentUploadToken"');
       expect(sql).toContain('LIMIT 1000');
       expect(prisma.$executeRawUnsafe.mock.calls[0][1]).toBe(token.cutoff); // parameterized cutoff
       expect(result.deletedCount).toBe(1003);
@@ -153,7 +153,7 @@ describe('RetentionWorker', () => {
 
       const result = await worker.sweepPolicy(token);
 
-      expect(prisma.$queryRawUnsafe.mock.calls[0][0]).toContain('SELECT COUNT(*) AS c FROM `PaymentUploadToken`');
+      expect(prisma.$queryRawUnsafe.mock.calls[0][0]).toContain('SELECT COUNT(*) AS c FROM "PaymentUploadToken"');
       expect(prisma.$executeRawUnsafe).not.toHaveBeenCalled();
       expect(result.wouldDeleteCount).toBe(9);
       expect(metrics.swept).toHaveBeenCalledWith(expect.objectContaining({ table: 'PaymentUploadToken', dryRun: true }));

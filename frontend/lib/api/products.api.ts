@@ -5,6 +5,10 @@ export type ProductQuery = {
   search?: string
   category?: string
   sort?: 'popular' | 'price-low' | 'price-high' | 'rating'
+  /** P2 #10: server-side filter on Product.isPromoSpecial (same visibility rules). */
+  promoSpecial?: boolean
+  /** P2 #11: server-side filter on Product.isTrialPack (same visibility rules). */
+  trialPack?: boolean
 }
 
 export const productsApi = {

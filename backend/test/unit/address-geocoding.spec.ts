@@ -157,7 +157,6 @@ describe('AddressGeocodingService', () => {
 describe('PaxelProvider omits unusable coordinates', () => {
   const config = (): ShippingConfig =>
     ({
-      originPostalCode: '40111',
       allowMockRates: false,
       paxel: {
         enabled: true, baseUrl: 'https://paxel.test', apiKey: 'k', apiSecret: 's',

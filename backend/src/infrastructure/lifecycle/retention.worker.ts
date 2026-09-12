@@ -112,18 +112,18 @@ export class RetentionWorker implements OnApplicationBootstrap, OnModuleDestroy 
     const cutoff = (days: number) => new Date(now - days * 24 * 60 * 60 * 1000);
     return [
       // OutboxEvent: delivered history (PUBLISHED). FAILED kept far longer, separate policy.
-      { name: 'OutboxEvent.PUBLISHED', table: '`OutboxEvent`', where: "`status` = 'PUBLISHED' AND `lockedUntil` IS NULL AND `createdAt` < ?", cutoff: cutoff(this.config.outboxPublishedDays) },
-      { name: 'OutboxEvent.FAILED', table: '`OutboxEvent`', where: "`status` = 'FAILED' AND `lockedUntil` IS NULL AND `createdAt` < ?", cutoff: cutoff(this.config.outboxFailedDays) },
+      { name: 'OutboxEvent.PUBLISHED', table: `"OutboxEvent"`, where: `"status" = 'PUBLISHED' AND "lockedUntil" IS NULL AND "createdAt" < $1`, cutoff: cutoff(this.config.outboxPublishedDays) },
+      { name: 'OutboxEvent.FAILED', table: `"OutboxEvent"`, where: `"status" = 'FAILED' AND "lockedUntil" IS NULL AND "createdAt" < $1`, cutoff: cutoff(this.config.outboxFailedDays) },
       // ProcessedEvent: dedup ledger; window >> redelivery window.
-      { name: 'ProcessedEvent', table: '`ProcessedEvent`', where: '`processedAt` < ?', cutoff: cutoff(this.config.processedDays) },
+      { name: 'ProcessedEvent', table: `"ProcessedEvent"`, where: `"processedAt" < $1`, cutoff: cutoff(this.config.processedDays) },
       // NotificationOutbox: SENT by sentAt; FAILED kept far longer.
-      { name: 'NotificationOutbox.SENT', table: '`NotificationOutbox`', where: "`status` = 'SENT' AND `lockedUntil` IS NULL AND `sentAt` < ?", cutoff: cutoff(this.config.notificationSentDays) },
-      { name: 'NotificationOutbox.FAILED', table: '`NotificationOutbox`', where: "`status` = 'FAILED' AND `lockedUntil` IS NULL AND `createdAt` < ?", cutoff: cutoff(this.config.notificationFailedDays) },
+      { name: 'NotificationOutbox.SENT', table: `"NotificationOutbox"`, where: `"status" = 'SENT' AND "lockedUntil" IS NULL AND "sentAt" < $1`, cutoff: cutoff(this.config.notificationSentDays) },
+      { name: 'NotificationOutbox.FAILED', table: `"NotificationOutbox"`, where: `"status" = 'FAILED' AND "lockedUntil" IS NULL AND "createdAt" < $1`, cutoff: cutoff(this.config.notificationFailedDays) },
       // IdempotencyKey: expired keys (live PROCESSING rows have a future expiresAt → never matched).
-      { name: 'IdempotencyKey', table: '`IdempotencyKey`', where: '`expiresAt` < ?', cutoff: new Date(now) },
+      { name: 'IdempotencyKey', table: `"IdempotencyKey"`, where: `"expiresAt" < $1`, cutoff: new Date(now) },
       // PaymentUploadToken: deleted only N days AFTER expiry, so active and recently-
       // expired tokens (future or within-window expiresAt) are never matched.
-      { name: 'PaymentUploadToken', table: '`PaymentUploadToken`', where: '`expiresAt` < ?', cutoff: cutoff(this.config.uploadTokenExpiredDays) },
+      { name: 'PaymentUploadToken', table: `"PaymentUploadToken"`, where: `"expiresAt" < $1`, cutoff: cutoff(this.config.uploadTokenExpiredDays) },
     ];
   }
 
@@ -153,8 +153,11 @@ export class RetentionWorker implements OnApplicationBootstrap, OnModuleDestroy 
 
   private async deleteBatch(policy: RetentionPolicy, limit: number): Promise<number> {
     // limit is a validated integer from config → injection-safe to inline; cutoff is parameterized.
+    // PostgreSQL has no LIMIT on DELETE, so the batch is chosen by a sub-select.
+    // ctid, not id: ProcessedEvent has a COMPOSITE primary key (consumer, messageId)
+    // and no single id column, so ctid is the one row identifier all six tables share.
     const affected = await this.prisma.$executeRawUnsafe(
-      `DELETE FROM ${policy.table} WHERE ${policy.where} LIMIT ${limit}`,
+      `DELETE FROM ${policy.table} WHERE ctid IN (SELECT ctid FROM ${policy.table} WHERE ${policy.where} LIMIT ${limit})`,
       policy.cutoff,
     );
     return Number(affected);

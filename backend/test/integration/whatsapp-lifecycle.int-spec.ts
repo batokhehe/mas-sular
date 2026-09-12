@@ -1,5 +1,5 @@
 /**
- * PAXELBOX-61AG.3.29 — WhatsApp lifecycle end to end, against real MySQL.
+ * PAXELBOX-61AG.3.29 — WhatsApp lifecycle end to end, against real PostgreSQL.
  *
  * Everything downstream of the domain transaction is the real thing: the real
  * OrderCreatedNotificationConsumer, the real ShipmentService transitions, the
@@ -136,7 +136,7 @@ describe('WA lifecycle (real DB, stubbed Qontak)', () => {
 
   const rowsFor = (orderId: string, template?: string) =>
     world.prisma.notificationOutbox.findMany({
-      where: { template, payload: { path: '$.orderId', equals: orderId } },
+      where: { template, payload: { path: ['orderId'], equals: orderId } },
       orderBy: { createdAt: 'asc' },
     })
 

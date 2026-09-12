@@ -34,6 +34,13 @@ ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL} \
     NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+# Production-readiness B4 - the storefront URL contract, enforced at BUILD time.
+# The storefront client APPENDS /api/v1 itself, so this is the bare API origin
+# (https://<API_DOMAIN>), never .../api/v1 - which would produce /api/v1/api/v1/...
+# Empty is allowed: the client then calls the same origin (/api/v1 behind a proxy).
+RUN case "${NEXT_PUBLIC_API_URL}" in \
+      */api/v1|*/api/v1/) echo "ERROR: storefront NEXT_PUBLIC_API_URL must be the bare API origin (the client appends /api/v1), got '${NEXT_PUBLIC_API_URL}'"; exit 1 ;; \
+    esac
 RUN pnpm build
 # Fail the BUILD, not the container, if standalone lands somewhere unexpected.
 # Next nests output under the package path when it detects a monorepo root

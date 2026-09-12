@@ -20,11 +20,11 @@ export function HomeHero() {
           </span>
 
           <h1 className="text-balance text-3xl font-bold tracking-tight sm:text-4xl lg:text-5xl">
-            Bakso Premium <span className="text-primary">Asli Nusantara</span>
+            Bakso Bumbu Rujak <span className="text-primary">Favorit Keluarga</span>
           </h1>
 
           <p className="mx-auto mt-4 max-w-lg text-pretty text-muted-foreground lg:mx-0">
-            Nikmati kelezatan bakso berkualitas tinggi dengan daging sapi pilihan, langsung diantar ke rumah Anda.
+            Gak pake kuah, Bakso mas sular hadir dengan sensasi kenikmatan yang beda, gak gitu aja.
           </p>
 
           <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row lg:justify-start">

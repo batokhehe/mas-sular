@@ -2,7 +2,7 @@ import { Inject, Injectable, NestMiddleware } from '@nestjs/common';
 import { LogLevel } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import type { NextFunction, Request, Response } from 'express';
-import { acceptableRequestId, redactSensitivePath, redactSensitiveQuery } from '../../common/logging/redact';
+import { acceptableRequestId, redactSensitiveParams, redactSensitivePath, redactSensitiveQuery } from '../../common/logging/redact';
 import { LOG_CONFIG, LogConfig } from './log.config';
 import { LogService } from './log.service';
 import { runWithRequestContext } from './request-context';
@@ -65,9 +65,10 @@ export class RequestLoggingMiddleware implements NestMiddleware {
         orderId: p.orderId ?? (rawPath.includes('/orders/') ? p.id : undefined) ?? null,
         paymentId: p.paymentId ?? null,
         shipmentId: p.shipmentId ?? null,
-        // Credential-bearing query values (e.g. the SSE stream's ?token= JWT) are
-        // redacted BEFORE persistence — SystemLog readers must never see them.
-        metadata: { query: redactSensitiveQuery(req.query), params: p, userAgent: req.headers['user-agent'] ?? null },
+        // Credential-bearing query values (e.g. the SSE stream's ?token= JWT) and
+        // capability tokens in the route params (payment upload, P2 #14 invoice)
+        // are redacted BEFORE persistence — SystemLog readers must never see them.
+        metadata: { query: redactSensitiveQuery(req.query), params: redactSensitiveParams(p), userAgent: req.headers['user-agent'] ?? null },
       });
     });
 

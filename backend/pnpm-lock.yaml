@@ -117,7 +117,7 @@ importers:
       '@nestjs/testing':
         specifier: ^11.1.0
         version: 11.2.0(@nestjs/common@11.2.0(class-transformer@0.5.1)(class-validator@0.14.4)(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.2.0)(@nestjs/platform-express@11.2.0)
-      '@testcontainers/mysql':
+      '@testcontainers/postgresql':
         specifier: ^10.28.0
         version: 10.28.0
       '@testcontainers/rabbitmq':
@@ -1167,8 +1167,8 @@ packages:
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
 
-  '@testcontainers/mysql@10.28.0':
-    resolution: {integrity: sha512-yZKe86Esg8mPyr957aSwdkmDqXH17vab5aUcDqwR/E2fZpZxLetwfvmoVP+V6TpQQNTYrVTyP5T+HPMgaZeIkA==}
+  '@testcontainers/postgresql@10.28.0':
+    resolution: {integrity: sha512-NN25rruG5D4Q7pCNIJuHwB+G85OSeJ3xHZ2fWx0O6sPoPEfCYwvpj8mq99cyn68nxFkFYZeyrZJtSFO+FnydiA==}
 
   '@testcontainers/rabbitmq@10.28.0':
     resolution: {integrity: sha512-Gl8/gAYfRCsjuhTfAIT7/0e49ozMRe05RDFr2CFQWcZDgB4A7qx2QaUqEIhcQnHqRjfEQTWoV1PovnGNZU+dGQ==}
@@ -2215,6 +2215,7 @@ packages:
   eslint@9.39.5:
     resolution: {integrity: sha512-DgZS62aPLXKlnxILS/AYCoRvHaZeXceIzlXPkkGGzJWSow1aEk0lbTlxUSlyjC8jcaKxAdOnTDz+o1JFSBsyjw==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
+    deprecated: This version is no longer supported. Please see https://eslint.org/version-support for other options.
     hasBin: true
     peerDependencies:
       jiti: '*'
@@ -5150,7 +5151,7 @@ snapshots:
 
   '@standard-schema/spec@1.1.0': {}
 
-  '@testcontainers/mysql@10.28.0':
+  '@testcontainers/postgresql@10.28.0':
     dependencies:
       testcontainers: 10.28.0
     transitivePeerDependencies:

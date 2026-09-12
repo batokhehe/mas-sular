@@ -26,7 +26,6 @@ const AWB = 'MERCHANT-20200224-1-HB4OBT';
 
 function config(over: Partial<{ enabled: boolean; maxRetry: number }> = {}): ShippingConfig {
   return {
-    originPostalCode: '40111',
     allowMockRates: false,
     // RajaOngkir is the JNE rate source (PAXELBOX-45); disabled here so these
     // pre-existing cases keep exercising exactly what they always did.

@@ -1,5 +1,5 @@
 /**
- * Phase 5J.1 — RESUMING a gateway payment against REAL MySQL.
+ * Phase 5J.1 — RESUMING a gateway payment against REAL PostgreSQL.
  *
  * The unit spec proves the resume logic with a mocked ledger. This one proves the
  * claim that actually matters operationally: after N resumes there is still

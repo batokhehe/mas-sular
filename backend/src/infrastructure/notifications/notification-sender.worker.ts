@@ -147,10 +147,19 @@ export class NotificationSenderWorker implements OnApplicationBootstrap, OnModul
     const limit = Math.trunc(this.config.batchSize);
 
     await this.prisma.$executeRawUnsafe(
-      'UPDATE `NotificationOutbox` SET `lockedUntil` = ?, `lockedBy` = ? ' +
-        "WHERE `status` = 'PENDING' AND `nextAttemptAt` <= ? " +
-        'AND (`lockedUntil` IS NULL OR `lockedUntil` < ?) ' +
-        `ORDER BY \`nextAttemptAt\` ASC LIMIT ${limit}`,
+      // PostgreSQL has no ORDER BY / LIMIT on UPDATE, so the rows to claim are
+      // chosen by a sub-select. FOR UPDATE SKIP LOCKED is what MySQL's
+      // `UPDATE ... LIMIT` gave us implicitly and then some: a row another worker
+      // is claiming right now is skipped rather than waited on, so two relays never
+      // serialise on the same batch. The stale-lease predicate is unchanged, so a
+      // crashed attempt is still reclaimable after leaseMs.
+      `UPDATE "NotificationOutbox" SET "lockedUntil" = $1, "lockedBy" = $2 ` +
+        `WHERE id IN (` +
+          `SELECT id FROM "NotificationOutbox" ` +
+          `WHERE "status" = 'PENDING' AND "nextAttemptAt" <= $3 ` +
+          `AND ("lockedUntil" IS NULL OR "lockedUntil" < $4) ` +
+          `ORDER BY "nextAttemptAt" ASC LIMIT ${limit} FOR UPDATE SKIP LOCKED` +
+        `)`,
       leaseExpiry,
       claimToken,
       now,

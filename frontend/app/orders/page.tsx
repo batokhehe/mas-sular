@@ -159,6 +159,13 @@ function OrderCard({ order, onRefetch }: { order: Order; onRefetch: () => void }
                 <span>-{formatIDR(order.voucherDiscountAmount)}</span>
               </div>
             ) : null}
+            {/* Gateway orders always list the fee — Rp0 when the merchant absorbs it. */}
+            {order.paymentMethod === 'GATEWAY' ? (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Biaya Layanan</span>
+                <span>{formatIDR(order.paymentServiceFee)}</span>
+              </div>
+            ) : null}
             <div className="flex justify-between border-t pt-1 font-semibold">
               <span>Total</span>
               <span className="text-primary">{formatIDR(order.totalPrice)}</span>

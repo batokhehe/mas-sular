@@ -132,20 +132,23 @@ export class QueueCenterService {
 
   private async tableStats(table: 'OutboxEvent' | 'NotificationOutbox', now: Date): Promise<TableStats> {
     try {
-      const t = Prisma.raw(`\`${table}\``);
+      const t = Prisma.raw(`"${table}"`);
       const successState = table === 'OutboxEvent' ? 'PUBLISHED' : 'SENT';
-      const doneCol = table === 'OutboxEvent' ? Prisma.raw('publishedAt') : Prisma.raw('sentAt');
+      const doneCol = table === 'OutboxEvent' ? Prisma.raw('"publishedAt"') : Prisma.raw('"sentAt"');
+      // The status column is a NATIVE enum in PostgreSQL, so a bound parameter
+      // must be cast to the enum type that belongs to THIS table.
+      const enumT = Prisma.raw(table === 'OutboxEvent' ? '"OutboxStatus"' : '"NotificationStatus"');
       const rows = await this.prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
         SELECT
-          SUM(status = 'PENDING') pending,
-          SUM(status = 'PENDING' AND lockedUntil IS NOT NULL AND lockedUntil > ${now}) processing,
-          SUM(status = ${successState}) published,
-          SUM(status = 'FAILED') failed,
-          SUM(status = 'PENDING' AND attempts > 0) retrying,
-          MIN(CASE WHEN status = 'PENDING' THEN createdAt END) oldestPending,
-          MAX(${doneCol}) lastActivity,
-          MAX(CASE WHEN status = 'FAILED' THEN createdAt END) lastFailure,
-          AVG(CASE WHEN status = ${successState} AND ${doneCol} IS NOT NULL THEN TIMESTAMPDIFF(MICROSECOND, createdAt, ${doneCol}) / 1000 END) avgPublishMs
+          COUNT(*) FILTER (WHERE status = 'PENDING') pending,
+          COUNT(*) FILTER (WHERE status = 'PENDING' AND "lockedUntil" IS NOT NULL AND "lockedUntil" > ${now}) processing,
+          COUNT(*) FILTER (WHERE status = ${successState}::${enumT}) published,
+          COUNT(*) FILTER (WHERE status = 'FAILED') failed,
+          COUNT(*) FILTER (WHERE status = 'PENDING' AND attempts > 0) retrying,
+          MIN("createdAt") FILTER (WHERE status = 'PENDING') "oldestPending",
+          MAX(${doneCol}) "lastActivity",
+          MAX("createdAt") FILTER (WHERE status = 'FAILED') "lastFailure",
+          AVG(EXTRACT(EPOCH FROM (${doneCol} - "createdAt")) * 1000) FILTER (WHERE status = ${successState}::${enumT} AND ${doneCol} IS NOT NULL) "avgPublishMs"
         FROM ${t}
       `);
       const r = rows[0] ?? {};
@@ -184,13 +187,13 @@ export class QueueCenterService {
     try {
       const rows = await this.prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
         SELECT module,
-          SUM(action = 'tick') success,
-          SUM(action = 'tick.failed') failure,
-          MAX(CASE WHEN action = 'tick' THEN createdAt END) lastSuccess,
-          MAX(CASE WHEN action = 'tick.failed' THEN createdAt END) lastFailure,
-          MAX(createdAt) heartbeat,
-          AVG(durationMs) avgMs
-        FROM \`SystemLog\` WHERE module LIKE 'worker.%' GROUP BY module
+          COUNT(*) FILTER (WHERE action = 'tick') success,
+          COUNT(*) FILTER (WHERE action = 'tick.failed') failure,
+          MAX("createdAt") FILTER (WHERE action = 'tick') "lastSuccess",
+          MAX("createdAt") FILTER (WHERE action = 'tick.failed') "lastFailure",
+          MAX("createdAt") heartbeat,
+          AVG("durationMs") "avgMs"
+        FROM "SystemLog" WHERE module LIKE 'worker.%' GROUP BY module
       `);
       byModule = new Map(rows.map((r) => [String(r.module), r]));
     } catch {
@@ -225,14 +228,17 @@ export class QueueCenterService {
 
   private async lastActivityOf(table: 'OutboxEvent' | 'NotificationOutbox') {
     try {
-      const t = Prisma.raw(`\`${table}\``);
+      const t = Prisma.raw(`"${table}"`);
       const successState = table === 'OutboxEvent' ? 'PUBLISHED' : 'SENT';
-      const doneCol = table === 'OutboxEvent' ? Prisma.raw('publishedAt') : Prisma.raw('sentAt');
+      const doneCol = table === 'OutboxEvent' ? Prisma.raw('"publishedAt"') : Prisma.raw('"sentAt"');
+      // The status column is a NATIVE enum in PostgreSQL, so a bound parameter
+      // must be cast to the enum type that belongs to THIS table.
+      const enumT = Prisma.raw(table === 'OutboxEvent' ? '"OutboxStatus"' : '"NotificationStatus"');
       const rows = await this.prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
-        SELECT MAX(${doneCol}) lastSuccess,
-               MAX(CASE WHEN status = 'FAILED' THEN createdAt END) lastFailure,
-               SUM(status = ${successState}) success,
-               SUM(status = 'FAILED') failure
+        SELECT MAX(${doneCol}) "lastSuccess",
+               MAX("createdAt") FILTER (WHERE status = 'FAILED') "lastFailure",
+               COUNT(*) FILTER (WHERE status = ${successState}::${enumT}) success,
+               COUNT(*) FILTER (WHERE status = 'FAILED') failure
         FROM ${t}
       `);
       const r = rows[0] ?? {};

@@ -205,9 +205,14 @@ export function PromoForm({
           </label>
           <label className="space-y-2 text-sm text-gray-700">
             <span>Max usage count</span>
+            {/* Blank = unlimited (omitted -> null). The floor is 1, not 0: the backend
+                enforces 0 as "no uses allowed" (hidden from the storefront, rejected at
+                checkout), so a 0 here only ever produced a dead voucher. See
+                lib/promos/usage-display.ts. */}
             <input
               type="number"
-              min={0}
+              min={1}
+              placeholder="Unlimited"
               value={values.maxUsageCount ?? ''}
               onChange={(event) => handleNumericChange('maxUsageCount', event.target.value)}
               className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none focus:border-[#465fff] focus:bg-white"

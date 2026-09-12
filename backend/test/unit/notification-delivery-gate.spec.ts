@@ -5,7 +5,9 @@ import {
   loadNotificationDeliveryConfig,
   maskRecipient,
   normalizeRecipient,
+  resolveRecipientPolicy,
 } from '../../src/infrastructure/notifications/notification-delivery.gate';
+import { validateEnv } from '../../src/common/config/env.validation';
 import { NotificationSenderWorker } from '../../src/infrastructure/notifications/notification-sender.worker';
 import { QontakWhatsAppProvider } from '../../src/infrastructure/notifications/qontak-whatsapp.provider';
 import { EmailNotificationProvider } from '../../src/infrastructure/notifications/email-notification.provider';
@@ -359,7 +361,7 @@ describe('existing FAILED rows stay dead unless someone acts deliberately', () =
 
     await worker.processBatch();
 
-    expect(String(prisma.$executeRawUnsafe.mock.calls[0][0])).toContain("`status` = 'PENDING'");
+    expect(String(prisma.$executeRawUnsafe.mock.calls[0][0])).toContain(`"status" = 'PENDING'`);
     expect(prisma.notificationOutbox.findMany.mock.calls[0][0].where).toMatchObject({ status: 'PENDING' });
   });
 
@@ -483,5 +485,118 @@ describe('the gate in isolation', () => {
     const gate = new NotificationDeliveryGate({ enabled: true, allowedRecipients: [CUSTOMER_PHONE] });
     expect(() => gate.assertDeliverable(message())).not.toThrow();
     expect(() => gate.assertDeliverable(message({ recipient: { name: 'P', phone: '628111222333' } }))).toThrow(/not allowlisted/);
+  });
+});
+
+// ------------------------------------------------------ B6 recipient policy
+/**
+ * Production-readiness B6. The allowlist is the right default for development,
+ * but with no other mode production could never message a real customer. An
+ * explicit, production-only `NOTIFICATION_RECIPIENT_POLICY=all` widens WHO may
+ * receive a message - and nothing else. Every provider below is the REAL one with
+ * its HTTP seam spied and pointed at `.invalid`: no real send can happen.
+ */
+const PROD_ALL = { NODE_ENV: 'production', NOTIFICATION_DELIVERY_ENABLED: 'true', NOTIFICATION_RECIPIENT_POLICY: 'all' };
+const ARBITRARY_CUSTOMER = '6281377788899'; // on no allowlist anywhere
+
+describe('B6: the default policy cannot reach arbitrary recipients', () => {
+  it('defaults to allowlist, and every unknown/misspelled value is allowlist', () => {
+    for (const raw of [undefined, '', 'allowlist', 'ALL', 'All', 'everyone', '*', 'true', ' all-customers ']) {
+      const env = raw === undefined ? { NODE_ENV: 'production' } : { NODE_ENV: 'production', NOTIFICATION_RECIPIENT_POLICY: raw };
+      expect(resolveRecipientPolicy(env)).toBe('allowlist');
+    }
+  });
+
+  it('is never `all` outside production, whatever the variable says (no development wildcard)', () => {
+    for (const NODE_ENV of [undefined, 'development', 'test', 'staging']) {
+      expect(resolveRecipientPolicy({ NODE_ENV, NOTIFICATION_RECIPIENT_POLICY: 'all' })).toBe('allowlist');
+    }
+  });
+
+  it('a development stack with policy=all and delivery on still blocks an arbitrary customer', async () => {
+    const { worker, qontakHttp, prisma } = build({
+      env: { NODE_ENV: 'development', NOTIFICATION_DELIVERY_ENABLED: 'true', NOTIFICATION_RECIPIENT_POLICY: 'all' },
+      recipient: ARBITRARY_CUSTOMER,
+    });
+    await worker.processBatch();
+    expect(qontakHttp).not.toHaveBeenCalled();
+    expect(persistedError(prisma)).toContain('NOTIFICATION_ALLOWED_RECIPIENTS is empty');
+  });
+
+  it('boot validation rejects `all` outside production and any unknown value', () => {
+    const base = {
+      DATABASE_URL: 'postgresql://u:p@db:5432/app', REDIS_URL: 'redis://redis:6379',
+      JWT_ACCESS_SECRET: 'a'.repeat(32), JWT_REFRESH_SECRET: 'b'.repeat(32), JWT_ADMIN_ACCESS_SECRET: 'c'.repeat(32),
+      GOOGLE_CLIENT_ID: 'g', APP_URL: 'https://api.example.invalid', CORS_ORIGINS: 'https://shop.example.invalid',
+      CHECKOUT_IDEMPOTENCY_ENABLED: 'true', TRUST_PROXY_HOPS: '1',
+    };
+    for (const NODE_ENV of ['development', 'test', 'staging']) {
+      expect(() => validateEnv({ ...base, NODE_ENV, NOTIFICATION_RECIPIENT_POLICY: 'all' })).toThrow(/only allowed with NODE_ENV=production/);
+    }
+    expect(() => validateEnv({ ...base, NODE_ENV: 'production', NOTIFICATION_RECIPIENT_POLICY: 'everyone' })).toThrow(/NOTIFICATION_RECIPIENT_POLICY/);
+    expect(() => validateEnv({ ...base, NODE_ENV: 'production', NOTIFICATION_RECIPIENT_POLICY: 'all' })).not.toThrow();
+    expect(() => validateEnv({ ...base, NODE_ENV: 'production' })).not.toThrow(); // unset = allowlist
+  });
+});
+
+describe('B6: explicit production policy delivers to legitimate customer recipients', () => {
+  // Order, payment, shipment/AWB and the #14 manual invoice message all leave through
+  // this ONE gate in NotificationSenderWorker.sendRow.
+  const templates = ['order.new', 'order.transfer', 'order.cod', 'order.shipped', 'order.delivered', 'shipment.status', 'manual.order-update'];
+
+  it.each(templates)('WhatsApp %s reaches an arbitrary customer (mock transport)', async (template) => {
+    const { worker, qontakHttp, prisma } = build({
+      env: PROD_ALL,
+      rows: [outboxRow({ template, recipient: ARBITRARY_CUSTOMER })],
+    });
+    await worker.processBatch();
+    expect(qontakHttp).toHaveBeenCalledTimes(1);
+    expect(String((qontakHttp.mock.calls[0] as unknown[])[0])).toContain('qontak.invalid');
+    expect(prisma.notificationOutbox.updateMany.mock.calls[0][0].data.status).toBe('SENT');
+  });
+
+  it('Resend email reaches an arbitrary customer (mock transport)', async () => {
+    const { worker, resendHttp, qontakHttp } = build({ env: PROD_ALL, channel: NotificationChannel.EMAIL, recipient: 'someone@example.invalid' });
+    await worker.processBatch();
+    expect(resendHttp).toHaveBeenCalledTimes(1);
+    expect(qontakHttp).not.toHaveBeenCalled();
+  });
+
+  it('`all` does not bypass the master switch: delivery disabled still blocks', async () => {
+    const { worker, qontakHttp, factory, prisma } = build({
+      env: { NODE_ENV: 'production', NOTIFICATION_RECIPIENT_POLICY: 'all' },
+      recipient: ARBITRARY_CUSTOMER,
+    });
+    await worker.processBatch();
+    expect(factory.get).not.toHaveBeenCalled();
+    expect(qontakHttp).not.toHaveBeenCalled();
+    expect(persistedError(prisma)).toContain('NOTIFICATION_DELIVERY_ENABLED');
+  });
+
+  it('`all` does not bypass recipient validity: an unusable recipient is blocked', async () => {
+    const { worker, qontakHttp, prisma } = build({ env: PROD_ALL, recipient: 'not-a-phone' });
+    await worker.processBatch();
+    expect(qontakHttp).not.toHaveBeenCalled();
+    expect(persistedError(prisma)).toContain('no usable recipient');
+  });
+
+  it('an explicit production allowlist policy still restricts', async () => {
+    const { worker, qontakHttp, prisma } = build({
+      env: { ...PROD_ALL, NOTIFICATION_RECIPIENT_POLICY: 'allowlist', NOTIFICATION_ALLOWED_RECIPIENTS: CUSTOMER_PHONE },
+      recipient: ARBITRARY_CUSTOMER,
+    });
+    await worker.processBatch();
+    expect(qontakHttp).not.toHaveBeenCalled();
+    expect(persistedError(prisma)).toContain('is not allowlisted');
+  });
+
+  it('#14 manual invoice WhatsApp is held by the same gate under the default policy', async () => {
+    const { worker, qontakHttp, prisma } = build({
+      env: { NODE_ENV: 'production', NOTIFICATION_DELIVERY_ENABLED: 'true' },
+      rows: [outboxRow({ template: 'manual.order-update', recipient: ARBITRARY_CUSTOMER })],
+    });
+    await worker.processBatch();
+    expect(qontakHttp).not.toHaveBeenCalled();
+    expect(persistedError(prisma)).toContain('blocked by notification safety gate');
   });
 });

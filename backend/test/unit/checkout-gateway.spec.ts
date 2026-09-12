@@ -75,7 +75,7 @@ describe('checkout gateway payload — response normalization', () => {
   it('carries every additive field the checkout response promises', () => {
     const payload = buildCheckoutGatewayPayload(charge(), descriptor('QRIS'));
     expect(Object.keys(payload).sort()).toEqual([
-      'deeplinkUrl', 'expiryAt', 'paymentChannel', 'paymentInstruction', 'paymentMethod',
+      'amountBreakdown', 'deeplinkUrl', 'expiryAt', 'paymentChannel', 'paymentInstruction', 'paymentMethod',
       'provider', 'providerStatus', 'qrString', 'redirectUrl', 'vaNumber',
     ].sort());
     expect(payload).toMatchObject({
@@ -86,6 +86,22 @@ describe('checkout gateway payload — response normalization', () => {
       qrString: 'QR-DATA',
       expiryAt: '2026-07-12T03:00:00.000Z',
     });
+  });
+
+  it('carries the attempt\'s customer-facing amount breakdown (fresh charge and ledger rebuild), never the absorbed share', () => {
+    const breakdown = { baseAmount: 105_000, serviceFee: 0, total: 105_000 };
+    expect(buildCheckoutGatewayPayload(charge({ amountBreakdown: breakdown }), descriptor('QRIS')).amountBreakdown).toEqual(breakdown);
+    expect(buildCheckoutGatewayPayload(charge(), descriptor('QRIS')).amountBreakdown).toBeNull();
+
+    const row = {
+      channelCode: 'BNI_VA', provider: 'midtrans', status: GatewayTransactionStatus.PENDING, grossAmount: 109_000,
+      baseAmount: 105_000, serviceFeeCustomer: 4_000, vaNumber: '8808', qrString: null, redirectUrl: null, deeplinkUrl: null, expiryAt: null,
+    };
+    const rebuilt = buildGatewayPayloadFromLedger(row, descriptor('BNI_VA'));
+    expect(rebuilt.amountBreakdown).toEqual({ baseAmount: 105_000, serviceFee: 4_000, total: 109_000 });
+    expect(JSON.stringify(rebuilt)).not.toMatch(/bsorbed|Calculated/);
+    // A legacy attempt with no snapshot rebuilds with no breakdown (unchanged behaviour).
+    expect(buildGatewayPayloadFromLedger({ ...row, baseAmount: null }, descriptor('BNI_VA')).amountBreakdown).toBeNull();
   });
 
   it('routes the action URL to deeplinkUrl for wallets and redirectUrl otherwise', () => {
@@ -156,6 +172,7 @@ describe('channel catalog metadata for the storefront', () => {
 // Checkout flow integration: gateway charge runs AFTER commit, manual untouched.
 // ---------------------------------------------------------------------------
 import { OrdersService } from '../../src/modules/orders/orders.service';
+import { MERCHANT_FEE_FIELDS } from '../../src/modules/orders/domain/customer-order-view';
 import { CheckoutCourier, CreateOrderDto } from '../../src/modules/orders/application/dto/create-order.dto';
 import { PaymentChannelRegistry } from '../../src/modules/payments/gateway/payment-channel.registry';
 import { PaymentProviderFactory } from '../../src/modules/payments/gateway/payment-provider.factory';
@@ -194,7 +211,7 @@ function checkoutPrisma() {
   };
 }
 
-function checkoutService(initiate?: jest.Mock) {
+function checkoutService(initiate?: jest.Mock, feeEnabled = true) {
   const prisma = checkoutPrisma();
   const shipping = { calculateRateForCourier: jest.fn().mockResolvedValue({ cost: 10000, etd: '2 days' }) };
   const idempotency = { isCheckoutEnabled: jest.fn().mockReturnValue(false) };
@@ -209,6 +226,7 @@ function checkoutService(initiate?: jest.Mock) {
     undefined, undefined, undefined, undefined,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     initiation as any, initiate ? registry : undefined,
+    { enabled: feeEnabled }, // PAYMENT_SERVICE_FEE_ENABLED
   );
   return { service, prisma, initiate };
 }
@@ -236,34 +254,96 @@ describe('checkout → gateway integration', () => {
     expect((body.paymentInstruction as { type: string }).type).toBe('QR');
   });
 
-  it('calculates the QRIS fee once from subtotal + shipping, then persists and charges that total', async () => {
+  it('A. fee ENABLED: persists the full breakdown and the customer total includes the fee', async () => {
     const initiate = chargeOk();
-    const { service, prisma } = checkoutService(initiate);
+    const { service, prisma } = checkoutService(initiate, true);
 
-    await service.checkout(USER, checkoutDto({ payment_method: PaymentMethod.GATEWAY, payment_channel: 'QRIS' }));
+    await service.checkout(USER, checkoutDto({ payment_method: PaymentMethod.GATEWAY, payment_channel: 'BNI_VA' }));
 
     const data = prisma.__tx.order.create.mock.calls[0][0].data;
     // Product (20,000) + shipping (10,000) is the fee base: no tax is added.
-    expect(data.paymentServiceFee).toBe(210);
-    expect(data.totalPrice).toBe(30_210);
-    expect(data.payment.create.amount).toBe(30_210);
+    expect(data).toMatchObject({
+      paymentServiceFee: 4_000, paymentServiceFeeCalculated: 4_000, paymentServiceFeeAbsorbed: 0,
+      paymentServiceFeeEnabled: true, paymentServiceFeeChannel: 'BNI_VA', totalPrice: 34_000,
+    });
+    expect(data.paymentServiceFeeRule).toMatchObject({ channel: 'BNI_VA', type: 'FIXED', fixedAmount: 4_000, passThrough: 'ALLOWED' });
+    expect(data.payment.create.amount).toBe(34_000);
     // Shipping is stored unchanged and is not conflated with the payment fee.
     expect(data.shipment.create.cost).toBe(10_000);
   });
 
-  it('recalculates the summary when the selected gateway channel changes', async () => {
-    const { service } = checkoutService();
+  it('B/D. fee DISABLED: customer total excludes the fee, the merchant cost is still recorded', async () => {
+    const initiate = chargeOk();
+    const { service, prisma } = checkoutService(initiate, false);
 
-    const qris = await service.getSummary(USER, checkoutDto({ payment_method: PaymentMethod.GATEWAY, payment_channel: 'QRIS' }));
-    const gopay = await service.getSummary(USER, checkoutDto({ payment_method: PaymentMethod.GATEWAY, payment_channel: 'GOPAY' }));
-    const bni = await service.getSummary(USER, checkoutDto({ payment_method: PaymentMethod.GATEWAY, payment_channel: 'BNI_VA' }));
-    const bca = await service.getSummary(USER, checkoutDto({ payment_method: PaymentMethod.GATEWAY, payment_channel: 'BCA_VA' }));
+    await service.checkout(USER, checkoutDto({ payment_method: PaymentMethod.GATEWAY, payment_channel: 'BNI_VA' }));
 
-    expect([qris, gopay, bni, bca].map((summary) => summary.payment_service_fee)).toEqual([210, 600, 4_000, 0]);
-    expect([qris, gopay, bni, bca].map((summary) => summary.grand_total)).toEqual([30_210, 30_600, 34_000, 30_000]);
+    const data = prisma.__tx.order.create.mock.calls[0][0].data;
+    expect(data).toMatchObject({
+      paymentServiceFee: 0, paymentServiceFeeCalculated: 4_000, paymentServiceFeeAbsorbed: 4_000,
+      paymentServiceFeeEnabled: false, paymentServiceFeeChannel: 'BNI_VA', totalPrice: 30_000,
+    });
+    expect(data.payment.create.amount).toBe(30_000);
   });
 
-  it('deducts an existing voucher discount before calculating the QRIS fee base', async () => {
+  it('C. summary per channel in both modes; QRIS and cards never pass the fee on', async () => {
+    const channels = ['QRIS', 'GOPAY', 'BNI_VA', 'BCA_VA', 'SHOPEEPAY', 'CREDIT_CARD'];
+    const on = checkoutService(undefined, true).service;
+    const off = checkoutService(undefined, false).service;
+    const enabled = await Promise.all(channels.map((c) => on.getSummary(USER, checkoutDto({ payment_method: PaymentMethod.GATEWAY, payment_channel: c }))));
+    const disabled = await Promise.all(channels.map((c) => off.getSummary(USER, checkoutDto({ payment_method: PaymentMethod.GATEWAY, payment_channel: c }))));
+
+    //                                            QRIS  GOPAY  BNI_VA  BCA_VA  SHOPEEPAY  CARD
+    expect(enabled.map((s) => s.payment_service_fee)).toEqual([0, 600, 4_000, 4_000, 600, 0]);
+    expect(enabled.map((s) => s.grand_total)).toEqual([30_000, 30_600, 34_000, 34_000, 30_600, 30_000]);
+    expect(disabled.map((s) => s.payment_service_fee)).toEqual([0, 0, 0, 0, 0, 0]);
+    expect(disabled.map((s) => s.grand_total)).toEqual([30_000, 30_000, 30_000, 30_000, 30_000, 30_000]);
+    // The "Biaya Layanan" row applies to every gateway summary, Rp0 included.
+    expect([...enabled, ...disabled].every((s) => s.payment_service_fee_applies === true)).toBe(true);
+  });
+
+  it('the customer-facing summary never exposes the merchant-absorbed fee or the rule', async () => {
+    const summary = await checkoutService(undefined, false).service.getSummary(USER, checkoutDto({ payment_method: PaymentMethod.GATEWAY, payment_channel: 'BNI_VA' }));
+    expect(summary).not.toHaveProperty('payment_service_fee_breakdown');
+    expect(JSON.stringify(summary)).not.toMatch(/absorbed|Absorbed|calculatedFee|passThrough/);
+  });
+
+  it('the checkout response carries the customer fee but never the merchant fee accounting', async () => {
+    const { service, prisma } = checkoutService(chargeOk(), false);
+    // The persisted row carries the full breakdown (as the real create would return it).
+    prisma.__tx.order.create.mockResolvedValue({
+      ...CREATED_ORDER, paymentServiceFee: 0, paymentServiceFeeCalculated: 4_000, paymentServiceFeeAbsorbed: 4_000,
+      paymentServiceFeeEnabled: false, paymentServiceFeeChannel: 'BNI_VA', paymentServiceFeeRule: { channel: 'BNI_VA' },
+    });
+
+    const outcome = await service.checkout(USER, checkoutDto({ payment_method: PaymentMethod.GATEWAY, payment_channel: 'BNI_VA' }));
+    const body = (outcome as { body: Record<string, unknown> }).body;
+
+    expect(body).toMatchObject({ id: 'order-1', paymentServiceFee: 0, totalPrice: 30000 });
+    for (const field of MERCHANT_FEE_FIELDS) expect(body).not.toHaveProperty(field);
+  });
+
+  it('the customer order list never carries the merchant fee accounting', async () => {
+    const { service, prisma } = checkoutService();
+    Object.assign(prisma.order, {
+      findMany: jest.fn().mockResolvedValue([
+        { id: 'o1', paymentServiceFee: 0, paymentServiceFeeCalculated: 4_000, paymentServiceFeeAbsorbed: 4_000, paymentServiceFeeRule: {}, payment: null },
+        { id: 'o2', paymentServiceFee: 800, paymentServiceFeeCalculated: 800, paymentServiceFeeAbsorbed: 0, payment: { id: 'p', gatewayTransactions: [] } },
+      ]),
+    });
+
+    const orders = (await service.listForUser(USER)) as Array<Record<string, unknown>>;
+
+    expect(orders.map((o) => o.paymentServiceFee)).toEqual([0, 800]);
+    for (const order of orders) for (const field of MERCHANT_FEE_FIELDS) expect(order).not.toHaveProperty(field);
+  });
+
+  it('I. manual transfer: no gateway fee, no "Biaya Layanan" row, totals unchanged', async () => {
+    const summary = await checkoutService(undefined, true).service.getSummary(USER, checkoutDto({ payment_method: PaymentMethod.BANK_TRANSFER }));
+    expect(summary).toMatchObject({ subtotal: 20_000, shipping_cost: 10_000, discount: 0, payment_service_fee: 0, payment_service_fee_applies: false, grand_total: 30_000 });
+  });
+
+  it('H. deducts an existing voucher discount before calculating the fee base', async () => {
     const { service, prisma } = checkoutService();
     prisma.promo.findFirst.mockResolvedValue({
       id: 'promo-1', code: 'SAVE5K', isActive: true, startDate: null, endDate: null,
@@ -273,11 +353,12 @@ describe('checkout → gateway integration', () => {
     });
 
     const summary = await service.getSummary(USER, checkoutDto({
-      voucher_code: 'save5k', payment_method: PaymentMethod.GATEWAY, payment_channel: 'QRIS',
+      voucher_code: 'save5k', payment_method: PaymentMethod.GATEWAY, payment_channel: 'GOPAY',
     }));
 
-    // (20,000 subtotal + 10,000 shipping - 5,000 voucher) × 0.7% = 175.
-    expect(summary).toMatchObject({ discount: 5_000, payment_service_fee: 175, grand_total: 25_175 });
+    // Subtotal, shipping and the voucher are unchanged by the fee; the fee is on
+    // (20,000 subtotal + 10,000 shipping - 5,000 voucher) × 2% = 500.
+    expect(summary).toMatchObject({ subtotal: 20_000, shipping_cost: 10_000, discount: 5_000, payment_service_fee: 500, grand_total: 25_500 });
   });
 
   it('BANK_TRANSFER: byte-compatible — no gateway call, no extra fields', async () => {
@@ -288,7 +369,7 @@ describe('checkout → gateway integration', () => {
     const body = (outcome as { body: Record<string, unknown> }).body;
 
     expect(initiate).not.toHaveBeenCalled();
-    expect(body).toBe(CREATED_ORDER); // the exact object the transaction returned
+    expect(body).toStrictEqual(CREATED_ORDER); // exactly what the transaction returned: no extra fields
     expect(body).not.toHaveProperty('paymentInstruction');
   });
 
@@ -315,14 +396,14 @@ describe('checkout → gateway integration', () => {
     const body = (outcome as { body: Record<string, unknown> }).body;
 
     expect(initiate).toHaveBeenCalled();
-    expect(body).toBe(CREATED_ORDER); // order stands
+    expect(body).toStrictEqual(CREATED_ORDER); // order stands
     expect(body).not.toHaveProperty('paymentInstruction');
   });
 
   it('with the gateway module absent, checkout behaves exactly as before', async () => {
     const { service } = checkoutService(); // no initiation service injected
     const outcome = await service.checkout(USER, checkoutDto({ payment_method: PaymentMethod.GATEWAY, payment_channel: 'QRIS' }));
-    expect((outcome as { body: unknown }).body).toBe(CREATED_ORDER);
+    expect((outcome as { body: unknown }).body).toStrictEqual(CREATED_ORDER);
   });
 });
 

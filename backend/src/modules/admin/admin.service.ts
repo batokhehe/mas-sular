@@ -5,6 +5,8 @@ import { OrderStatus, PaymentStatus, Prisma, ShipmentStatus } from '@prisma/clie
 import { PrismaService } from '../../database/prisma.service';
 import { ShipmentService } from '../shipment/shipment.service';
 import { trackingCacheKey } from '../shipment/shipment-sync.service';
+import { mergeAdminShipmentMetadata } from '../shipment/shipment-metadata';
+import { lockShipmentRow } from '../shipment/shipment-row-lock';
 import { InventoryReservationService } from '../inventory/inventory-reservation.service';
 import { CreateBannerDto } from '../cms/application/dto/banner.dto';
 import {
@@ -18,6 +20,7 @@ import {
 } from './application/dto/admin-operations.dto';
 import { OrderCancellationService } from '../orders/order-cancellation.service';
 import { orderStatusSourcesFor } from '../orders/domain/order-status-transitions';
+import { isSkuUniqueViolation, skuCandidates, skuFromSlug } from './product-sku';
 import { CreateCategoryDto } from './application/dto/create-category.dto';
 import { CreateProductDto } from './application/dto/create-product.dto';
 import { CreatePromoDto } from './application/dto/create-promo.dto';
@@ -160,7 +163,23 @@ export class AdminService {
   }
 
   async createProduct(dto: CreateProductDto) {
-    return this.prisma.product.create({ data: { ...dto } });
+    // An explicit SKU is honoured exactly as before (P2 #5).
+    if (dto.sku?.trim()) return this.prisma.product.create({ data: { ...dto } });
+
+    // Otherwise assign one from the unique slug. SKU stays load-bearing (it is the
+    // Paxel item code), so a product must never be created without one; and a
+    // blank '' is never written because it would collide on @unique. Only a SKU
+    // collision moves to the next candidate - any other error (a duplicate slug,
+    // say) surfaces exactly as it did before.
+    const { sku: _blank, ...rest } = dto;
+    for (const sku of skuCandidates(skuFromSlug(dto.slug))) {
+      try {
+        return await this.prisma.product.create({ data: { ...rest, sku } });
+      } catch (err) {
+        if (!isSkuUniqueViolation(err)) throw err;
+      }
+    }
+    throw new ConflictException('Could not assign a unique SKU for this product; set one explicitly.');
   }
 
   listProducts() {
@@ -175,7 +194,12 @@ export class AdminService {
 
   async updateProduct(id: string, dto: UpdateProductDto) {
     await this.getProduct(id);
-    return this.prisma.product.update({ where: { id }, data: dto });
+    // The Admin form no longer sends a SKU (P2 #5), so an edit leaves the stored SKU
+    // untouched. A blank SKU is treated as "not provided" rather than written: ''
+    // would erase the Paxel item code and collide on @unique. A non-blank SKU from
+    // an API client is still applied as before.
+    const { sku, ...rest } = dto;
+    return this.prisma.product.update({ where: { id }, data: sku?.trim() ? dto : rest });
   }
 
   async deleteProduct(id: string) {
@@ -388,7 +412,9 @@ export class AdminService {
         select: { id: true, actorId: true, action: true, entity: true, entityId: true, ipAddress: true, after: true, createdAt: true },
       }),
       this.prisma.notificationOutbox.findMany({
-        where: { payload: { path: '$.orderId', equals: id } },
+        // PostgreSQL JSON path filter: an array of keys. MySQL took a JSONPath
+        // string ("$.orderId"); Prisma types the two differently per provider.
+        where: { payload: { path: ['orderId'], equals: id } },
         orderBy: { createdAt: 'desc' },
         take: 100,
         select: { id: true, channel: true, template: true, status: true, attempts: true, providerMessageId: true, sentAt: true, createdAt: true },
@@ -676,18 +702,30 @@ export class AdminService {
     // cached under it.
     await this.invalidateTrackingCache(existing.provider, existing.trackingNumber);
 
-    return this.prisma.shipment.update({
-      where: { id },
-      data: {
-        provider: dto.provider,
-        service: dto.service,
-        cost: dto.cost,
-        status: dto.status,
-        trackingNumber: dto.trackingNumber,
-        trackingUrl: dto.trackingUrl,
-        metadata: dto.metadata as Prisma.InputJsonValue | undefined,
-      },
-      include: { order: true },
+    const fields = {
+      provider: dto.provider,
+      service: dto.service,
+      cost: dto.cost,
+      status: dto.status,
+      trackingNumber: dto.trackingNumber,
+      trackingUrl: dto.trackingUrl,
+    };
+    if (dto.metadata === undefined) {
+      return this.prisma.shipment.update({ where: { id }, data: fields, include: { order: true } });
+    }
+
+    // A metadata edit MERGES into what is stored (never a wholesale replace), under
+    // the shipment row lock so it cannot overwrite what the JNE webhook or a poller
+    // is writing at the same moment. System-owned paths (jne.webhook, tracking) keep
+    // their stored value whatever the edit contains.
+    return this.prisma.$transaction(async (tx) => {
+      await lockShipmentRow(tx, id);
+      const current = await tx.shipment.findUnique({ where: { id }, select: { metadata: true } });
+      return tx.shipment.update({
+        where: { id },
+        data: { ...fields, metadata: mergeAdminShipmentMetadata(current?.metadata, dto.metadata as Record<string, unknown>) },
+        include: { order: true },
+      });
     });
   }
 

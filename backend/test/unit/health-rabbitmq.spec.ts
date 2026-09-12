@@ -22,10 +22,10 @@ const { HealthController } = require('../../src/health.controller') as typeof im
 
 const RABBIT_URL = 'amqps://user:pass@broker.example.test:5671/vhost';
 
-function controller(opts: { redisOk?: boolean; mysqlOk?: boolean } = {}) {
+function controller(opts: { redisOk?: boolean; postgresOk?: boolean } = {}) {
   const prisma = {
     $queryRaw: jest.fn(async () => {
-      if (opts.mysqlOk === false) throw new Error('db down');
+      if (opts.postgresOk === false) throw new Error('db down');
       return [{ 1: 1 }];
     }),
   };
@@ -51,7 +51,7 @@ function mockRes(): ResStub {
 }
 
 /** Invokes the readiness handler and returns both halves of its answer. */
-async function probe(opts: { redisOk?: boolean; mysqlOk?: boolean } = {}) {
+async function probe(opts: { redisOk?: boolean; postgresOk?: boolean } = {}) {
   const http = mockRes();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const body = await controller(opts).ready(http as any);
@@ -155,11 +155,11 @@ describe('health response semantics are unchanged', () => {
   it('still reports the other dependencies independently', async () => {
     connectMock.mockResolvedValue({ close: jest.fn() });
 
-    const mysqlDown = await probe({ mysqlOk: false });
-    expect(mysqlDown.body.checks.mysql).toBe('failed');
-    expect(mysqlDown.body.checks.rabbitmq).toBe('ok');
-    expect(mysqlDown.body.status).toBe('not_ready');
-    expect(mysqlDown.code).toBe(503);
+    const postgresDown = await probe({ postgresOk: false });
+    expect(postgresDown.body.checks.postgres).toBe('failed');
+    expect(postgresDown.body.checks.rabbitmq).toBe('ok');
+    expect(postgresDown.body.status).toBe('not_ready');
+    expect(postgresDown.code).toBe(503);
 
     const redisDown = await probe({ redisOk: false });
     expect(redisDown.body.checks.redis).toBe('failed');

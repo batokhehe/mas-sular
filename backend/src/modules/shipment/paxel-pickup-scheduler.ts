@@ -3,7 +3,8 @@ import { PermanentError } from '../shipping/domain/shipping-errors';
 import {
   isValidTimeZone,
   parseHhMm,
-  PaxelAutoPickupConfig,
+  PickupPolicy,
+  pickupPolicyOf,
   SHIPPING_CONFIG,
   ShippingConfig,
 } from '../shipping/shipping.config';
@@ -25,9 +26,13 @@ import {
  *   ...in either case at PAXEL_PICKUP_DEFAULT_TIME, local to PAXEL_PICKUP_TIMEZONE.
  *
  * The cutoff is NOT "the latest pickup time". With the business values (cutoff
- * 17:00, pickup 19:00) the same-day appointment is deliberately two hours AFTER
- * the cutoff: the cutoff is the latest payment verification still eligible for
- * today's run.
+ * 15:00, pickup 17:00 WIB - DEFAULT_PICKUP_POLICY) the same-day appointment is
+ * deliberately two hours AFTER the cutoff: the cutoff is the latest payment
+ * verification still eligible for today's run.
+ *
+ * The rule is shop-wide (P1 #13): Paxel is SENT the resolved slot, JNE only has
+ * it RECORDED (its booking API has no pickup field). The class keeps its Paxel
+ * name because Paxel is the only courier whose booking depends on it.
  *
  * WHY IT LIVES HERE, not in PaxelShipmentProvider: the resolver decides the
  * appointment, the provider only sends it. Keeping the decision out of the HTTP
@@ -112,12 +117,12 @@ function instantFromZonedCivil(civil: ZonedParts, timeZone: string): Date {
  * renders it into Paxel's wire format.
  *
  * Comparison granularity is the MINUTE, not the second. The business stated the
- * boundary in minutes ("17:00 is INCLUDED, 17:01 is the next-day case"), so a
- * verification at 17:00:30 belongs to the 17:00 minute and still catches today's
+ * boundary in minutes ("15:00 is INCLUDED, 15:01 is the next-day case"), so a
+ * verification at 15:00:30 belongs to the 15:00 minute and still catches today's
  * run. Comparing at second granularity would shrink "included" to a one-second
- * window, which is not what a 17:00 operational cutoff means.
+ * window, which is not what a 15:00 operational cutoff means.
  */
-export function resolveAutomaticPaxelPickupAt(reference: Date, policy: PaxelAutoPickupConfig): Date {
+export function resolveAutomaticPaxelPickupAt(reference: Date, policy: PickupPolicy): Date {
   if (!(reference instanceof Date) || Number.isNaN(reference.getTime())) {
     throw new PermanentError('Automatic Paxel pickup needs a valid payment verification time', 'paxel');
   }
@@ -179,5 +184,16 @@ export class PaxelPickupScheduler {
       throw new PermanentError('Automatic Paxel pickup scheduling is disabled (PAXEL_AUTO_PICKUP_ENABLED)', 'paxel');
     }
     return resolveAutomaticPaxelPickupAt(verifiedAt, policy).toISOString();
+  }
+
+  /**
+   * The shop-wide slot for a payment verified at `verifiedAt`, from the shared
+   * rule and REGARDLESS of Paxel's automatic-booking switch - that switch decides
+   * whether Paxel books on its own, not what the shop's pickup time is. For a
+   * courier with no pickup contract (JNE): the slot is recorded for operations,
+   * never sent to the courier and never allowed to gate its booking.
+   */
+  resolvePolicyIso(verifiedAt: Date): string {
+    return resolveAutomaticPaxelPickupAt(verifiedAt, pickupPolicyOf(this.config)).toISOString();
   }
 }

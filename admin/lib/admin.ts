@@ -1,4 +1,5 @@
 import { api, apiBaseUrl, getAuthToken } from './api';
+import type { ServiceFeeRuleSnapshot } from './orders/service-fee-view';
 
 /** Standard paginated envelope returned by admin list endpoints. */
 export type Paginated<T> = {
@@ -25,9 +26,10 @@ export type AdminCategory = {
   icon?: string | null;
 };
 
+// No `sku` (P2 #5): the API still returns it (it is the courier item code), but it is
+// internal and must never be rendered - omitting it here makes any attempt a compile error.
 export type AdminProduct = {
   id: string;
-  sku: string;
   slug: string;
   name: string;
   description?: string | null;
@@ -38,6 +40,8 @@ export type AdminProduct = {
   status: string;
   isBestSeller: boolean;
   isNew: boolean;
+  isPromoSpecial: boolean; // P2 #10: homepage "Promo Spesial Produk" section
+  isTrialPack: boolean; // P2 #11: homepage "Trial Pack" section
   price: number;
   spicyLevel?: number | null;
   // Real physical attributes of the PRODUCT itself, sent to Paxel as
@@ -457,6 +461,14 @@ export type AdminOrderDetail = AdminOrder & {
   voucherDiscountAmount?: number;
   voucherCode?: string | null;
   outletId?: string | null;
+  // Payment service fee (gateway orders): the customer-charged "Biaya Layanan"
+  // plus the merchant-side accounting, recorded in both fee modes.
+  paymentServiceFee?: number;
+  paymentServiceFeeCalculated?: number;
+  paymentServiceFeeAbsorbed?: number;
+  paymentServiceFeeEnabled?: boolean | null;
+  paymentServiceFeeChannel?: string | null;
+  paymentServiceFeeRule?: ServiceFeeRuleSnapshot | null;
   items: Array<{
     id: string;
     productId: string;
@@ -466,7 +478,7 @@ export type AdminOrderDetail = AdminOrder & {
     spicyLevel?: number | null;
     notes?: string | null;
     toppings: Array<{ id: string; name: string; price: number }>;
-    product?: { id: string; sku: string; imageUrl: string } | null;
+    product?: { id: string; imageUrl: string } | null; // `sku` intentionally omitted (P2 #5)
   }>;
   reservations?: Array<{
     id: string;
@@ -495,6 +507,13 @@ export type AdminOrderDetail = AdminOrder & {
       provider: string;
       channelCode: string;
       status: string;
+      // The attempt's recorded amount and fee snapshot (what the gateway was charged).
+      grossAmount?: number;
+      baseAmount?: number | null;
+      serviceFeeCalculated?: number;
+      serviceFeeCustomer?: number;
+      serviceFeeAbsorbed?: number;
+      serviceFeeEnabled?: boolean | null;
       providerReference?: string | null;
       providerTransactionId?: string | null;
       vaNumber?: string | null;
@@ -518,6 +537,26 @@ export type AdminOrderDetail = AdminOrder & {
 
 export function fetchAdminOrder(id: string) {
   return api<AdminOrderDetail>(`/admin/orders/${id}`);
+}
+
+// ---------------- Customer invoice link (P2 #14) ----------------
+
+/** Only metadata: the link itself is shown once, in the response that created it. */
+export type InvoiceLinkStatus = { active: { createdAt: string; expiresAt: string } | null };
+export type IssuedInvoiceLink = { invoiceUrl: string; createdAt: string; expiresAt: string };
+/** `notification.status` is the queue state (PENDING) - acceptance, not WhatsApp delivery. */
+export type SentInvoiceLink = IssuedInvoiceLink & { notification: { id: string; status: string; createdAt: string } };
+
+export function fetchInvoiceLinkStatus(orderId: string) {
+  return api<InvoiceLinkStatus>(`/admin/orders/${orderId}/invoice-link`);
+}
+
+export function createInvoiceLink(orderId: string) {
+  return api<IssuedInvoiceLink>(`/admin/orders/${orderId}/invoice-link`, { method: 'POST' });
+}
+
+export function sendInvoiceLinkWhatsApp(orderId: string) {
+  return api<SentInvoiceLink>(`/admin/orders/${orderId}/invoice-link/whatsapp`, { method: 'POST' });
 }
 
 // ---------------- Order operations center (read-only bundle + internal notes) ----------------

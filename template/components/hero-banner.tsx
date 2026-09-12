@@ -31,7 +31,7 @@ export function HeroBanner() {
             </motion.div>
 
             <h1 className="text-3xl sm:text-4xl lg:text-5xl xl:text-6xl font-bold tracking-tight text-balance mb-4">
-              Bakso Premium{' '}
+              Bakso Bumbu Rujak{' '}
               <span className="text-primary">Asli Nusantara</span>
             </h1>
 

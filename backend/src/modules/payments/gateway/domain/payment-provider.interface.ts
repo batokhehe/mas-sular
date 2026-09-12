@@ -87,6 +87,31 @@ export interface ChargeResult {
   metadata?: Record<string, unknown>;
   /** Redacted snapshot of what we sent the provider. */
   rawRequest?: unknown;
+  /**
+   * Customer-facing amount breakdown of the attempt, attached by
+   * PaymentInitiationService (never by a provider): what the customer pays and the
+   * "Biaya Layanan" part of it. Absent for manual transfer.
+   */
+  amountBreakdown?: GatewayAmountBreakdown;
+}
+
+export interface GatewayAmountBreakdown {
+  /** Fee-exclusive amount: subtotal + shipping - discount. */
+  baseAmount: number;
+  /** Customer-charged payment service fee ("Biaya Layanan"); Rp0 when the merchant absorbs it. */
+  serviceFee: number;
+  /** baseAmount + serviceFee — exactly the amount charged. */
+  total: number;
+}
+
+/** The customer-facing breakdown of a recorded attempt, or null when it has no fee snapshot. */
+export function amountBreakdownOf(row: {
+  baseAmount: number | null;
+  serviceFeeCustomer: number;
+  grossAmount: number;
+}): GatewayAmountBreakdown | null {
+  if (row.baseAmount === null || row.baseAmount === undefined) return null;
+  return { baseAmount: row.baseAmount, serviceFee: row.serviceFeeCustomer, total: row.grossAmount };
 }
 
 /** Authoritative status read back from a provider. */

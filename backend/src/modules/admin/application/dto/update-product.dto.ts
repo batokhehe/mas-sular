@@ -1,5 +1,7 @@
+import { Transform } from 'class-transformer';
 import { IsBoolean, IsEnum, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 import { ProductStatus } from '@prisma/client';
+import { rawBoolean } from '../../../../common/validation/strict-boolean';
 
 export class UpdateProductDto {
   @IsOptional()
@@ -43,6 +45,17 @@ export class UpdateProductDto {
   @IsOptional()
   @IsBoolean()
   isNew?: boolean;
+
+  // P2 #10 / #11: omitted = unchanged. Raw value validated - see CreateProductDto.
+  @IsOptional()
+  @Transform(rawBoolean)
+  @IsBoolean()
+  isPromoSpecial?: boolean;
+
+  @IsOptional()
+  @Transform(rawBoolean)
+  @IsBoolean()
+  isTrialPack?: boolean;
 
   @IsOptional()
   @IsEnum(ProductStatus)

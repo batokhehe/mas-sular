@@ -7,14 +7,14 @@
 #
 # NETWORK RULE — the whole point of the two-network split:
 #   edge     : frontend, admin, backend        (a future proxy joins here)
-#   internal : backend, mysql, redis, rabbitmq (internal: true — no egress)
-# MySQL/Redis/RabbitMQ publish NO host ports. They are reachable only by
-# Docker DNS names (mysql, redis, rabbitmq) from services on `internal`.
+#   internal : backend, postgres, redis, rabbitmq (internal: true — no egress)
+# PostgreSQL/Redis/RabbitMQ publish NO host ports. They are reachable only by
+# Docker DNS names (postgres, redis, rabbitmq) from services on `internal`.
 #
 # Secrets come from an env file that is NEVER committed:
 #   docker compose --env-file ./production.env -f docker-compose.production.yml up -d
 #
-# Database: MySQL 8.4 — the version the integration suite validates.
+# Database: PostgreSQL 16 — the version the integration suite validates.
 # RabbitMQ: see OPTION A / OPTION B below before deploying.
 
 name: mas-sular
@@ -31,30 +31,29 @@ x-hardening: &hardening
 
 services:
   # ------------------------------------------------------------- database ---
-  mysql:
-    image: mysql:8.4
+  postgres:
+    image: postgres:16-alpine
     restart: unless-stopped
     <<: *hardening
-    command:
-      - --character-set-server=utf8mb4
-      - --collation-server=utf8mb4_unicode_ci
     environment:
-      MYSQL_DATABASE: ${MYSQL_DATABASE:?set MYSQL_DATABASE}
-      MYSQL_USER: ${MYSQL_USER:?set MYSQL_USER}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD}
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      # Initialise the cluster with data checksums so silent corruption is
+      # detected on read rather than propagated into a backup.
+      POSTGRES_INITDB_ARGS: "--data-checksums"
     volumes:
-      - mysql_data:/var/lib/mysql
+      - postgres_data:/var/lib/postgresql/data
     networks: [internal]
-    # NO ports: — 3306 must never reach the host.
+    # NO ports: — 5432 must never reach the host.
     healthcheck:
-      # CMD-SHELL, not CMD: the exec form would pass the literal string
-      # "$MYSQL_ROOT_PASSWORD" instead of expanding it inside the container.
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      # -U/-d are required: without them pg_isready probes the OS user, which
+      # does not exist in the cluster, and reports a healthy server as down.
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
       timeout: 5s
       retries: 12
-      start_period: 40s
+      start_period: 30s
     logging: *default-logging
     deploy:
       resources:
@@ -122,8 +121,8 @@ services:
     # empty; dropping ALL clears the BOUNDING set too, so nothing can be regained
     # if a future change adds a setuid binary or switches back to root (F54).
     cap_drop: [ALL]
-    # `prisma migrate deploy` was verified against a disposable MySQL 8.4 under a
-    # read-only rootfs: all 35 migrations applied, 0 EROFS, 0 EACCES, and /tmp was
+    # `prisma migrate deploy` was verified against a disposable PostgreSQL 16 under a
+    # read-only rootfs: the 0_init baseline applied, 0 EROFS, 0 EACCES, and /tmp was
     # still empty afterwards — the schema engine works entirely over the DB
     # connection. It also passed with no tmpfs at all; /tmp is kept as defensive
     # scratch space in case a future engine or a larger migration needs to spill.
@@ -139,7 +138,7 @@ services:
       DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
     networks: [internal]
     depends_on:
-      mysql: { condition: service_healthy }
+      postgres: { condition: service_healthy }
     logging: *default-logging
 
   # ------------------------------------------------------------------ API ---
@@ -168,7 +167,7 @@ services:
     networks: [edge, internal]
     # Not published: the reverse proxy reaches it over `edge` by DNS name.
     depends_on:
-      mysql: { condition: service_healthy }
+      postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
       backend-migrate: { condition: service_completed_successfully }
@@ -217,7 +216,9 @@ services:
       context: ./admin
       target: runner
       args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_ADMIN_API_URL:-${NEXT_PUBLIC_API_URL}}
+        # The admin base INCLUDES /api/v1; the storefront's NEXT_PUBLIC_API_URL is the
+        # bare origin, so it is never a valid fallback here. Required explicitly.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_ADMIN_API_URL:?set NEXT_PUBLIC_ADMIN_API_URL (https://<API_DOMAIN>/api/v1)}
     restart: unless-stopped
     <<: *hardening
     cap_drop: [ALL]
@@ -241,6 +242,6 @@ networks:
     internal: true   # no route to the outside world
 
 volumes:
-  mysql_data:
+  postgres_data:
   rabbitmq_data:
   uploads_data:

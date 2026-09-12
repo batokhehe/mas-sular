@@ -37,7 +37,8 @@ export default function ProductsPage() {
 
     return data
       .filter((product) => {
-        const matchesSearch = [product.sku, product.name, product.categoryId].some((field) =>
+        // SKU is internal and never shown (P2 #5), so it is not searchable either.
+        const matchesSearch = [product.name, product.categoryId].some((field) =>
           field.toLowerCase().includes(search.toLowerCase()),
         );
         const matchesStatus = statusFilter === 'ALL' || product.status === statusFilter;
@@ -77,7 +78,7 @@ export default function ProductsPage() {
                 setSearch(event.target.value);
                 setPage(1);
               }}
-              placeholder="Search products by SKU, name, or category"
+              placeholder="Search products by name or category"
               className="h-11 rounded-xl border border-gray-200 bg-gray-50 px-4 text-sm outline-none focus:border-[#465fff] focus:bg-white"
             />
             <select
@@ -123,7 +124,6 @@ export default function ProductsPage() {
             <table className="w-full min-w-[760px] text-left text-sm">
               <thead>
                 <tr className="border-b border-gray-100 text-xs uppercase text-gray-400">
-                  <th className="py-3 font-medium">SKU</th>
                   <th className="py-3 font-medium">Name</th>
                   <th className="py-3 font-medium">Category</th>
                   <th className="py-3 font-medium">Stock</th>
@@ -134,8 +134,19 @@ export default function ProductsPage() {
               <tbody>
                 {pageProducts.map((product: AdminProduct) => (
                   <tr key={product.id} className="border-b border-gray-50 last:border-0">
-                    <td className="py-4 font-medium text-gray-800">{product.sku}</td>
-                    <td className="py-4 text-gray-600">{product.name}</td>
+                    <td className="py-4 text-gray-600">
+                      {product.name}
+                      {product.isPromoSpecial ? (
+                        <Badge tone="brand" className="ml-2">
+                          Promo Special
+                        </Badge>
+                      ) : null}
+                      {product.isTrialPack ? (
+                        <Badge tone="brand" className="ml-2">
+                          Trial Pack
+                        </Badge>
+                      ) : null}
+                    </td>
                     <td className="py-4 text-gray-500">{product.categoryId}</td>
                     <td className="py-4 text-gray-500">{product.stock}</td>
                     <td className="py-4">

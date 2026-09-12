@@ -20,8 +20,10 @@ import {
 } from '@/lib/admin';
 import { formatAdminAddressLine } from '@/lib/format-address';
 import { ShipmentTimeline } from '@/app/orders/components/shipment-timeline';
+import { InvoiceLinkPanel } from '@/app/orders/components/invoice-link-panel';
 import { useAdminProfile } from '@/lib/auth';
 import { formatRupiah } from '@/lib/utils/number';
+import { feeModeLabel, feeRuleLabel } from '@/lib/orders/service-fee-view';
 import {
   ADMIN_LOADING_MESSAGES, ADMIN_SUCCESS_MESSAGES, confirmApprove, confirmReject, runWithFeedback,
 } from '@/lib/admin-alert';
@@ -97,6 +99,7 @@ export default function OrderDetailPage() {
   const businessTotal = order.totalPrice;
   const uniqueCode = payment?.uniqueCode ?? null;
   const transferAmount = payment?.amount ?? businessTotal;
+  const isGateway = (payment?.method ?? order.paymentMethod) === 'GATEWAY';
   const mapsQuery = order.address ? encodeURIComponent(`${order.address.recipientName} ${formatAdminAddressLine(order.address)}`) : '';
 
   return (
@@ -143,10 +146,12 @@ export default function OrderDetailPage() {
           {actions?.openTracking && order.shipment?.trackingUrl ? (
             <a href={order.shipment.trackingUrl} target="_blank" rel="noreferrer"><ActionButton icon={ExternalLink}>Open Tracking</ActionButton></a>
           ) : null}
-          <ActionButton icon={Printer} onClick={() => window.print()}>Print Invoice</ActionButton>
           <ActionButton icon={Printer} onClick={() => window.print()}>Print Packing Slip</ActionButton>
         </div>
       </Card>
+
+      {/* P2 #14: the customer invoice is a tokenized customer page (not a print of this Admin page). */}
+      <InvoiceLinkPanel orderId={order.id} recipientPhone={order.address?.phone ?? order.user?.phone ?? null} />
 
       <div className="grid gap-5 xl:grid-cols-[1.35fr_0.65fr]">
         <div className="space-y-5">
@@ -166,6 +171,7 @@ export default function OrderDetailPage() {
               <Field label="Voucher" value={order.voucherCode ?? '—'} />
               <Field label="Discount" value={rp(order.voucherDiscountAmount ?? 0)} />
               <Field label="Shipping" value={rp(order.shippingCost ?? order.deliveryFee ?? 0)} />
+              {isGateway ? <Field label="Biaya Layanan (customer)" value={rp(order.paymentServiceFee ?? 0)} /> : null}
               <Field label="Outlet" value={order.reservations?.[0]?.outlet?.name ?? order.outletId ?? '—'} />
             </div>
           </Section>
@@ -185,7 +191,6 @@ export default function OrderDetailPage() {
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="font-medium text-gray-900">{item.productName}</p>
-                      <p className="text-xs text-gray-400">SKU {item.product?.sku ?? '—'}</p>
                       <p className="mt-1 text-sm text-gray-500">Qty {item.quantity} × {rp(item.unitPrice)}</p>
                       {item.toppings.length > 0 ? <p className="text-xs text-gray-500">Toppings: {item.toppings.map((t) => t.name).join(', ')}</p> : null}
                       {reservation ? (
@@ -225,6 +230,25 @@ export default function OrderDetailPage() {
                   <Field label="Expires At" value={dt(gateway.expiryAt)} />
                   {gateway.vaNumber ? <Field label="Virtual Account" value={gateway.vaNumber} /> : null}
                   {gateway.failureReason ? <Field label="Failure Reason" value={gateway.failureReason} /> : null}
+                  {gateway.grossAmount != null ? <Field label="Attempt Amount (charged)" value={rp(gateway.grossAmount)} strong /> : null}
+                  {gateway.baseAmount != null ? <Field label="Attempt Base (excl. fee)" value={rp(gateway.baseAmount)} /> : null}
+                </div>
+              </div>
+            ) : null}
+
+            {/* Payment service fee - the recorded snapshot, in both fee modes (read-only). */}
+            {isGateway ? (
+              <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-4">
+                <p className="mb-3 text-xs uppercase text-gray-400">Payment Service Fee</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="Fee Mode" value={feeModeLabel(order.paymentServiceFeeEnabled, order.paymentServiceFeeRule)} />
+                  <Field label="Fee Channel" value={order.paymentServiceFeeChannel ?? '—'} />
+                  <Field label="Applicable Fee (calculated)" value={rp(order.paymentServiceFeeCalculated ?? 0)} />
+                  <Field label="Biaya Layanan (customer paid)" value={rp(order.paymentServiceFee ?? 0)} strong />
+                  <Field label="Merchant-Absorbed Fee" value={rp(order.paymentServiceFeeAbsorbed ?? 0)} />
+                  <Field label="Fee Rule" value={feeRuleLabel(order.paymentServiceFeeRule)} />
+                  {order.paymentServiceFeeRule ? <Field label="Pass-through" value={order.paymentServiceFeeRule.passThrough} /> : null}
+                  {order.paymentServiceFeeRule ? <Field label="Rule Version" value={order.paymentServiceFeeRule.version} /> : null}
                 </div>
               </div>
             ) : null}

@@ -242,7 +242,10 @@ describe('PaymentInitiationService — persistence integration', () => {
     const registry = new PaymentChannelRegistry(factory);
     const prisma = { payment: { findFirst: jest.fn().mockResolvedValue(PAYMENT) } };
     const ledger = {
-      createPendingTransaction: jest.fn().mockResolvedValue({ id: 'gtx-1' }),
+      createPendingTransaction: jest.fn().mockImplementation(async (input: { grossAmount: number }) => ({
+        // Echoes what the real ledger returns: the recorded attempt with its amount.
+        id: 'gtx-1', grossAmount: input.grossAmount, baseAmount: null, serviceFeeCustomer: 0,
+      })),
       updateGatewayResponse: jest.fn().mockResolvedValue({ id: 'gtx-1' }),
       markFailed: jest.fn().mockResolvedValue({ changed: true }),
     };

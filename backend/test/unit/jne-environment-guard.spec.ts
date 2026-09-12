@@ -164,7 +164,6 @@ describe('loadShippingConfig — JNE environment', () => {
 describe('assertShippingConfigured applies the guard', () => {
   const shipping = (over: Partial<JneProviderConfig>): ShippingConfig =>
     ({
-      originPostalCode: '40111',
       allowMockRates: false,
       paxel: { enabled: false, baseUrl: 'https://paxel.test', timeoutMs: 500, maxRetry: 0, needInsurance: false, defaultDimension: '30x35x20' },
       jne: jne(over),
@@ -185,7 +184,7 @@ describe('assertShippingConfigured applies the guard', () => {
 describe('validateEnv', () => {
   const VALID: Record<string, string> = {
     NODE_ENV: 'production',
-    DATABASE_URL: 'mysql://u:p@db:3306/app',
+    DATABASE_URL: 'postgresql://u:p@db:5432/app',
     REDIS_URL: 'redis://redis:6379',
     JWT_ACCESS_SECRET: 'a'.repeat(32),
     JWT_REFRESH_SECRET: 'b'.repeat(32),
@@ -194,6 +193,7 @@ describe('validateEnv', () => {
     APP_URL: 'https://shop.example.com',
     CORS_ORIGINS: 'https://shop.example.com',
     CHECKOUT_IDEMPOTENCY_ENABLED: 'true',
+    TRUST_PROXY_HOPS: '1',
     JNE_ENABLED: 'true',
     JNE_API_KEY: 'k',
     JNE_USERNAME: 'u',

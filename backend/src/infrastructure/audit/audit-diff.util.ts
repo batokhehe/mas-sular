@@ -13,7 +13,8 @@ const IGNORED_KEYS = new Set(['updatedAt', 'createdAt', 'lastLogin', 'deletedAt'
 const isIgnored = (key: string): boolean => IGNORED_KEYS.has(key) || /(At|Timestamp)$/.test(key);
 
 // Secrets are stripped from snapshots BEFORE persisting (never stored).
-const SENSITIVE_KEYS = new Set(['password', 'passwordHash', 'token', 'tokenHash', 'secret', 'apiKey', 'authorization', 'refreshToken', 'accessToken', 'webhookPayload']);
+// `invoiceUrl` (P2 #14) carries the customer invoice capability token.
+const SENSITIVE_KEYS = new Set(['password', 'passwordHash', 'token', 'tokenHash', 'secret', 'apiKey', 'authorization', 'refreshToken', 'accessToken', 'webhookPayload', 'invoiceUrl']);
 
 /** Deep-copy a snapshot with secrets removed and keys sorted (stable pretty JSON). */
 export function sanitizeSnapshot(value: unknown): unknown {

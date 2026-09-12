@@ -2,7 +2,7 @@ import { validateEnv } from '../../src/common/config/env.validation';
 
 const VALID: Record<string, string> = {
   NODE_ENV: 'production',
-  DATABASE_URL: 'mysql://u:p@db:3306/app',
+  DATABASE_URL: 'postgresql://u:p@db:5432/app',
   REDIS_URL: 'redis://redis:6379',
   JWT_ACCESS_SECRET: 'a'.repeat(32),
   JWT_REFRESH_SECRET: 'b'.repeat(32),
@@ -12,6 +12,8 @@ const VALID: Record<string, string> = {
   CORS_ORIGINS: 'https://shop.example.com',
   // Required in staging/production (M5); part of a valid production baseline.
   CHECKOUT_IDEMPOTENCY_ENABLED: 'true',
+  // Required in staging/production (B3): one reverse proxy in front of the API.
+  TRUST_PROXY_HOPS: '1',
 };
 
 const valid = (over: Record<string, string | undefined> = {}) => ({ ...VALID, ...over });

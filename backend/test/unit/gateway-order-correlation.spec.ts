@@ -1,3 +1,4 @@
+import { ConflictException } from '@nestjs/common';
 import { GatewayTransactionStatus, PaymentMethod, PaymentStatus } from '@prisma/client';
 import { ManualTransferProvider } from '../../src/modules/payments/gateway/infrastructure/providers/manual-transfer.provider';
 import { MidtransPaymentProvider } from '../../src/modules/payments/gateway/infrastructure/providers/midtrans-payment.provider';
@@ -53,6 +54,11 @@ function midtrans(transactionId = 'trx-9') {
   return { provider, calls };
 }
 
+/** Echoes what the real pricing service returns: the recorded attempt with its amount and customer fee. */
+const pricedAttempt = (id: string) => async (input: { grossAmount: number; serviceFee: { baseAmount: number; customerFee: number } }) => ({
+  id, grossAmount: input.grossAmount, baseAmount: input.serviceFee.baseAmount, serviceFeeCustomer: input.serviceFee.customerFee,
+});
+
 const sentOrderId = (calls: Array<Record<string, unknown>>): string =>
   (calls[0].transaction_details as { order_id: string }).order_id;
 
@@ -104,18 +110,20 @@ describe('Phase 5A — the ledger stores exactly what was charged', () => {
           method: PaymentMethod.GATEWAY,
           status: PaymentStatus.PENDING,
           amount: 130000,
-          order: { orderNumber: ORDER_NUMBER, user: { name: 'Budi', email: null, phone: null } },
+          order: { orderNumber: ORDER_NUMBER, totalPrice: 130000, paymentServiceFee: 0, user: { name: 'Budi', email: null, phone: null } },
         }),
       },
     };
     const ledger = {
-      createPendingTransaction: jest.fn().mockResolvedValue({ id: attemptId }),
+      createPendingTransaction: jest.fn(),
       updateGatewayResponse: jest.fn().mockResolvedValue({}),
       markFailed: jest.fn(),
     };
+    // Gateway attempts are opened (with their fee) by the pricing service.
+    const pricing = { openPricedAttempt: jest.fn().mockImplementation(pricedAttempt(attemptId)) };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const service = new PaymentInitiationService(prisma as any, registry, factory, ledger as any);
-    return { service, ledger, calls };
+    const service = new PaymentInitiationService(prisma as any, registry, factory, ledger as any, undefined, { enabled: false }, pricing as any);
+    return { service, ledger, pricing, calls, prisma };
   }
 
   it('persists providerOrderId === the order_id Midtrans actually received', async () => {
@@ -128,14 +136,26 @@ describe('Phase 5A — the ledger stores exactly what was charged', () => {
   });
 
   it('corrects the placeholder written before the charge (final value is never the bare number)', async () => {
-    const { service, ledger } = initiation(ATTEMPT_A);
+    const { service, ledger, pricing } = initiation(ATTEMPT_A);
     await service.initiate('pay-1', 'QRIS');
 
     // The row is opened before the provider exists to build an id, so step 3
     // writes a placeholder…
-    expect(ledger.createPendingTransaction.mock.calls[0][0].providerOrderId).toBe(ORDER_NUMBER);
+    expect(pricing.openPricedAttempt.mock.calls[0][0].providerOrderId).toBe(ORDER_NUMBER);
     // …and step 5b overwrites it with the real one.
     expect(ledger.updateGatewayResponse.mock.calls[0][1].providerOrderId).not.toBe(ORDER_NUMBER);
+  });
+
+  it('a gateway payment with no positive amount is never opened or charged', async () => {
+    for (const order of [{ totalPrice: 0, paymentServiceFee: 0 }, { totalPrice: 4000, paymentServiceFee: 4000 }]) {
+      const { service, pricing, calls, prisma } = initiation(ATTEMPT_A);
+      const payment = await prisma.payment.findFirst();
+      prisma.payment.findFirst.mockResolvedValue({ ...payment, order: { ...payment.order, ...order } });
+
+      await expect(service.initiate('pay-1', 'QRIS')).rejects.toBeInstanceOf(ConflictException);
+      expect(pricing.openPricedAttempt).not.toHaveBeenCalled();
+      expect(calls).toHaveLength(0);
+    }
   });
 
   it('manual transfer is untouched — no gateway order id, so nothing is overwritten', async () => {
@@ -164,7 +184,10 @@ describe('Phase 5A — the ledger stores exactly what was charged', () => {
       },
     };
     const ledger = {
-      createPendingTransaction: jest.fn().mockResolvedValue({ id: 'gtx-1' }),
+      createPendingTransaction: jest.fn().mockImplementation(async (input: { grossAmount: number }) => ({
+        // Echoes what the real ledger returns: the recorded attempt with its amount.
+        id: 'gtx-1', grossAmount: input.grossAmount, baseAmount: null, serviceFeeCustomer: 0,
+      })),
       updateGatewayResponse: jest.fn().mockResolvedValue({}),
       markFailed: jest.fn(),
     };
@@ -231,7 +254,7 @@ describe('a failed Core API charge leaves the order intact', () => {
         findFirst: jest.fn().mockResolvedValue({
           id: 'pay-1', orderId: 'o-1', method: PaymentMethod.GATEWAY,
           status: PaymentStatus.PENDING, amount: 130000,
-          order: { orderNumber: 'BMS-FAIL-1', user: { name: 'Budi', email: null, phone: null } },
+          order: { orderNumber: 'BMS-FAIL-1', totalPrice: 130000, paymentServiceFee: 0, user: { name: 'Budi', email: null, phone: null } },
         }),
         // Present so an accidental mutation would be visible in the assertions.
         update: jest.fn(), updateMany: jest.fn(), delete: jest.fn(),
@@ -239,12 +262,13 @@ describe('a failed Core API charge leaves the order intact', () => {
       order: { update: jest.fn(), updateMany: jest.fn(), delete: jest.fn() },
     };
     const ledger = {
-      createPendingTransaction: jest.fn().mockResolvedValue({ id: 'attempt-fail' }),
+      createPendingTransaction: jest.fn(),
       updateGatewayResponse: jest.fn(),
       markFailed: jest.fn().mockResolvedValue(undefined),
     };
+    const pricing = { openPricedAttempt: jest.fn().mockImplementation(pricedAttempt('attempt-fail')) };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const service = new PaymentInitiationService(prisma as any, registry, factory, ledger as any);
+    const service = new PaymentInitiationService(prisma as any, registry, factory, ledger as any, undefined, { enabled: false }, pricing as any);
     return { service, ledger, prisma, provider };
   }
 

@@ -71,7 +71,7 @@ function buildPrisma() {
     $queryRaw: jest.fn().mockImplementation((arg: unknown) => {
       const text = sqlText(arg);
       if (text.includes('OrderItem')) return Promise.resolve(TOP_PRODUCTS);
-      if (text.includes('DATE(o.createdAt)')) return Promise.resolve(SALES_ROWS);
+      if (text.includes('o."createdAt"::date')) return Promise.resolve(SALES_ROWS);
       return Promise.resolve([{ '1': 1 }]); // SELECT 1
     }),
   };

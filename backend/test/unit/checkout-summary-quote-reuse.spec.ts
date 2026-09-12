@@ -85,7 +85,7 @@ function buildPrisma() {
 }
 
 /** withAllocation:false reproduces the legacy path where allocation is absent. */
-function build(withAllocation = true) {
+function build(withAllocation = true, feeEnabled = false) {
   const prisma = buildPrisma();
   // A real ShippingService fans out to every provider; spying on getQuotes is
   // exactly what proves the second fan-out is gone.
@@ -116,6 +116,10 @@ function build(withAllocation = true) {
     undefined,
     undefined,
     (withAllocation ? allocation : undefined) as never,
+    undefined,
+    undefined,
+    undefined,
+    { enabled: feeEnabled }, // PAYMENT_SERVICE_FEE_ENABLED
   );
   return { service, shipping, allocation };
 }
@@ -179,15 +183,25 @@ describe('getSummary reuses allocation quotes', () => {
     expect(summary.grand_total).toBe(89000);
   });
 
-  it('QRIS fee is computed off the reused shipping cost, unchanged', async () => {
-    const { service } = build();
+  it('the payment service fee is computed off the reused shipping cost, unchanged', async () => {
+    const { service } = build(true, true);
+    const summary = await service.getSummary(
+      USER,
+      summaryDto({ payment_method: 'GATEWAY', payment_channel: 'GOPAY' }) as never,
+    );
+    // base 89000 -> round(89000 * 2%) = 1780 (GoPay may pass the fee on when enabled)
+    expect(summary.payment_service_fee).toBe(1780);
+    expect(summary.grand_total).toBe(90780);
+  });
+
+  it('QRIS never passes the fee on: the customer total stays the reused-shipping base', async () => {
+    const { service } = build(true, true);
     const summary = await service.getSummary(
       USER,
       summaryDto({ payment_method: 'GATEWAY', payment_channel: 'QRIS' }) as never,
     );
-    // base 89000 -> round(89000 * 0.007) = 623
-    expect(summary.payment_service_fee).toBe(623);
-    expect(summary.grand_total).toBe(89623);
+    expect(summary.payment_service_fee).toBe(0);
+    expect(summary.grand_total).toBe(89000);
   });
 });
 

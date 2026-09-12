@@ -39,8 +39,14 @@ export class PaymentUploadTokenService {
     return createHash('sha256').update(rawToken).digest('hex');
   }
 
+  /**
+   * The CUSTOMER-facing link: the storefront page `frontend/app/payment/[token]`,
+   * which then calls the API at /api/v1/payments/upload/:token. Production-readiness
+   * H4: this used to emit `/payments/upload/<token>` - the API path - on the
+   * storefront origin (PAYMENT_UPLOAD_BASE_URL), which is a storefront 404.
+   */
   buildUrl(rawToken: string): string {
-    return `${this.baseUrl}/payments/upload/${rawToken}`;
+    return `${this.baseUrl}/payment/${rawToken}`;
   }
 
   /** Issue a token row (storing only the hash) inside the caller's transaction. */

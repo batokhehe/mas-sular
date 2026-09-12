@@ -54,7 +54,7 @@ describe('Checkout replay body resolution (A4)', () => {
     const outcome = await service.checkout(USER, DTO, IDEM);
 
     expect(outcome.kind).toBe('result');
-    expect((outcome as any).body).toBe(LATEST);
+    expect((outcome as any).body).toStrictEqual(LATEST);
     expect(prisma.order.findUnique).toHaveBeenCalledWith({
       where: { id: 'order-1' },
       include: { items: { include: { toppings: true } }, payment: true },

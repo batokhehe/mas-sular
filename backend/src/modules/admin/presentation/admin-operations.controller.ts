@@ -8,6 +8,7 @@ import { PermissionGuard } from '../../../common/guards/permission.guard';
 import { AdminService } from '../admin.service';
 import { ExecutiveDashboardService } from '../executive-dashboard.service';
 import { AdminOrderNotesService } from '../admin-order-notes.service';
+import { AdminInvoiceLinkService } from '../admin-invoice-link.service';
 import { ShipmentService } from '../../shipment/shipment.service';
 import {
   CreateShipmentDto,
@@ -34,6 +35,7 @@ export class AdminOperationsController {
     // Cancellation talks to the courier, which is ShipmentService's job — the
     // same collaborator the retry and prepare actions already go through.
     private readonly shipments: ShipmentService,
+    private readonly invoiceLinks: AdminInvoiceLinkService,
   ) {}
 
   @Permissions('Dashboard.read')
@@ -66,6 +68,27 @@ export class AdminOperationsController {
   @Get('orders/:id/operations')
   orderOperations(@Param('id') id: string) {
     return this.adminService.getOrderOperations(id);
+  }
+
+  // ---- Customer invoice link (P2 #14) ----
+  // Metadata of the active link only; the link itself is shown once, when created.
+  @Permissions('Order.read')
+  @Get('orders/:id/invoice-link')
+  invoiceLinkStatus(@Param('id') id: string) {
+    return this.invoiceLinks.status(id);
+  }
+
+  @Permissions('Order.update')
+  @Post('orders/:id/invoice-link')
+  createInvoiceLink(@CurrentAdmin() admin: AdminUser, @Param('id') id: string) {
+    return this.invoiceLinks.create(id, { id: admin.sub, name: admin.name });
+  }
+
+  // Sends a customer message, so it also needs the manual-send permission.
+  @Permissions('Order.update', 'Notification.send')
+  @Post('orders/:id/invoice-link/whatsapp')
+  sendInvoiceLinkWhatsApp(@CurrentAdmin() admin: AdminUser, @Param('id') id: string) {
+    return this.invoiceLinks.sendWhatsApp(id, { id: admin.sub, name: admin.name });
   }
 
   // ---- Internal notes (admin-only annotations; isolated from business flows) ----

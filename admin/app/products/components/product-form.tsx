@@ -26,8 +26,9 @@ interface ProductFormProps {
   submitLabel: string;
 }
 
+// No `sku` (P2 #5): it is internal and never shown. The form never sends one, so the
+// backend assigns it from the slug on create and leaves it untouched on edit.
 export type ProductFormValues = {
-  sku: string;
   slug: string;
   name: string;
   description: string;
@@ -37,6 +38,8 @@ export type ProductFormValues = {
   spicyLevel?: number;
   isBestSeller: boolean;
   isNew: boolean;
+  isPromoSpecial: boolean;
+  isTrialPack: boolean;
   status: 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
   stock: number;
   categoryId: string;
@@ -72,7 +75,6 @@ export function ProductForm({
   );
 
   const [values, setValues] = useState<ProductFormValues>({
-    sku: initialValues?.sku ?? '',
     slug: initialValues?.slug ?? '',
     name: initialValues?.name ?? '',
     description: initialValues?.description ?? '',
@@ -82,6 +84,8 @@ export function ProductForm({
     spicyLevel: initialValues?.spicyLevel ?? undefined,
     isBestSeller: initialValues?.isBestSeller ?? false,
     isNew: initialValues?.isNew ?? false,
+    isPromoSpecial: initialValues?.isPromoSpecial ?? false,
+    isTrialPack: initialValues?.isTrialPack ?? false,
     status:
       (initialValues?.status as ProductFormValues['status']) ??
       'ACTIVE',
@@ -169,15 +173,6 @@ export function ProductForm({
       <CardTitle>{submitLabel}</CardTitle>
       <form onSubmit={handleSubmit} className="mt-4 space-y-6">
         <div className="grid gap-4 lg:grid-cols-2">
-          <label className="space-y-2 text-sm text-gray-700">
-            <span>SKU</span>
-            <input
-              value={values.sku}
-              onChange={(event) => handleChange('sku', event.target.value)}
-              className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none focus:border-[#465fff] focus:bg-white"
-              required
-            />
-          </label>
           <label className="space-y-2 text-sm text-gray-700">
             <span>Slug</span>
             <input
@@ -321,7 +316,29 @@ export function ProductForm({
                 />
                 New
               </label>
+              <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={values.isPromoSpecial}
+                  onChange={(event) => handleChange('isPromoSpecial', event.target.checked)}
+                  className="h-4 w-4 rounded border-gray-300 text-[#465fff] focus:ring-[#465fff]"
+                />
+                Promo Special
+              </label>
+              <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={values.isTrialPack}
+                  onChange={(event) => handleChange('isTrialPack', event.target.checked)}
+                  className="h-4 w-4 rounded border-gray-300 text-[#465fff] focus:ring-[#465fff]"
+                />
+                Trial Pack
+              </label>
             </div>
+            <p className="text-xs text-gray-500">
+              Promo Special and Trial Pack products appear in the storefront homepage sections &quot;Promo Spesial
+              Produk&quot; and &quot;Trial Pack&quot;.
+            </p>
           </div>
         </div>
 

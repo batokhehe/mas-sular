@@ -8,7 +8,6 @@ import { CreateShipmentInput } from '../../src/modules/shipment/domain/shipment-
 
 function config(paxelEnabled: boolean, jneEnabled: boolean, maxRetry = 1): ShippingConfig {
   return {
-    originPostalCode: '40111',
     allowMockRates: false,
     // RajaOngkir is the JNE rate source (PAXELBOX-45); disabled here so these
     // pre-existing cases keep exercising exactly what they always did.

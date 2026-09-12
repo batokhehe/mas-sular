@@ -3,9 +3,9 @@
  *
  *   npx tsx prisma/tools/normalize-address-phone.verify.ts
  *
- * Runs the real tool against a THROWAWAY MySQL container. It never touches a
+ * Runs the real tool against a THROWAWAY PostgreSQL container. It never touches a
  * configured database: DATABASE_URL is overwritten with the container's URI
- * before @prisma/client is loaded, and the run aborts unless `SELECT DATABASE()`
+ * before @prisma/client is loaded, and the run aborts unless `current_database()`
  * returns the disposable name AND the Address table is empty.
  *
  * What it proves:
@@ -68,13 +68,13 @@ function diff(before: Snapshot, after: Snapshot): Record<string, string[]> {
 }
 
 async function main(): Promise<void> {
-  const { MySqlContainer } = require('@testcontainers/mysql');
+  const { PostgreSqlContainer } = require('@testcontainers/postgresql');
 
-  console.log('starting disposable MySQL…');
-  const container = await new MySqlContainer('mysql:8.4')
+  console.log('starting disposable PostgreSQL…');
+  const container = await new PostgreSqlContainer('postgres:16-alpine')
     .withDatabase(DB)
     .withUsername('backfill')
-    .withUserPassword('backfill')
+    .withPassword('backfill')
     .start();
 
   try {
@@ -93,7 +93,7 @@ async function main(): Promise<void> {
     const prisma = new PrismaClient();
 
     // ---- isolation gate: refuse to continue unless this is the throwaway DB --
-    const liveRows = (await prisma.$queryRawUnsafe('SELECT DATABASE() AS db')) as Array<{ db: string }>;
+    const liveRows = (await prisma.$queryRawUnsafe('SELECT current_database() AS db')) as Array<{ db: string }>;
     const live = liveRows[0]?.db;
     assert.equal(live, DB, `isolation gate: connected to "${live}", expected "${DB}"`);
     assert.equal(await prisma.address.count(), 0, 'isolation gate: Address table is not empty');
@@ -249,11 +249,18 @@ async function main(): Promise<void> {
     // Real protected names, created inside the throwaway container. Nothing here
     // can reach a real host: only the container's port is listening.
     console.log('=== 5. WRITE GUARDS ===');
-    const root = `mysql://root:${container.getRootPassword()}@${container.getHost()}:${container.getPort()}`;
+    const root = `postgresql://backfill:backfill@${container.getHost()}:${container.getPort()}`;
     const { PrismaClient: RootClient } = require('@prisma/client');
     const admin = new RootClient({ datasources: { db: { url: `${root}/${DB}` } } });
     for (const name of ['mas_sular', 'u122587529_dev_ecommerce', 'ecommerce_staging']) {
-      await admin.$executeRawUnsafe(`CREATE DATABASE IF NOT EXISTS \`${name}\``);
+      // PostgreSQL has no CREATE DATABASE IF NOT EXISTS, so existence is checked
+      // first. CREATE DATABASE also cannot run inside a transaction block, which
+      // is why this is $executeRawUnsafe rather than part of an interactive tx.
+      const exists = (await admin.$queryRawUnsafe(
+        `SELECT 1 AS ok FROM pg_database WHERE datname = $1`,
+        name,
+      )) as Array<{ ok: number }>;
+      if (exists.length === 0) await admin.$executeRawUnsafe(`CREATE DATABASE "${name}"`);
     }
     await admin.$disconnect();
 

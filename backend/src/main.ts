@@ -9,6 +9,7 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { LogService } from './infrastructure/logging/log.service';
 import { RequestLoggingMiddleware } from './infrastructure/logging/request-logging.middleware';
 import { CsrfGuard } from './common/auth/csrf.guard';
+import { configureTrustProxy } from './common/http/trust-proxy';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'path';
 
@@ -18,6 +19,10 @@ async function bootstrap(): Promise<void> {
     { bufferLogs: true },
   ); const logger = app.get(Logger);
   app.useLogger(logger);
+  // B3: trust exactly the reverse-proxy hop(s) in front of the API, so req.ip - and
+  // with it the ThrottlerGuard bucket - is the real client, not the proxy.
+  const trustedHops = configureTrustProxy(app);
+  logger.log(`trust proxy: ${trustedHops} hop(s)`, 'Bootstrap');
 
   // /metrics is served outside the API prefix/version (Prometheus scrape convention).
   app.setGlobalPrefix(process.env.API_PREFIX ?? 'api', {
