@@ -57,7 +57,7 @@ services:
     logging: *default-logging
     deploy:
       resources:
-        limits: { cpus: "2.0", memory: 2G }
+        limits: { cpus: "0.5", memory: 2G }
         reservations: { memory: 512M }
 
   # ---------------------------------------------------------------- cache ---
@@ -78,7 +78,7 @@ services:
     logging: *default-logging
     deploy:
       resources:
-        limits: { cpus: "0.5", memory: 256M }
+        limits: { cpus: "0.25", memory: 256M }
 
   # ------------------------------------------------------------- messaging --
   # OPTION B (self-hosted) — active here so the stack is self-contained.
@@ -106,7 +106,7 @@ services:
     logging: *default-logging
     deploy:
       resources:
-        limits: { cpus: "1.0", memory: 512M }
+        limits: { cpus: "0.25", memory: 512M }
 
   # ------------------------------------------------------------ migration ---
   # Runs to completion BEFORE the API starts. `migrate deploy` only applies
@@ -179,7 +179,7 @@ services:
         # Node serves on the event loop, not per-connection threads. ~7.5x
         # headroom (F56). Set here, not as top-level pids_limit: Compose treats
         # the two as one setting and rejects declaring both.
-        limits: { cpus: "2.0", memory: 1536M, pids: 256 }
+        limits: { cpus: "0.75", memory: 1536M, pids: 256 }
         reservations: { memory: 512M }
 
   # ----------------------------------------------------------- storefront ---
@@ -208,7 +208,7 @@ services:
       resources:
         # pids: measured peak 13 tasks (next-server holds a fixed 11 threads; 600
         # concurrent requests added none). No query engine, so lower than the API.
-        limits: { cpus: "1.0", memory: 768M, pids: 128 }
+        limits: { cpus: "0.5", memory: 768M, pids: 128 }
 
   # ---------------------------------------------------------------- admin ---
   admin:
@@ -232,7 +232,7 @@ services:
     deploy:
       resources:
         # pids: same shape as the storefront — measured peak 13 tasks.
-        limits: { cpus: "0.5", memory: 512M, pids: 128 }
+        limits: { cpus: "0.25", memory: 512M, pids: 128 }
 
 networks:
   edge:

@@ -249,7 +249,7 @@ async function main(): Promise<void> {
       `Districts=${flatDistricts.length} Villages=${flatVillages.length}`,
   );
 
-  await seedCoverageDemo();
+//   await seedCoverageDemo();
 }
 
 /**

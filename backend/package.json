@@ -17,7 +17,8 @@
     "prisma:seed": "tsx prisma/seed.ts",
     "prisma:seed:address": "tsx prisma/seed-address.ts",
     "prisma:seed:inventory": "tsx prisma/seed-inventory.ts",
-    "test:sandbox": "jest --config test/integration/jest.sandbox.config.js"
+    "test:sandbox": "jest --config test/integration/jest.sandbox.config.js",
+    "prisma:seed:catalog": "tsx prisma/seed-catalog.ts"
   },
   "dependencies": {
     "@nestjs/bullmq": "^11.0.2",
