@@ -72,7 +72,7 @@ def main():
         bug.append("_No defects logged (0 FAIL results)._\n")
         if executed == 0:
             bug.append("All 92 cases are **Blocked** pending an executable environment "
-                       "(Docker + MySQL/Redis/RabbitMQ + seed). Not defects.")
+                       "(Docker + PostgreSQL/Redis/RabbitMQ + seed). Not defects.")
     for x in fails:
         bug += [f"## {x['id']} — {x['module']}",
                 f"- **Scenario:** {x['scenario']}",

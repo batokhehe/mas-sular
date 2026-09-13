@@ -8,6 +8,9 @@ import { ShipmentAdminController } from './presentation/shipment-admin.controlle
 import { JneWebhookController } from './presentation/jne-webhook.controller';
 import { JNE_WEBHOOK_CONFIG, loadJneWebhookConfig } from './jne-webhook.config';
 import { JneWebhookService } from './jne-webhook.service';
+import { PaxelWebhookController } from './presentation/paxel-webhook.controller';
+import { PAXEL_WEBHOOK_CONFIG, loadPaxelWebhookConfig } from './paxel-webhook.config';
+import { PaxelWebhookService } from './paxel-webhook.service';
 import { SHIPMENT_PROVIDERS, ShipmentProviderFactory } from './shipment-provider.factory';
 import { SHIPMENT_TRACKING_CONFIG, loadShipmentTrackingConfig } from './shipment-tracking.config';
 import { ShipmentTrackingWorker } from './shipment-tracking.worker';
@@ -19,7 +22,7 @@ import { ShipmentStatusMapper } from './shipment-status.mapper';
 import { ShipmentSyncService } from './shipment-sync.service';
 
 @Module({
-  controllers: [ShipmentAdminController, JneWebhookController],
+  controllers: [ShipmentAdminController, JneWebhookController, PaxelWebhookController],
   providers: [
     // Provider credentials (same env as quotation; env.validation asserts at boot).
     //
@@ -65,6 +68,10 @@ import { ShipmentSyncService } from './shipment-sync.service';
     // JNE Webhook Status V2 (inbound pushes). Off unless JNE_WEBHOOK_ENABLED=true.
     { provide: JNE_WEBHOOK_CONFIG, useFactory: () => loadJneWebhookConfig() },
     JneWebhookService,
+    // Paxel webhook (inbound pushes). Off unless PAXEL_WEBHOOK_ENABLED=true;
+    // independent of PAXEL_ENABLED.
+    { provide: PAXEL_WEBHOOK_CONFIG, useFactory: () => loadPaxelWebhookConfig() },
+    PaxelWebhookService,
   ],
   exports: [ShipmentService, ShipmentSyncService, ShipmentStatusMapper],
 })

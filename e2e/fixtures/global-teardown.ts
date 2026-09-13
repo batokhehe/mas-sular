@@ -7,7 +7,7 @@ import { E2E_STATE_DIR } from './global-setup';
  *
  * Signals shutdown with a flag file rather than SIGTERM, which is unreliable on
  * Windows, and waits for the child to confirm it actually stopped. Runs even
- * when the suite failed, so a run can never leave a MySQL container or a backend
+ * when the suite failed, so a run can never leave a PostgreSQL container or a backend
  * process behind.
  */
 

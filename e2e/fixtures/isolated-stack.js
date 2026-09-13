@@ -82,7 +82,9 @@ async function fail(message, err) {
       .withDatabase('e2e_isolated')
       .withUsername('e2e')
       // Generated per run; never a repository or developer credential.
-      .withUserPassword(require('crypto').randomBytes(18).toString('hex'))
+      // (@testcontainers/postgresql names this withPassword - withUserPassword is
+      // the MySQL container's API and does not exist here.)
+      .withPassword(require('crypto').randomBytes(18).toString('hex'))
       .start();
   } catch (e) {
     await fail('could not start the disposable PostgreSQL container (is Docker running?)', e);
@@ -191,9 +193,10 @@ async function fail(message, err) {
   const prisma = app.get(PrismaService);
 
   // ---------- HARD ISOLATION GUARD ----------
-  const liveDb = (await prisma.$queryRawUnsafe('SELECT DATABASE() AS db'))[0].db;
+  // current_database() is PostgreSQL's name for MySQL's DATABASE().
+  const liveDb = (await prisma.$queryRawUnsafe('SELECT current_database() AS db'))[0].db;
   const addressRows = await prisma.address.count();
-  log('SELECT DATABASE() = ' + liveDb + ' ; Address rows = ' + addressRows);
+  log('SELECT current_database() = ' + liveDb + ' ; Address rows = ' + addressRows);
   if (liveDb !== 'e2e_isolated' || addressRows !== 0) {
     await app.close();
     await fail('isolation guard REFUSED: connected database is "' + liveDb + '" with ' + addressRows + ' address rows');

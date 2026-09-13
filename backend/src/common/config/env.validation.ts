@@ -169,6 +169,11 @@ const baseSchema = z
     // Inbound JNE Webhook Status V2. OFF by default: JNE's V2 documentation defines no
     // webhook authentication, so the endpoint is only reachable once deliberately enabled.
     JNE_WEBHOOK_ENABLED: boolFlag,
+    // Inbound Paxel webhook. OFF by default and independent of PAXEL_ENABLED. When on,
+    // X-Paxel-Signature is verified with PAXEL_WEBHOOK_SECRET (required, cross-field
+    // below). Which secret Paxel signs with is not yet confirmed by Paxel.
+    PAXEL_WEBHOOK_ENABLED: boolFlag,
+    PAXEL_WEBHOOK_SECRET: z.string().optional(),
 
     // Checkout idempotency. Optional locally; MUST be true in staging/production
     // (cross-field below) so duplicate checkout requests can never double-create.
@@ -285,6 +290,11 @@ export const envSchema = baseSchema.superRefine((env, ctx) => {
   // - and regardless of PAXEL_AUTO_PICKUP_ENABLED, because JNE records the same
   // slot either way. The HH:mm format of the two times is checked by their own
   // schemas above; the timezone needs ICU, so it is checked here.
+  // The Paxel webhook fails closed without a verification secret; refuse to boot
+  // with it enabled and nothing to verify against.
+  if (env.PAXEL_WEBHOOK_ENABLED === 'true' && !env.PAXEL_WEBHOOK_SECRET?.trim()) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['PAXEL_WEBHOOK_SECRET'], message: 'PAXEL_WEBHOOK_SECRET is required when PAXEL_WEBHOOK_ENABLED=true' });
+  }
   if (env.PAXEL_PICKUP_TIMEZONE?.trim() && !isValidTimeZone(env.PAXEL_PICKUP_TIMEZONE)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['PAXEL_PICKUP_TIMEZONE'], message: `PAXEL_PICKUP_TIMEZONE is not a valid IANA timezone ('${env.PAXEL_PICKUP_TIMEZONE}')` });
   }

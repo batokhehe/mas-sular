@@ -30,6 +30,23 @@ export function redactSensitiveParams(params: unknown): unknown {
   return out;
 }
 
+/**
+ * pino-http `redact` option. Credential headers are fully censored - the auth
+ * header, cookies, and the Paxel webhook's `X-Paxel-Signature` (a request
+ * signature: never worth a log line). The request URL and the route params are
+ * partially censored so capability tokens (payment upload, P2 #14 invoice) never
+ * reach request logs - pino-http logs `req.params`, which carries the path too.
+ */
+export const PINO_HTTP_REDACT = {
+  paths: ['req.headers.authorization', 'req.headers.cookie', 'req.headers["x-paxel-signature"]', 'req.url', 'req.params'],
+  censor: (value: unknown, path: string[]): unknown => {
+    const field = path[path.length - 1];
+    if (field === 'url') return redactSensitivePath(String(value));
+    if (field === 'params') return redactSensitiveParams(value);
+    return '[Redacted]';
+  },
+};
+
 // Query-string keys whose VALUES must never be persisted (the SSE stream carries
 // the admin JWT as ?token=, and future endpoints may carry similar credentials).
 const SENSITIVE_QUERY_KEY = /token|secret|password|authorization|api[-_]?key/i;

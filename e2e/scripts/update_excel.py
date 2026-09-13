@@ -13,7 +13,7 @@ RESULTS = os.path.join(ROOT, "reports", "results.json")
 MODULE_SHEETS = ["Authentication", "Customer Frontend", "Admin Panel",
                  "Payment Flow", "Order Flow", "Shipping Flow", "Security"]
 TESTER = "Claude Code"
-BLOCKED_NOTE = ("Not executed in this run environment (no Docker/MySQL/Redis; backend "
+BLOCKED_NOTE = ("Not executed in this run environment (no Docker/PostgreSQL/Redis; backend "
                 "cannot boot). Harness authored at /e2e — run: pnpm i && npx playwright "
                 "test once the stack (docker-compose up + migrate + seed-uat) is reachable.")
 

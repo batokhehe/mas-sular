@@ -16,7 +16,7 @@ import { API_URL, CUSTOMER_URL, STORAGE } from '../utils/env';
  * see components/account/address-form.tsx). That is the point: the server must
  * replace the placeholder. Nothing about the frontend is changed to make this pass.
  *
- * Requires the isolated stack (disposable MySQL + stubbed Google/Paxel) — see the
+ * Requires the isolated stack (disposable PostgreSQL + stubbed Google/Paxel) — see the
  * 61AG.3.6 launcher. E2E_OUT_DIR points at its state files.
  */
 

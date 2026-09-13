@@ -1,5 +1,6 @@
 import { Prisma, ShipmentStatus } from '@prisma/client';
 import type { JneWebhookRecord } from './domain/jne-webhook';
+import type { PaxelWebhookRecord } from './domain/paxel-webhook';
 import type { ShipmentTransitionRejection } from './domain/shipment-transition';
 
 /**
@@ -19,6 +20,12 @@ import type { ShipmentTransitionRejection } from './domain/shipment-transition';
 export interface PaxelShipmentMetadata {
   /** ISO-8601. The admin's choice, verbatim. */
   pickupDatetime?: string;
+  /**
+   * Everything Paxel pushed through its webhook (status observations, logs, actual
+   * price/weight, delivery media links, money). Courier-internal and system-owned:
+   * Shipment.cost stays the shipping price the customer was charged.
+   */
+  webhook?: PaxelWebhookRecord;
 }
 
 /**
@@ -76,11 +83,11 @@ export interface ShipmentMetadata {
 }
 
 /**
- * Metadata paths owned by the system, not by operators: the JNE webhook record (what
- * the courier reported) and the pollers' rejected observations. An admin metadata
- * edit can never overwrite or delete them.
+ * Metadata paths owned by the system, not by operators: the courier webhook records
+ * (what JNE / Paxel reported) and the pollers' rejected observations. An admin
+ * metadata edit can never overwrite or delete them.
  */
-const SYSTEM_OWNED_PATHS: ReadonlyArray<readonly string[]> = [['jne', 'webhook'], ['tracking']];
+const SYSTEM_OWNED_PATHS: ReadonlyArray<readonly string[]> = [['jne', 'webhook'], ['paxel', 'webhook'], ['tracking']];
 
 /** Narrow the loosely-typed Json column without throwing on legacy shapes. */
 export function readShipmentMetadata(value: Prisma.JsonValue | null | undefined): ShipmentMetadata {
@@ -132,20 +139,38 @@ export function withJneWebhook(existing: Prisma.JsonValue | null | undefined, re
   return JSON.parse(JSON.stringify({ ...current, jne: { ...(current.jne ?? {}), webhook: record } })) as Prisma.InputJsonValue;
 }
 
+/** The stored Paxel webhook record, or undefined when Paxel has not pushed yet. */
+export function readPaxelWebhook(value: Prisma.JsonValue | null | undefined): PaxelWebhookRecord | undefined {
+  const record = readShipmentMetadata(value).paxel?.webhook;
+  return record && typeof record === 'object' && !Array.isArray(record) ? record : undefined;
+}
+
 /**
- * Metadata as a CUSTOMER may see it: the courier-internal JNE webhook record
- * (courier-reported ongkir, receiver details, media links) is removed.
+ * Merge the Paxel webhook record into existing metadata, preserving every other key
+ * (Paxel's pickup slot, the JNE namespace, booking failure diagnostics).
+ */
+export function withPaxelWebhook(existing: Prisma.JsonValue | null | undefined, record: PaxelWebhookRecord): Prisma.InputJsonValue {
+  const current = readShipmentMetadata(existing);
+  return JSON.parse(JSON.stringify({ ...current, paxel: { ...(current.paxel ?? {}), webhook: record } })) as Prisma.InputJsonValue;
+}
+
+/**
+ * Metadata as a CUSTOMER may see it: the courier-internal webhook records (JNE and
+ * Paxel: courier-reported costs, receiver/driver details, media links, money) and
+ * the pollers' diagnostics are removed.
  */
 export function withoutCourierInternals(value: Prisma.JsonValue | null | undefined): Prisma.JsonValue | null {
   if (value === null || value === undefined) return null;
   const current = readShipmentMetadata(value);
-  if (!current.jne?.webhook && !current.tracking) return value;
+  if (!current.jne?.webhook && !current.paxel?.webhook && !current.tracking) return value;
   const rest: Record<string, unknown> = { ...current };
   delete rest.tracking;
-  if (current.jne?.webhook) {
-    const { webhook: _internal, ...jne } = current.jne;
-    if (Object.keys(jne).length === 0) delete rest.jne;
-    else rest.jne = jne;
+  for (const courier of ['jne', 'paxel'] as const) {
+    const namespace = current[courier];
+    if (!namespace?.webhook) continue;
+    const { webhook: _internal, ...kept } = namespace;
+    if (Object.keys(kept).length === 0) delete rest[courier];
+    else rest[courier] = kept;
   }
   return rest as Prisma.JsonValue;
 }

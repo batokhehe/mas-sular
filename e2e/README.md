@@ -6,14 +6,14 @@ has **no `data-testid`**.
 
 ## Status of this harness
 - ✅ Harness, fixtures, reporters, Excel writer, report generators — authored & compiling.
-- ⏸️ **0 cases executed live** in the build environment: it has **no Docker / MySQL /
+- ⏸️ **0 cases executed live** in the build environment: it has **no Docker / PostgreSQL /
   Redis**, so the NestJS backend (fail-fast on `DATABASE_URL`/`REDIS_URL`) cannot boot
   and nothing is reachable. All cases are marked **Blocked** (never fabricated Pass/Fail).
 - Customer auth uses **backend cookie-mint** (Google OAuth can't be automated); admin
   uses **real email/password** login.
 
 ## Prerequisites to actually run
-1. **Infra:** `docker compose up -d` (MySQL/Redis/RabbitMQ) at repo root.
+1. **Infra:** `docker compose up -d` (PostgreSQL/Redis/RabbitMQ) at repo root.
 2. **Backend env:** copy `backend/.env.example` → `backend/.env`, set secrets +
    `GOOGLE_CLIENT_ID`; `cd backend && npx prisma migrate deploy && pnpm seed`.
 3. **Seed UAT users/data:** create a test customer + admin, export their ids/creds (see env below).
