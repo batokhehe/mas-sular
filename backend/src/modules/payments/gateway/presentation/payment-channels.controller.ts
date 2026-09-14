@@ -25,10 +25,13 @@ export class PaymentChannelsController {
     private readonly initiation: PaymentInitiationService,
   ) {}
 
-  /** GET /api/v1/payments/channels — channels a customer can actually use today. */
+  /**
+   * GET /api/v1/payments/channels — channels a customer can actually use today.
+   * Manual transfer is listed only while an active bank account exists (P0-3).
+   */
   @Get('channels')
-  list(): { channels: PublicPaymentChannel[] } {
-    return { channels: this.channels.listPublic() };
+  async list(): Promise<{ channels: PublicPaymentChannel[] }> {
+    return { channels: await this.channels.listPublic() };
   }
 
   /**

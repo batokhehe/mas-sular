@@ -7,6 +7,19 @@ import * as bcrypt from 'bcryptjs'
 import { AdminAuthService } from '../../src/modules/admin-auth/admin-auth.service'
 import { BootstrapError, bootstrapProduction, readBootstrapCredentials } from '../../prisma/bootstrap/production-bootstrap'
 import { PERMISSIONS, ROLES } from '../../prisma/bootstrap/rbac'
+import { ROLE_PERMISSION_MATRIX } from '../../prisma/bootstrap/permission-catalogue'
+import { AdminSessionStore } from '../../src/modules/admin-auth/admin-session.store'
+import { AdminLoginLimiter } from '../../src/modules/admin-auth/admin-login-limiter'
+
+/** Minimal in-memory stand-in for the Redis-backed cache-manager. */
+function memoryCache() {
+  const m = new Map<string, unknown>()
+  return {
+    get: async (k: string) => m.get(k),
+    set: async (k: string, v: unknown) => { m.set(k, v) },
+    del: async (k: string) => { m.delete(k) },
+  }
+}
 import { getWorld, IntegrationWorld } from './world'
 
 const OWNER = { BOOTSTRAP_ADMIN_EMAIL: 'owner@shop.example', BOOTSTRAP_ADMIN_PASSWORD: 'first-operator-passphrase-01', BOOTSTRAP_ADMIN_NAME: 'Pemilik' }
@@ -41,7 +54,9 @@ describe('B5 production bootstrap (real DB)', () => {
     const c = await counts()
     expect(c.roles).toBe(ROLES.length)
     expect(c.permissions).toBe(PERMISSIONS.length)
-    expect(c.grants).toBe(PERMISSIONS.length) // SUPER_ADMIN holds every permission
+    // SUPER_ADMIN holds every catalogue permission; ADMIN/MANAGER/STAFF hold exactly their matrix.
+    const matrixGrants = Object.values(ROLE_PERMISSION_MATRIX).reduce((n, perms) => n + perms.length, 0)
+    expect(c.grants).toBe(PERMISSIONS.length + matrixGrants)
     expect(c.admins).toBe(1)
     expect(c.adminRoles).toBe(1)
     // No demo catalogue, voucher, bank account or outlet.
@@ -58,7 +73,9 @@ describe('B5 production bootstrap (real DB)', () => {
   })
 
   it('the created admin can log in through the real admin auth service with full permissions', async () => {
-    const auth = new AdminAuthService(world.prisma, new JwtService({ secret: 'int-test-admin-secret-00000000000000' }))
+    const cache = memoryCache()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const auth = new AdminAuthService(world.prisma, new JwtService({ secret: 'int-test-admin-secret-00000000000000' }), new AdminSessionStore(cache as any), new AdminLoginLimiter(cache as any))
     const session = await auth.login('owner@shop.example', OWNER.BOOTSTRAP_ADMIN_PASSWORD)
     expect(session.accessToken).toEqual(expect.any(String))
     expect(session.permissions).toEqual(expect.arrayContaining(['Order.read', 'Order.update', 'Notification.send', 'Product.create']))

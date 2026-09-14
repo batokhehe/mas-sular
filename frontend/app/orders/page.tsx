@@ -26,7 +26,8 @@ import { useMe } from '@/lib/query/hooks/use-me'
 import { useOrders } from '@/lib/query/hooks/use-orders'
 import { canResumeGatewayPayment, gatewayPaymentHref } from '@/lib/payments/resume'
 import type { Order } from '@/lib/types/models'
-import type { OrderStatus, PaymentStatus, ShipmentStatus } from '@/lib/types/enums'
+import type { OrderStatus, PaymentStatus } from '@/lib/types/enums'
+import { shipmentStatusLabel } from '@/lib/orders/shipment-status-label'
 
 type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline'
 
@@ -43,7 +44,7 @@ const PAYMENT_LABEL: Record<string, { label: string; variant: BadgeVariant }> = 
 const UPLOADABLE: PaymentStatus[] = ['PENDING', 'WAITING_VERIFICATION']
 const RECEIPT_METHODS = new Set(['BANK_TRANSFER', 'QRIS'])
 
-// Presentation only — derived from the real OrderStatus / ShipmentStatus values.
+// Presentation only — derived from the real OrderStatus values (shipment badges: lib/orders/shipment-status-label).
 const ORDER_META: Record<OrderStatus, { label: string; variant: BadgeVariant; icon: typeof Clock }> = {
   PENDING: { label: 'Pending', variant: 'outline', icon: Clock },
   PROCESSING: { label: 'Processing', variant: 'secondary', icon: Package },
@@ -53,15 +54,6 @@ const ORDER_META: Record<OrderStatus, { label: string; variant: BadgeVariant; ic
   DELIVERED: { label: 'Delivered', variant: 'default', icon: CheckCircle2 },
   COMPLETED: { label: 'Completed', variant: 'default', icon: CheckCircle2 },
   CANCELLED: { label: 'Cancelled', variant: 'destructive', icon: XCircle },
-}
-
-const SHIPMENT_LABEL: Record<ShipmentStatus, { label: string; variant: BadgeVariant }> = {
-  PENDING: { label: 'Pending', variant: 'outline' },
-  RATE_SELECTED: { label: 'Rate selected', variant: 'outline' },
-  PICKED_UP: { label: 'Picked up', variant: 'secondary' },
-  IN_TRANSIT: { label: 'In transit', variant: 'secondary' },
-  DELIVERED: { label: 'Delivered', variant: 'default' },
-  FAILED: { label: 'Failed', variant: 'destructive' },
 }
 
 function OrderCard({ order, onRefetch }: { order: Order; onRefetch: () => void }) {
@@ -74,6 +66,7 @@ function OrderCard({ order, onRefetch }: { order: Order; onRefetch: () => void }
   const StatusIcon = meta.icon
   const payment = order.payment
   const pay = payment ? PAYMENT_LABEL[payment.status] : undefined
+  const shipmentBadge = order.shipment ? shipmentStatusLabel(order.shipment.status) : undefined
   const canUpload =
     payment && RECEIPT_METHODS.has(order.paymentMethod) && UPLOADABLE.includes(payment.status)
   // A gateway payment the customer never finished. The link replays the attempt
@@ -96,9 +89,9 @@ function OrderCard({ order, onRefetch }: { order: Order; onRefetch: () => void }
             {meta.label}
           </Badge>
           {pay ? <Badge variant={pay.variant}>{pay.label}</Badge> : null}
-          {order.shipment ? (
-            <Badge variant={SHIPMENT_LABEL[order.shipment.status].variant}>
-              Shipping: {SHIPMENT_LABEL[order.shipment.status].label}
+          {shipmentBadge ? (
+            <Badge variant={shipmentBadge.variant}>
+              Shipping: {shipmentBadge.label}
             </Badge>
           ) : null}
         </div>
@@ -180,7 +173,7 @@ function OrderCard({ order, onRefetch }: { order: Order; onRefetch: () => void }
                 <h4 className="font-medium">Shipment</h4>
                 <p className="text-muted-foreground">
                   {order.shipment.provider} · {order.shipment.service} ·{' '}
-                  {SHIPMENT_LABEL[order.shipment.status].label}
+                  {shipmentBadge?.label}
                 </p>
                 {order.shipment.trackingNumber ? (
                   <p className="text-muted-foreground">

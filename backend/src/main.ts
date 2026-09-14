@@ -11,7 +11,8 @@ import { RequestLoggingMiddleware } from './infrastructure/logging/request-loggi
 import { CsrfGuard } from './common/auth/csrf.guard';
 import { configureTrustProxy } from './common/http/trust-proxy';
 import { NestExpressApplication } from '@nestjs/platform-express';
-import { join } from 'path';
+import { corsOptions, originRejectionMiddleware, parseAllowedOrigins } from './common/http/cors-policy';
+import { publicUploadDir } from './modules/upload/upload.util';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(
@@ -29,25 +30,14 @@ async function bootstrap(): Promise<void> {
     exclude: [{ path: 'metrics', method: RequestMethod.GET }],
   });
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: process.env.API_VERSION ?? '1' });
-  const allowedOrigins = (process.env.CORS_ORIGINS ?? '')
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
-
   // Explicit allowlist only — never reflect arbitrary origins back with credentials.
   // A request with no Origin header (same-origin, curl, server-to-server) is allowed;
-  // a cross-origin request is allowed only if its origin is in CORS_ORIGINS. The env
-  // validation requires a non-empty, wildcard-free CORS_ORIGINS in staging/production.
-  app.enableCors({
-    origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error('Not allowed by CORS'));
-      }
-    },
-    credentials: true,
-  });
+  // a disallowed cross-origin request gets a clean 403 (L5) from the rejection
+  // middleware, registered BEFORE cors. The env validation requires a non-empty,
+  // wildcard-free CORS_ORIGINS in staging/production.
+  const allowedOrigins = parseAllowedOrigins();
+  app.use(originRejectionMiddleware(allowedOrigins));
+  app.enableCors(corsOptions(allowedOrigins));
   // Enterprise logging center: assign a requestId, run the request inside an ALS
   // context, and persist a request.finished log. Applied via app.use (robust across
   // Express versions) and early so the requestId covers the whole request.
@@ -78,12 +68,15 @@ async function bootstrap(): Promise<void> {
   // Ensure OnModuleDestroy fires on SIGTERM/SIGINT so the outbox relay stops
   // its loop and closes the shared AMQP connection cleanly.
   app.enableShutdownHooks();
-  app.useStaticAssets(
-    join(process.cwd(), 'uploads'),
-    {
-      prefix: '/uploads/',
-    },
-  );
+  // Only the PUBLIC upload directory is served (catalogue/banner images). Payment
+  // receipts live in uploads/private/receipts and are read through the authenticated
+  // GET /payments/receipts/:file endpoint (L8) - never from here.
+  app.useStaticAssets(publicUploadDir(), {
+    prefix: '/uploads/',
+    index: false,
+    dotfiles: 'deny',
+    fallthrough: true,
+  });
 
   // Swagger enumerates the full API surface (incl. admin/system routes), so it is
   // OFF in production unless SWAGGER_ENABLED=true explicitly opts back in.

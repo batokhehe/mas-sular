@@ -1,36 +1,27 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { loginAdmin } from '@/lib/auth-actions';
-import { getAuthToken } from '@/lib/api';
+import { firstAccessibleRoute } from '@/lib/navigation';
 
 export default function LoginPage() {
-  console.log('[LOGIN PAGE] render');
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const hasToken = Boolean(getAuthToken());
-
-  useEffect(() => {
-    console.log('[LOGIN PAGE] mounted');
-  }, []);
-
-  useEffect(() => {
-    console.log('[LOGIN PAGE] auth state', { hasToken });
-  }, [hasToken]);
-
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
     setIsSubmitting(true);
 
     try {
-      await loginAdmin(email, password);
-      router.replace('/dashboard');
+      const data = await loginAdmin(email, password);
+      // Land on a page this admin may open: the dashboard when they hold
+      // Dashboard.read, otherwise their first accessible page (STAFF -> /orders).
+      router.replace(firstAccessibleRoute(data.permissions ?? []));
     } catch (err) {
       setError((err as Error).message || 'Login failed.');
     } finally {

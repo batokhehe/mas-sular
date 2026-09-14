@@ -1,5 +1,5 @@
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
-import { ConflictException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import type { Cache } from 'cache-manager';
 import { OrderStatus, PaymentStatus, Prisma, ShipmentStatus } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
@@ -25,11 +25,22 @@ import { CreateCategoryDto } from './application/dto/create-category.dto';
 import { CreateProductDto } from './application/dto/create-product.dto';
 import { CreatePromoDto } from './application/dto/create-promo.dto';
 import { CreateRoleDto } from './application/dto/create-role.dto';
+import { CreateToppingDto } from './application/dto/create-topping.dto';
 import { UpdateBannerDto } from './application/dto/update-banner.dto';
 import { UpdateCategoryDto } from './application/dto/update-category.dto';
 import { UpdateProductDto } from './application/dto/update-product.dto';
 import { UpdatePromoDto } from './application/dto/update-promo.dto';
 import { UpdateRoleDto } from './application/dto/update-role.dto';
+import { UpdateToppingDto } from './application/dto/update-topping.dto';
+import { ALL_PERMISSION_NAMES } from '../../../prisma/bootstrap/permission-catalogue';
+import {
+  assertCustomerRoles,
+  assertGrantablePermissions,
+  assertMutableRole,
+  assertRoleAdministrator,
+  RoleActor,
+  validateCustomRoleName,
+} from './role-policy';
 import { UpdateUserDto } from './application/dto/update-user.dto';
 import { pageArgs, paginate } from '../../common/pagination/pagination';
 import { buildOrderTimeline, computeAvailableActions } from './order-operations.util';
@@ -280,6 +291,38 @@ export class AdminService {
   async deletePromo(id: string) {
     await this.getPromo(id);
     return this.prisma.promo.update({ where: { id }, data: { deletedAt: new Date() } });
+  }
+
+  /**
+   * Toppings. The storefront lists active, non-deleted ones and checkout re-prices
+   * each chosen topping from this table (orders.service getCartPricing), while every
+   * placed order keeps its own OrderItemTopping name/price snapshot - so editing a
+   * price here only affects orders placed afterwards. Delete is a soft delete, like
+   * the rest of the catalogue: ordered toppings stay referenced by OrderItemTopping.
+   */
+  createTopping(dto: CreateToppingDto) {
+    return this.prisma.topping.create({ data: { ...dto } });
+  }
+
+  /** Active and inactive alike - the admin needs to see what customers do not. */
+  listToppings() {
+    return this.prisma.topping.findMany({ where: { deletedAt: null }, orderBy: { name: 'asc' } });
+  }
+
+  async getTopping(id: string) {
+    const topping = await this.prisma.topping.findUnique({ where: { id } });
+    if (!topping || topping.deletedAt) throw new NotFoundException('Topping not found');
+    return topping;
+  }
+
+  async updateTopping(id: string, dto: UpdateToppingDto) {
+    await this.getTopping(id);
+    return this.prisma.topping.update({ where: { id }, data: dto });
+  }
+
+  async deleteTopping(id: string) {
+    await this.getTopping(id);
+    return this.prisma.topping.update({ where: { id }, data: { deletedAt: new Date() } });
   }
 
   async createBanner(dto: CreateBannerDto) {
@@ -775,17 +818,39 @@ export class AdminService {
     return user;
   }
 
-  async createRole(dto: CreateRoleDto) {
+  /** H1: SUPER_ADMIN only; custom roles only; reserved names and non-catalogue permissions refused. */
+  async createRole(dto: CreateRoleDto, actor: RoleActor) {
+    assertRoleAdministrator(actor);
+    const name = validateCustomRoleName(dto.name);
+    await this.assertRoleNameAvailable(name);
+    const permissionIds = dto.permissionIds ?? [];
+    await this.assertGrantable(permissionIds);
     return this.prisma.role.create({
       data: {
-        name: dto.name,
+        name,
         description: dto.description,
-        permissions: dto.permissionIds ? {
-          create: dto.permissionIds.map((permissionId) => ({ permissionId })),
-        } : undefined,
+        permissions: permissionIds.length ? { create: [...new Set(permissionIds)].map((permissionId) => ({ permissionId })) } : undefined,
       },
       include: { permissions: { include: { permission: true } } },
     });
+  }
+
+  /** Case-insensitive uniqueness, so "Ops Lead" and "ops lead" cannot coexist. */
+  private async assertRoleNameAvailable(name: string, exceptId?: string) {
+    const clash = await this.prisma.role.findFirst({
+      where: { name: { equals: name, mode: 'insensitive' }, ...(exceptId ? { NOT: { id: exceptId } } : {}) },
+      select: { id: true },
+    });
+    if (clash) throw new ConflictException('A role with this name already exists');
+  }
+
+  private async assertGrantable(permissionIds: readonly string[]) {
+    if (permissionIds.length === 0) return;
+    const found = await this.prisma.permission.findMany({
+      where: { id: { in: [...new Set(permissionIds)] } },
+      select: { id: true, subject: true, action: true },
+    });
+    assertGrantablePermissions(permissionIds, found);
   }
 
   listRoles() {
@@ -824,14 +889,22 @@ export class AdminService {
    * touches it when a scalar actually changes - a permissions-only edit would otherwise
    * leave the timestamp untouched and the next caller's stale token would still match.
    */
-  async updateRole(id: string, dto: UpdateRoleDto) {
-    await this.getRole(id);
+  async updateRole(id: string, dto: UpdateRoleDto, actor: RoleActor) {
+    // H1, in this order: who may edit roles at all, then which roles are editable.
+    assertRoleAdministrator(actor);
+    const current = await this.getRole(id);
+    assertMutableRole(current);
+    const heldByActor = await this.prisma.adminRole.findFirst({ where: { adminId: actor.sub, roleId: id }, select: { roleId: true } });
+    if (heldByActor) throw new ForbiddenException('You cannot modify a role you hold');
+    const name = dto.name !== undefined ? validateCustomRoleName(dto.name) : undefined;
+    if (name !== undefined) await this.assertRoleNameAvailable(name, id);
+    if (dto.permissionIds) await this.assertGrantable(dto.permissionIds);
 
     return this.prisma.$transaction(async (tx) => {
       const claimed = await tx.role.updateMany({
         where: { id, updatedAt: new Date(dto.expectedUpdatedAt) },
         data: {
-          ...(dto.name ? { name: dto.name } : {}),
+          ...(name ? { name } : {}),
           ...(dto.description !== undefined ? { description: dto.description } : {}),
           updatedAt: new Date(),
         },
@@ -847,7 +920,7 @@ export class AdminService {
         await tx.rolePermission.deleteMany({ where: { roleId: id } });
         if (dto.permissionIds.length > 0) {
           await tx.rolePermission.createMany({
-            data: dto.permissionIds.map((permissionId) => ({ roleId: id, permissionId })),
+            data: [...new Set(dto.permissionIds)].map((permissionId) => ({ roleId: id, permissionId })),
           });
         }
       }
@@ -861,6 +934,11 @@ export class AdminService {
 
   async updateUser(id: string, dto: UpdateUserDto) {
     await this.getUser(id);
+    // L3: a customer-management endpoint must never turn a customer into an admin.
+    if (dto.roleIds) {
+      const roles = await this.prisma.role.findMany({ where: { id: { in: [...new Set(dto.roleIds)] } }, select: { id: true, name: true } });
+      assertCustomerRoles(dto.roleIds, roles);
+    }
 
     const updateData: Prisma.UserUpdateInput = {
       ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
@@ -874,7 +952,7 @@ export class AdminService {
           data: {
             ...updateData,
             roles: {
-              create: dto.roleIds.map((roleId) => ({ roleId })),
+              create: [...new Set(dto.roleIds)].map((roleId) => ({ roleId })),
             },
           },
           include: { roles: { include: { role: true } }, addresses: ADDRESS_WITH_REGIONS, orders: true },
@@ -890,9 +968,10 @@ export class AdminService {
     });
   }
 
-  listPermissions() {
-    return this.prisma.permission.findMany({
-      orderBy: { subject: 'asc' },
-    });
+  /** Only canonical catalogue permissions are offered; retired legacy rows are hidden and not grantable. */
+  async listPermissions() {
+    const catalogue = new Set(ALL_PERMISSION_NAMES);
+    const rows = await this.prisma.permission.findMany({ orderBy: [{ subject: 'asc' }, { action: 'asc' }] });
+    return rows.filter((p) => catalogue.has(`${p.subject}.${p.action}`));
   }
 }

@@ -24,7 +24,8 @@ const CHECKOUT = strip(readFileSync(join(process.cwd(), 'app/checkout/page.tsx')
 test('every cart line has its own accessible checkbox bound to its selection', () => {
   const perLine = CART.split('{lines.map((line) => (')[1] ?? ''
   assert.match(perLine, /<Checkbox[\s\S]*?checked=\{line\.selected\}/)
-  assert.match(perLine, /onCheckedChange=\{\(checked\) => setSelected\(line\.productId, checked === true\)\}/)
+  // P0-1: keyed by the LINE (product + toppings), so "Baso" and "Baso + Keju" are independent.
+  assert.match(perLine, /onCheckedChange=\{\(checked\) => setSelected\(line\.lineId, checked === true\)\}/)
   assert.match(perLine, /aria-label=\{`Select \$\{line\.name\}`\}/)
 })
 
@@ -51,12 +52,13 @@ test('8. with nothing selected the checkout button is disabled and says why', ()
 })
 
 test('existing cart behaviour is kept: quantity, remove, navigation, clear, empty state', () => {
-  assert.match(CART, /setQty\(line\.productId, line\.qty - 1\)/)
-  assert.match(CART, /setQty\(line\.productId, line\.qty \+ 1\)/)
-  assert.match(CART, /onClick=\{\(\) => remove\(line\.productId\)\}/)
+  // P0-1: actions are keyed by lineId; prices include the line's toppings.
+  assert.match(CART, /setQty\(line\.lineId, line\.qty - 1\)/)
+  assert.match(CART, /setQty\(line\.lineId, line\.qty \+ 1\)/)
+  assert.match(CART, /onClick=\{\(\) => remove\(line\.lineId\)\}/)
   assert.match(CART, /<Link href=\{`\/catalog\/\$\{line\.slug\}`\}/)
-  assert.match(CART, /formatIDR\(line\.price\)\} each/)
-  assert.match(CART, /formatIDR\(line\.price \* line\.qty\)/)
+  assert.match(CART, /formatIDR\(lineUnitPrice\(line\)\)\} each/)
+  assert.match(CART, /formatIDR\(lineTotal\(line\)\)/)
   assert.match(CART, /onClick=\{\(\) => clear\(\)\}/)
   assert.match(CART, /if \(lines\.length === 0\) \{[\s\S]*?title="Your cart is empty"/)
 })
@@ -87,9 +89,10 @@ test('8. nothing selected: Checkout shows a clear message and never falls back t
 })
 
 test('10/11. success removes only the purchased lines; nothing else ever removes cart lines', () => {
-  assert.match(CHECKOUT, /const purchasedIds = input\.items\.map\(\(item\) => item\.product_id\)/)
+  // P0-1: by line (product + toppings), captured from the lines this request buys.
+  assert.match(CHECKOUT, /const purchasedLineIds = checkoutLines\.map\(\(line\) => line\.lineId\)/)
   const success = CHECKOUT.split('onSuccess: (order) => {')[1]?.split('router.push')[0] ?? ''
-  assert.match(success, /removeLines\(purchasedIds\)/)
+  assert.match(success, /removeLines\(purchasedLineIds\)/)
   assert.equal(/clearCart|\.clear\(\)/.test(CHECKOUT.replace('clearChosenAddress()', '')), false, 'the whole cart is never cleared')
   // Abandoning checkout (leaving, refresh, error) cannot delete anything: the only
   // removal is inside onSuccess.

@@ -1,7 +1,8 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import {
   ArrowDown, ArrowUp, Minus, Wallet, ShoppingBag, Clock, CheckCircle2, Package, Truck, PackageCheck, XCircle,
@@ -13,6 +14,7 @@ import { Card, CardTitle } from '@/components/ui/card';
 import { ROUTE_PERMISSIONS } from '@/lib/access';
 import { fetchExecutiveDashboard, ExecutiveDashboard, HealthLevel } from '@/lib/admin';
 import { useAdminAuthStatus, useAdminProfile } from '@/lib/auth';
+import { canViewDashboard, DASHBOARD_ROUTE, firstAccessibleRoute } from '@/lib/navigation';
 import { TrendChart, DonutChart } from '@/components/dashboard/charts';
 import { formatRupiah } from '@/lib/utils/number';
 
@@ -32,9 +34,21 @@ const HEALTH_DOT: Record<HealthLevel, string> = { green: 'bg-emerald-500', yello
 const HEALTH_LABEL: Record<HealthLevel, string> = { green: 'Operational', yellow: 'Degraded', red: 'Down' };
 
 export default function DashboardPage() {
+  const router = useRouter();
   const authStatus = useAdminAuthStatus();
   const profile = useAdminProfile({ enabled: authStatus.isInitialized && authStatus.hasToken });
-  const canFetch = profile.isSuccess;
+  // Decided from GET /admin/auth/me (the server's live permissions), not the cached list.
+  const permissions = profile.data?.permissions;
+  const mayView = profile.isSuccess && canViewDashboard(permissions);
+  // Admins without Dashboard.read never request the executive data (no 403 per poll).
+  const canFetch = mayView;
+
+  // `/` and old bookmarks lead here; send admins without Dashboard.read to their first
+  // accessible page instead of leaving them on a "Permission required" panel.
+  const fallbackRoute = profile.isSuccess && !mayView ? firstAccessibleRoute(permissions) : null;
+  useEffect(() => {
+    if (fallbackRoute && fallbackRoute !== DASHBOARD_ROUTE) router.replace(fallbackRoute);
+  }, [fallbackRoute, router]);
 
   const query = useQuery({
     queryKey: ['exec-dashboard'],

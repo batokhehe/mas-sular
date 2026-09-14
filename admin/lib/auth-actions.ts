@@ -1,23 +1,24 @@
 'use client';
 
-import { api, setAuthToken } from './api';
+import { api, notifyAuthChanged } from './api';
 import { writeStoredPermissions } from './permissions';
 
+/**
+ * Login response. The access token is NOT part of it: the API sets it as the
+ * httpOnly ms_admin_access cookie, which page scripts cannot read (H4).
+ */
 export type AdminLoginResponse = {
-  accessToken: string;
-  refreshToken?: string;
   user: {
     id: string;
     name: string;
     email: string;
-    isActive: boolean;
-    permissions?: string[];
     role?: {
       id: string;
       name: string;
     } | null;
   };
   permissions?: string[];
+  expiresAt?: string;
 };
 
 export async function loginAdmin(email: string, password: string) {
@@ -26,7 +27,7 @@ export async function loginAdmin(email: string, password: string) {
     body: JSON.stringify({ email, password }),
   });
 
-  setAuthToken(data.accessToken);
   writeStoredPermissions(data.permissions ?? []);
+  notifyAuthChanged();
   return data;
 }

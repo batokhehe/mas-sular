@@ -9,7 +9,7 @@ import { Card } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Separator } from '@/components/ui/separator'
 import { formatIDR } from '@/lib/utils/format'
-import { useCartStore, selectedLines, selectedSubtotal } from '@/lib/stores/cart-store'
+import { useCartStore, selectedLines, selectedSubtotal, lineUnitPrice, lineTotal } from '@/lib/stores/cart-store'
 
 export default function CartPage() {
   const lines = useCartStore((s) => s.lines)
@@ -69,12 +69,12 @@ export default function CartPage() {
               </span>
             </div>
             {lines.map((line) => (
-              <Card key={line.productId} className="flex gap-4 p-4">
+              <Card key={line.lineId} className="flex gap-4 p-4">
                 <div className="flex items-center gap-3">
                   <Checkbox
                     className="size-5"
                     checked={line.selected}
-                    onCheckedChange={(checked) => setSelected(line.productId, checked === true)}
+                    onCheckedChange={(checked) => setSelected(line.lineId, checked === true)}
                     aria-label={`Select ${line.name}`}
                   />
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -86,13 +86,18 @@ export default function CartPage() {
                       <Link href={`/catalog/${line.slug}`} className="line-clamp-1 font-semibold hover:underline">
                         {line.name}
                       </Link>
-                      <p className="text-sm text-muted-foreground">{formatIDR(line.price)} each</p>
+                      {line.toppings.length > 0 && (
+                        <p className="text-xs text-muted-foreground">
+                          + {line.toppings.map((t) => `${t.name} (${formatIDR(t.price)})`).join(', ')}
+                        </p>
+                      )}
+                      <p className="text-sm text-muted-foreground">{formatIDR(lineUnitPrice(line))} each</p>
                     </div>
                     <Button
                       variant="ghost"
                       size="icon"
                       className="size-8 shrink-0 text-muted-foreground hover:text-destructive"
-                      onClick={() => remove(line.productId)}
+                      onClick={() => remove(line.lineId)}
                       aria-label="Remove item"
                     >
                       <Trash2 className="size-4" />
@@ -104,7 +109,7 @@ export default function CartPage() {
                         variant="ghost"
                         size="icon"
                         className="size-8 rounded-full"
-                        onClick={() => setQty(line.productId, line.qty - 1)}
+                        onClick={() => setQty(line.lineId, line.qty - 1)}
                         aria-label="Decrease quantity"
                       >
                         <Minus className="size-3.5" />
@@ -114,15 +119,15 @@ export default function CartPage() {
                         variant="ghost"
                         size="icon"
                         className="size-8 rounded-full"
-                        onClick={() => setQty(line.productId, line.qty + 1)}
+                        onClick={() => setQty(line.lineId, line.qty + 1)}
                         aria-label="Increase quantity"
                       >
                         <Plus className="size-3.5" />
                       </Button>
                     </div>
-                    {/* Line total = real unit price × real quantity (the same per-line
-                        summation the store's cartSubtotal already performs). */}
-                    <p className="font-semibold text-primary">{formatIDR(line.price * line.qty)}</p>
+                    {/* Line total = unit price (product + toppings) × quantity (the same
+                        per-line summation the store's cartSubtotal already performs). */}
+                    <p className="font-semibold text-primary">{formatIDR(lineTotal(line))}</p>
                   </div>
                 </div>
               </Card>

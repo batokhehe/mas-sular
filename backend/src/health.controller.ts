@@ -3,15 +3,8 @@ import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { ApiTags } from '@nestjs/swagger';
 import { Cache } from 'cache-manager';
 import type { Response } from 'express';
-// NAMESPACE import, matching every other amqplib call site in this codebase.
-// A default import emits `amqplib_1.default.connect(...)` under `module: commonjs`
-// without `esModuleInterop`, and amqplib is CommonJS with no `default` export — so
-// it threw "Cannot read properties of undefined (reading 'connect')" before any
-// socket was opened. `allowSyntheticDefaultImports` silenced the type error but
-// changes no emit, which is why it compiled cleanly and failed only at runtime.
-import * as amqp from 'amqplib';
 import { PrismaService } from './database/prisma.service';
-import { amqpErrorInfo, describeAmqpTarget } from './common/diagnostics/amqp-redact';
+import { RabbitConnectionManager } from './infrastructure/outbox/rabbit-connection.manager';
 
 @ApiTags('health')
 @Controller({ path: 'health', version: '1' })
@@ -21,6 +14,7 @@ export class HealthController {
   constructor(
     private readonly prisma: PrismaService,
     @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
+    private readonly rabbit: RabbitConnectionManager,
   ) { }
 
   @Get()
@@ -58,19 +52,12 @@ export class HealthController {
     const rabbitRequired =
       process.env.OUTBOX_RELAY_ENABLED === 'true' || process.env.CONSUMERS_ENABLED === 'true';
     if (process.env.RABBITMQ_URL) {
-      // TEMP DIAGNOSTICS (remove once staging RabbitMQ is confirmed): log the
-      // credential-free target and the exact error. Status logic is unchanged.
-      const target = describeAmqpTarget(process.env.RABBITMQ_URL);
-      try {
-        this.logger.log(`RabbitMQ readiness probe -> ${target}`);
-        const connection = await amqp.connect(process.env.RABBITMQ_URL);
-        await connection.close();
-        this.logger.log(`RabbitMQ readiness OK -> ${target}`);
-        checks.rabbitmq = 'ok';
-      } catch (error) {
-        this.logger.error(`RabbitMQ readiness FAILED -> ${target} ${amqpErrorInfo(error)}`);
-        checks.rabbitmq = 'failed';
-      }
+      // L4: probe the SHARED connection the relay/consumers use - never a fresh
+      // AMQP connection per request (the former per-call connect/close was a
+      // public, unauthenticated way to make the API open broker connections).
+      const healthy = await this.rabbit.isHealthy();
+      checks.rabbitmq = healthy ? 'ok' : 'failed';
+      if (!healthy) this.logger.warn('RabbitMQ readiness failed (shared connection unavailable)');
     } else {
       checks.rabbitmq = rabbitRequired ? 'failed' : 'skipped';
     }

@@ -153,4 +153,12 @@ export interface PaymentProvider {
    * this never breaks an existing provider.
    */
   expireCharge?(ref: PaymentRef): Promise<ProviderStatus>;
+
+  /**
+   * Runtime precondition for offering a channel to a customer, beyond being
+   * registered. OPTIONAL: a provider without one is ready whenever it is
+   * registered (gateways). Manual transfer implements it - a transfer is only
+   * completable when an active bank account exists to transfer to.
+   */
+  isReady?(channel: PaymentChannelCode): Promise<boolean>;
 }

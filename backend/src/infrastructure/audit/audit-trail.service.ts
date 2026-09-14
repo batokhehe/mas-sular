@@ -9,6 +9,13 @@ import { numOrZero as num } from '../../common/utils/number.util';
 const EXPORT_BATCH = 1000;
 const EXPORT_MAX_ROWS = 50_000;
 
+/** Last non-empty line of an error message (Prisma puts the reason there), bounded. */
+function failureReason(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  const lines = message.split('\n').map((l) => l.trim()).filter(Boolean);
+  return (lines[lines.length - 1] ?? 'unknown error').slice(0, 300);
+}
+
 export interface AuditRecordInput {
   adminId?: string | null;
   adminName?: string | null;
@@ -53,7 +60,19 @@ export class AuditTrailService {
   // ---------------- Recording (fire-and-forget) ----------------
 
   record(input: AuditRecordInput): void {
-    void this.persist(input).catch((err) => this.logger.warn(`audit record failed: ${err instanceof Error ? err.message : err}`));
+    // Never breaks the admin action (the contract above), but a lost audit row is
+    // an error, not a warning. Context only: Prisma's message embeds the whole
+    // payload (IP, user agent, snapshots), so just its final line - the reason.
+    void this.persist(input).catch((err) =>
+      this.logger.error({
+        event: 'audit.record_failed',
+        module: input.module,
+        entity: input.entity,
+        entityId: input.entityId ?? null,
+        action: input.action,
+        reason: failureReason(err),
+      }),
+    );
   }
 
   private async persist(input: AuditRecordInput): Promise<void> {

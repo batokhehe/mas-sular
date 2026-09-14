@@ -1,9 +1,20 @@
 /**
- * Pure permission predicate shared by PermissionGuard and endpoints that must
- * authorize outside the guard pipeline (e.g. the SSE stream, where the JWT rides
- * as a query param). Single source of truth for the SUPER_ADMIN bypass and the
- * legacy `subjects.action` alias expansion.
+ * Pure permission predicate shared by PermissionGuard and any endpoint that must
+ * authorize outside the guard pipeline. Single source of truth for the SUPER_ADMIN
+ * bypass.
+ *
+ * RBAC hardening (H1 / Phase 5):
+ *   - SUPER_ADMIN is recognised ONLY by the canonical, immutable system role name
+ *     `SUPER_ADMIN`. The former `'Super Admin'` spelling was an editable-name alias:
+ *     anyone able to rename a role to "Super Admin" became a super admin.
+ *   - Permissions match EXACTLY. The legacy alias expansion (`Order.read` also
+ *     accepting `orders.view`) is gone; its naive pluralisation produced names such
+ *     as `categorys.view` that matched nothing and made grants silently ineffective.
+ *
+ * `role` must come from the database (AdminJwtStrategy.validate), never from a
+ * client-supplied token claim.
  */
+import { SUPER_ADMIN_ROLE } from '../../../prisma/bootstrap/permission-catalogue';
 
 export interface PermissionSubject {
   role?: string | null;
@@ -11,30 +22,14 @@ export interface PermissionSubject {
 }
 
 export function isSuperAdmin(user: PermissionSubject): boolean {
-  return user.role === 'SUPER_ADMIN' || user.role === 'Super Admin';
+  return user.role === SUPER_ADMIN_ROLE;
 }
 
-/** `Order.read` also accepts the legacy `orders.view` style grant. */
-export function expandPermissionAliases(permission: string): string[] {
-  const aliases = new Set([permission]);
-  const [subject, action] = permission.split('.');
-
-  if (subject && action) {
-    const legacySubject = `${subject.charAt(0).toLowerCase()}${subject.slice(1)}s`;
-    const legacyAction = action === 'read' ? 'view' : action;
-    aliases.add(`${legacySubject}.${legacyAction}`);
-  }
-
-  return Array.from(aliases);
-}
-
-/** True when the user is SUPER_ADMIN or holds every required permission (aliases accepted). */
+/** True when the user is SUPER_ADMIN or holds every required permission (exact names). */
 export function hasAllPermissions(user: PermissionSubject, required: string[]): boolean {
   if (required.length === 0) return true;
   if (isSuperAdmin(user)) return true;
 
   const granted = new Set(user.permissions ?? []);
-  return required.every((permission) =>
-    expandPermissionAliases(permission).some((accepted) => granted.has(accepted)),
-  );
+  return required.every((permission) => granted.has(permission));
 }

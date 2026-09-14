@@ -7,9 +7,11 @@ import { AdminService } from '../admin.service';
 import { CreateCategoryDto } from '../application/dto/create-category.dto';
 import { CreateProductDto } from '../application/dto/create-product.dto';
 import { CreatePromoDto } from '../application/dto/create-promo.dto';
+import { CreateToppingDto } from '../application/dto/create-topping.dto';
 import { UpdateCategoryDto } from '../application/dto/update-category.dto';
 import { UpdateProductDto } from '../application/dto/update-product.dto';
 import { UpdatePromoDto } from '../application/dto/update-promo.dto';
+import { UpdateToppingDto } from '../application/dto/update-topping.dto';
 
 @ApiTags('admin-catalog')
 @UseGuards(AdminGuard, PermissionGuard)
@@ -105,5 +107,39 @@ export class AdminCatalogController {
   @Delete('promos/:id')
   deletePromo(@Param('id') id: string) {
     return this.adminService.deletePromo(id);
+  }
+
+  // Toppings are product add-ons, so they reuse the Product.* permissions: whoever
+  // may change product prices may change topping prices (ADMIN), the read-only
+  // roles (MANAGER, STAFF) may list them. No new RBAC subject.
+
+  @Permissions('Product.create')
+  @Post('toppings')
+  createTopping(@Body() dto: CreateToppingDto) {
+    return this.adminService.createTopping(dto);
+  }
+
+  @Permissions('Product.read')
+  @Get('toppings')
+  listToppings() {
+    return this.adminService.listToppings();
+  }
+
+  @Permissions('Product.read')
+  @Get('toppings/:id')
+  getTopping(@Param('id') id: string) {
+    return this.adminService.getTopping(id);
+  }
+
+  @Permissions('Product.update')
+  @Patch('toppings/:id')
+  updateTopping(@Param('id') id: string, @Body() dto: UpdateToppingDto) {
+    return this.adminService.updateTopping(id, dto);
+  }
+
+  @Permissions('Product.delete')
+  @Delete('toppings/:id')
+  deleteTopping(@Param('id') id: string) {
+    return this.adminService.deleteTopping(id);
   }
 }

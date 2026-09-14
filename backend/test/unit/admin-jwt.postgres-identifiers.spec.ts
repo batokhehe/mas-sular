@@ -27,12 +27,13 @@ function buildAndCapture(queryResult: unknown[]) {
   const queryRaw = jest.fn().mockResolvedValue(queryResult);
   const prisma = { $queryRaw: queryRaw };
   const config = { get: jest.fn().mockReturnValue(SECRET) };
+  const sessions = { isActive: jest.fn().mockResolvedValue(true) };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const strategy = new AdminJwtStrategy(config as any, prisma as any);
+  const strategy = new AdminJwtStrategy(config as any, prisma as any, sessions as any);
   return { strategy, queryRaw };
 }
 
-const TOKEN = { sub: 'adm-1', email: 'a@test.local', name: 'A', isActive: true };
+const TOKEN = { sub: 'adm-1', sid: 'sess-1', typ: 'admin_access' };
 
 /** The SQL text Prisma would send, recovered from the tagged-template fragments. */
 function emittedSql(queryRaw: jest.Mock): string {

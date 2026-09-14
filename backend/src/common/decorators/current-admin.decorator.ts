@@ -2,6 +2,8 @@ import { createParamDecorator, ExecutionContext } from '@nestjs/common';
 
 export interface AdminUser {
   sub: string;
+  /** Server-side session id (H4); present on every request authenticated by AdminJwtStrategy. */
+  sid?: string;
   email: string;
   name: string;
   isActive: boolean;

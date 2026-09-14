@@ -1,6 +1,7 @@
 /**
  * PURE diff/snapshot helpers for the Audit Trail. No I/O — unit-testable alone.
  */
+import { Prisma } from '@prisma/client';
 
 export interface DiffEntry {
   field: string;
@@ -16,16 +17,38 @@ const isIgnored = (key: string): boolean => IGNORED_KEYS.has(key) || /(At|Timest
 // `invoiceUrl` (P2 #14) carries the customer invoice capability token.
 const SENSITIVE_KEYS = new Set(['password', 'passwordHash', 'token', 'tokenHash', 'secret', 'apiKey', 'authorization', 'refreshToken', 'accessToken', 'webhookPayload', 'invoiceUrl']);
 
-/** Deep-copy a snapshot with secrets removed and keys sorted (stable pretty JSON). */
+/**
+ * Prisma Decimal columns (Outlet/Address latitude+longitude, Product.rating) are
+ * decimal.js instances whose OWN keys include `constructor`. Walked as a plain
+ * object they became `{ constructor: [Function], d, e, s }`, which Prisma cannot
+ * store in the Json column - so every audited Outlet/Product write lost its row.
+ * Keep the numeric meaning: a JSON number when it round-trips exactly, otherwise
+ * the exact decimal string (never a silently rounded number).
+ */
+function decimalToJson(value: Prisma.Decimal): number | string {
+  const n = value.toNumber();
+  return Number.isFinite(n) && new Prisma.Decimal(n).equals(value) ? n : value.toString();
+}
+
+/**
+ * Deep-copy a snapshot with secrets removed and keys sorted (stable pretty JSON).
+ * The result is always JSON-serializable: Decimal -> number/exact string, BigInt ->
+ * string, Date -> ISO string; functions (never data) are dropped.
+ */
 export function sanitizeSnapshot(value: unknown): unknown {
   if (value === null || value === undefined) return null;
+  if (Prisma.Decimal.isDecimal(value)) return decimalToJson(value);
+  if (typeof value === 'bigint') return value.toString();
+  if (typeof value === 'function' || typeof value === 'symbol') return null;
   if (Array.isArray(value)) return value.map((v) => sanitizeSnapshot(v));
   if (value instanceof Date) return value.toISOString();
   if (typeof value !== 'object') return value;
   const out: Record<string, unknown> = {};
   for (const key of Object.keys(value as Record<string, unknown>).sort()) {
     if (SENSITIVE_KEYS.has(key)) continue;
-    out[key] = sanitizeSnapshot((value as Record<string, unknown>)[key]);
+    const v = (value as Record<string, unknown>)[key];
+    if (typeof v === 'function') continue;
+    out[key] = sanitizeSnapshot(v);
   }
   return out;
 }

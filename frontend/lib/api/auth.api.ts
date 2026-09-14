@@ -9,12 +9,12 @@ export interface GoogleLoginResponse {
   tokens: AuthTokens
 }
 
-// Admin login returns FLAT tokens plus the admin user + permissions.
+// Admin login returns the admin user + permissions. The access token is set by the
+// API as an httpOnly cookie and is deliberately NOT in the body (H4).
 export interface AdminLoginResponse {
-  accessToken: string
-  refreshToken: string
   user: { id: string; name: string; email: string }
   permissions: AdminPermission[]
+  expiresAt?: string
 }
 
 export const authApi = {

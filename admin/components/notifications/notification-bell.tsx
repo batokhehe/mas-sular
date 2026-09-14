@@ -7,7 +7,7 @@ import { Bell, CheckCheck, WifiOff } from 'lucide-react';
 import Swal from 'sweetalert2';
 import {
   fetchBellNotifications, fetchUnreadCount, markAllNotificationsRead, markNotificationRead,
-  bellStreamUrl, BellNotification,
+  bellStreamUrl, BELL_STREAM_INIT, BellNotification,
 } from '@/lib/notifications';
 import { BELL_FILTERS, PRIORITY_DOT, relativeTime, groupByDay, reduceUnread, badgeLabel } from '@/lib/system/bell-view';
 import { trailingDebounce } from '@/lib/debounce';
@@ -59,7 +59,7 @@ export function NotificationBell() {
     const connect = () => {
       const url = bellStreamUrl();
       if (!url || stopped) return;
-      source = new EventSource(url);
+      source = new EventSource(url, BELL_STREAM_INIT);
       source.onopen = () => {
         setConnection('live');
         // Resync the badge after a reconnect — events during the gap were missed.

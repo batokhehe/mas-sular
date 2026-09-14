@@ -81,9 +81,15 @@ None of these can be derived from the documentation. **Do not assume an answer.*
 
 ## 4. Reverse proxy / network (production action)
 
-This repository contains **no reverse-proxy configuration** (`docker-compose.production.yml` leaves TLS and
-the proxy to the edge layer). The backend publishes no host port and is reachable only through the proxy
-on the `edge` network. When JNE provides its source IP addresses, configure the proxy to:
+The versioned reverse-proxy configuration is `ops/nginx/mas-sular.conf` (installed to
+`/opt/mas-sular/nginx/conf.d/`). The backend publishes no host port and is reachable only through the proxy
+on the `edge` network.
+
+**Current state (staging, 2026-09-13): CLOSED.** No JNE source-IP list has been verified, so
+`JNE_WEBHOOK_ENABLED=false` (the application answers 503) **and** nginx answers 403 for
+`location = /api/v1/shipments/webhook/jne`. Both must change together to enable it.
+
+When JNE provides its source IP addresses (in writing), configure the proxy to:
 
 1. Allow `POST /api/v1/shipments/webhook/jne` **only** from the JNE-provided addresses; refuse everyone else
    for that path. Do not add addresses JNE has not provided in writing.
@@ -91,6 +97,25 @@ on the `edge` network. When JNE provides its source IP addresses, configure the 
    `TRUST_PROXY_HOPS=1`), so the application's per-IP rate limit (600/min on this route) keys on JNE's
    address, not the proxy's.
 3. Pass the path and JSON body through unmodified; no caching.
+
+Concretely, in `ops/nginx/mas-sular.conf`, replace the webhook location's `return 403;` with:
+
+```nginx
+location = /api/v1/shipments/webhook/jne {
+    allow <JNE-IP-1>;          # one line per address JNE supplied in writing
+    allow <JNE-IP-2>;
+    deny  all;
+    proxy_pass http://backend:3001;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+then `nginx -t` + reload, set `JNE_WEBHOOK_ENABLED=true` in `production.env`, and
+`docker compose ... up -d --force-recreate backend`. Verify from a non-JNE address that the path answers 403.
 
 Application validation stays fully active behind the restriction: the enabled flag, content type, payload
 validation, AWB + `order_id` matching and forward-only transitions do not depend on the proxy.

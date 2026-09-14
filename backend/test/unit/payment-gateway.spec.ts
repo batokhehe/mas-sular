@@ -107,10 +107,10 @@ describe('PaymentChannelRegistry', () => {
     expect(() => registry.resolve('NOPE')).toThrow(NotFoundException); // unknown code
   });
 
-  it('listPublic() is the customer projection (no provider field)', () => {
+  it('listPublic() is the customer projection (no provider field)', async () => {
     const { provider } = manualProvider();
     const { registry } = registryWith([provider]);
-    const [channel] = registry.listPublic();
+    const [channel] = await registry.listPublic();
     expect(channel).toMatchObject({ code: 'MANUAL_TRANSFER', label: 'Transfer Bank', method: PaymentMethod.BANK_TRANSFER });
     expect(channel).not.toHaveProperty('provider');
     expect(channel).not.toHaveProperty('enabled');
@@ -278,20 +278,28 @@ describe('PaymentGatewayModule wiring (DI graph resolves end to end)', () => {
     process.env.MIDTRANS_ENABLED = 'false';
     afterAllRestore.push(() => { process.env.MIDTRANS_ENABLED = previous; });
 
+    // P0-3: manual transfer is listed only while an active account exists.
+    const activeAccount = jest.fn().mockResolvedValue(ACCOUNT);
     const moduleRef = await Test.createTestingModule({ imports: [DatabaseModule, MetricsModule, PaymentGatewayModule] })
       .overrideProvider(PrismaService)
-      .useValue({ payment: { findUnique: jest.fn(), findFirst: jest.fn() }, paymentAccount: { findFirst: jest.fn() } })
+      .useValue({ payment: { findUnique: jest.fn(), findFirst: jest.fn() }, paymentAccount: { findFirst: activeAccount } })
       .compile();
 
     const factory = moduleRef.get(PaymentProviderFactory);
     expect(factory.getAll().map((p) => p.name)).toEqual(['manual']); // no gateway wired in Phase 1
     expect(moduleRef.get(PaymentInitiationService)).toBeInstanceOf(PaymentInitiationService);
 
-    const body = moduleRef.get(PaymentChannelsController).list();
+    const body = await moduleRef.get(PaymentChannelsController).list();
     expect(body.channels).toEqual([
       expect.objectContaining({ code: 'MANUAL_TRANSFER', label: 'Transfer Bank', method: PaymentMethod.BANK_TRANSFER }),
     ]);
     expect(JSON.stringify(body).toLowerCase()).not.toContain('midtrans');
+    expect(activeAccount).toHaveBeenCalledWith({ where: { isActive: true } });
+
+    // No active account (the real PaymentAccountService throws ConfigurationError):
+    // nothing is offered rather than a transfer that cannot be completed.
+    activeAccount.mockResolvedValueOnce(null);
+    expect((await moduleRef.get(PaymentChannelsController).list()).channels).toEqual([]);
 
     await moduleRef.close();
   });

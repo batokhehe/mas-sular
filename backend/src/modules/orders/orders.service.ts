@@ -763,6 +763,7 @@ export class OrdersService {
     fenceToken: number | null,
   ) {
     this.assertSelectablePaymentMethod(dto.payment_method);
+    await this.assertManualTransferReady(dto.payment_method);
     const items = this.normalizeItems(dto.items);
     const { products, toppings } = await this.getCartPricing(items);
     this.assertStock(items, products);
@@ -786,6 +787,20 @@ export class OrdersService {
         `Payment method ${method} is no longer available. Choose one of: ${selectablePaymentMethods().join(', ')}.`,
       );
     }
+  }
+
+  /**
+   * P0-3: a NEW manual-transfer order (explicit BANK_TRANSFER or the omitted-method
+   * default) needs a transfer the customer can actually make - the same readiness
+   * GET /payments/channels uses, i.e. an active bank account. Without one the order
+   * would sit PENDING with nowhere to pay. Other methods are untouched; existing
+   * orders and their payment pages are untouched.
+   */
+  private async assertManualTransferReady(method?: PaymentMethod): Promise<void> {
+    if ((method ?? DEFAULT_PAYMENT_METHOD) !== PaymentMethod.BANK_TRANSFER || !this.paymentChannels) return;
+    const manual = this.paymentChannels.find('MANUAL_TRANSFER');
+    if (manual && (await this.paymentChannels.isReady(manual))) return;
+    throw new BadRequestException('Transfer Bank is not available right now. Please choose another payment method.');
   }
 
   /**

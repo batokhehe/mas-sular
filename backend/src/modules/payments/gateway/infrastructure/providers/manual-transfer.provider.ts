@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { GatewayTransactionStatus, PaymentStatus } from '@prisma/client';
+import { ConfigurationError } from '../../../../../common/errors/configuration.error';
 import { PrismaService } from '../../../../../database/prisma.service';
 import { PaymentAccountService } from '../../../../payment-accounts/payment-account.service';
 import { PaymentChannelCode } from '../../domain/payment-channel';
@@ -37,6 +38,24 @@ export class ManualTransferProvider implements PaymentProvider {
 
   supportedChannels(): PaymentChannelCode[] {
     return ['MANUAL_TRANSFER'];
+  }
+
+  /**
+   * P0-3: manual transfer can only be completed when there is an account to pay
+   * into - the SAME active account createCharge() and the payment notifications
+   * read. No active account (ConfigurationError), or one missing the bank name,
+   * account name or number, means the channel must not be offered. Read-only.
+   */
+  async isReady(): Promise<boolean> {
+    try {
+      const account = await this.accounts.getActiveAccount();
+      return [account.bankName, account.accountName, account.accountNumber].every(
+        (value) => typeof value === 'string' && value.trim() !== '',
+      );
+    } catch (error) {
+      if (error instanceof ConfigurationError) return false;
+      throw error;
+    }
   }
 
   /**

@@ -26,13 +26,13 @@ import {
 } from '@/components/ui/select'
 import { useQuery } from '@tanstack/react-query'
 import { paymentsApi } from '@/lib/api/payments.api'
-import { badgesFor, groupChannels } from '@/lib/payments/channel-view'
+import { badgesFor, groupChannels, resolveChannelSelection } from '@/lib/payments/channel-view'
 import { useMe } from '@/lib/query/hooks/use-me'
 import { useCheckout } from '@/lib/query/hooks/use-checkout'
 import { useCheckoutSummary } from '@/lib/query/hooks/use-checkout-summary'
 import { useShippingOptions } from '@/lib/query/hooks/use-shipping-options'
 import { useCreateAddress } from '@/lib/query/hooks/use-addresses'
-import { useCartStore, selectedLines, toCheckoutItems } from '@/lib/stores/cart-store'
+import { useCartStore, selectedLines, toCheckoutItems, lineUnitPrice, lineTotal } from '@/lib/stores/cart-store'
 import { useCheckoutAddressStore } from '@/lib/stores/checkout-address-store'
 import { useLastOrderStore } from '@/lib/stores/last-order-store'
 import { ADDRESS_BOOK_FROM_CHECKOUT, resolveCheckoutAddressId } from '@/lib/address/checkout-address'
@@ -97,7 +97,8 @@ export default function CheckoutPage() {
     formState: { errors },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: { courier: 'jne', payment_channel: 'MANUAL_TRANSFER', voucher_code: '' },
+    // No channel until GET /payments/channels answers (P0-3): see the effect below.
+    defaultValues: { courier: 'jne', payment_channel: '', voucher_code: '' },
   })
 
   const addresses = me?.addresses ?? []
@@ -149,6 +150,13 @@ export default function CheckoutPage() {
   }, [voucherCodeRaw])
 
   const selectedChannelCode = watch('payment_channel')
+  // P0-3: the selection is always one of the returned channels - manual transfer
+  // is preselected only when the backend offers it (an active bank account exists).
+  useEffect(() => {
+    if (!channelsQuery.data) return
+    const next = resolveChannelSelection(getValues('payment_channel'), channelsQuery.data.channels)
+    if (next !== getValues('payment_channel')) setValue('payment_channel', next)
+  }, [channelsQuery.data, getValues, setValue])
   const selectedChannel = useMemo(
     () => channelSections.flatMap((s) => s.channels).find((c) => c.code === selectedChannelCode),
     [channelSections, selectedChannelCode],
@@ -188,27 +196,30 @@ export default function CheckoutPage() {
   const onSubmit = (values: FormValues) => {
     setConflict(null)
     if (!selectedShipping || checkoutItems.length === 0) return
+    // P0-3: never fall back to a method the customer was not offered.
+    if (!selectedChannel) return
     const input: CreateOrderInput = {
       address_id: values.address_id,
       // courier kept for backward compatibility; provider+service drive the quote.
       courier: (selectedShipping.provider as 'paxel' | 'jne') ?? values.courier,
       shipping_provider: selectedShipping.provider,
       shipping_service: selectedShipping.service,
-      payment_method: (selectedChannel?.method ?? 'BANK_TRANSFER') as CreateOrderInput['payment_method'],
+      payment_method: selectedChannel.method as CreateOrderInput['payment_method'],
       // Only meaningful for GATEWAY; the backend ignores it otherwise.
-      payment_channel: selectedChannel?.method === 'GATEWAY' ? selectedChannel.code : undefined,
+      payment_channel: selectedChannel.method === 'GATEWAY' ? selectedChannel.code : undefined,
       voucher_code: values.voucher_code || undefined,
       items: checkoutItems,
     }
     // Exactly what this request buys - captured now, so a later selection change
-    // cannot alter which lines are removed.
-    const purchasedIds = input.items.map((item) => item.product_id)
+    // cannot alter which lines are removed. Lines (product + topping set), not product
+    // ids: an unselected "Baso + Keju" must survive buying a plain "Baso".
+    const purchasedLineIds = checkoutLines.map((line) => line.lineId)
     checkout.mutate(
       { input, idempotencyKey: idempotencyKey.current },
       {
         onSuccess: (order) => {
           setLastOrder(order)
-          removeLines(purchasedIds) // unselected items stay in the cart
+          removeLines(purchasedLineIds) // unselected items stay in the cart
           clearChosenAddress() // the next checkout starts from the default address again
           // A gateway order carries its normalized instructions; send the customer
           // straight to the payment page. Everything else keeps the existing route.
@@ -378,7 +389,7 @@ export default function CheckoutPage() {
                 </div>
                 <ul className="space-y-3">
                   {checkoutLines.map((line) => (
-                    <li key={line.productId} className="flex items-center gap-3">
+                    <li key={line.lineId} className="flex items-center gap-3">
                       <div className="relative size-14 shrink-0 overflow-hidden rounded-lg bg-muted">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={line.imageUrl} alt={line.name} className="size-full object-cover" />
@@ -388,10 +399,15 @@ export default function CheckoutPage() {
                       </div>
                       <div className="min-w-0 flex-1">
                         <p className="line-clamp-1 text-sm font-medium">{line.name}</p>
-                        <p className="text-xs text-muted-foreground">{formatIDR(line.price)} each</p>
+                        {line.toppings.length > 0 && (
+                          <p className="line-clamp-2 text-xs text-muted-foreground">
+                            + {line.toppings.map((t) => `${t.name} (${formatIDR(t.price)})`).join(', ')}
+                          </p>
+                        )}
+                        <p className="text-xs text-muted-foreground">{formatIDR(lineUnitPrice(line))} each</p>
                       </div>
-                      {/* Real unit price × real qty (same per-line summation as cartSubtotal). */}
-                      <p className="text-sm font-semibold text-primary">{formatIDR(line.price * line.qty)}</p>
+                      {/* Unit price (product + toppings) × qty (same per-line summation as cartSubtotal). */}
+                      <p className="text-sm font-semibold text-primary">{formatIDR(lineTotal(line))}</p>
                     </li>
                   ))}
                 </ul>
@@ -469,6 +485,10 @@ export default function CheckoutPage() {
                         <div key={i} className="h-14 animate-pulse rounded-xl bg-muted" />
                       ))}
                     </div>
+                  ) : channelSections.length === 0 ? (
+                    <p role="status" className="text-sm text-muted-foreground">
+                      Belum ada metode pembayaran yang tersedia. Silakan coba lagi nanti.
+                    </p>
                   ) : (
                     <Controller
                       control={control}

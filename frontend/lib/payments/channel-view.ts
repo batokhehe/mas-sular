@@ -77,3 +77,18 @@ export function badgesFor(channel: PublicPaymentChannel): string[] {
 export function methodForChannel(channel: PublicPaymentChannel): string {
   return channel.method
 }
+
+/** The channel preselected when it is offered (today's default). */
+export const DEFAULT_CHANNEL_CODE = 'MANUAL_TRANSFER'
+
+/**
+ * P0-3: the selection must always be a channel the backend actually returned.
+ * Keep the customer's choice while it is offered; otherwise fall back to the
+ * default channel if THAT is offered; otherwise nothing (the form then asks the
+ * customer to pick). Never keeps a code that is no longer in the list - manual
+ * transfer is absent when no active bank account exists.
+ */
+export function resolveChannelSelection(current: string | undefined, channels: readonly Pick<PublicPaymentChannel, 'code'>[]): string {
+  if (current && channels.some((c) => c.code === current)) return current
+  return channels.some((c) => c.code === DEFAULT_CHANNEL_CODE) ? DEFAULT_CHANNEL_CODE : ''
+}

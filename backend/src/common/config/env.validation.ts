@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { isJneSandboxUrl, isValidTimeZone } from '../../modules/shipping/shipping.config';
 import { TRUST_PROXY_MAX_HOPS } from '../http/trust-proxy';
+import { ADMIN_ACCESS_TTL_MAX_MS, adminAccessTtlToMs } from '../../modules/admin-auth/admin-session.config';
 
 /** Known hardcoded development secrets that must never be used as real secrets. */
 const INSECURE_SECRETS = new Set(['development-only-secret', 'development-only-admin-secret']);
@@ -30,6 +31,17 @@ const baseSchema = z
     JWT_ACCESS_SECRET: secret,
     JWT_REFRESH_SECRET: secret,
     JWT_ADMIN_ACCESS_SECRET: secret,
+    // H4: admin access tokens live for hours, never days (no admin refresh token).
+    JWT_ADMIN_ACCESS_TTL: z
+      .string()
+      .optional()
+      .refine((v) => v === undefined || v.trim() === '' || adminAccessTtlToMs(v) !== null, {
+        message: `must be <n>s|<n>m|<n>h and at most ${ADMIN_ACCESS_TTL_MAX_MS / 3_600_000}h (days are not allowed)`,
+      }),
+    // M4: domain of the httpOnly admin cookie. Unset (recommended) = host-only on the API host.
+    ADMIN_COOKIE_DOMAIN: z.string().optional(),
+    // M1: optional bearer token for scraping /metrics through the proxy. Unset = direct in-network scrapes only.
+    METRICS_TOKEN: z.string().min(32, 'must be at least 32 characters').optional(),
     GOOGLE_CLIENT_ID: z.string().min(1, 'GOOGLE_CLIENT_ID is required'),
 
     // Upload URLs

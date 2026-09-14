@@ -24,6 +24,7 @@ import { InvoiceLinkPanel } from '@/app/orders/components/invoice-link-panel';
 import { useAdminProfile } from '@/lib/auth';
 import { formatRupiah } from '@/lib/utils/number';
 import { feeModeLabel, feeRuleLabel } from '@/lib/orders/service-fee-view';
+import { orderItemPricing } from '@/lib/orders/order-item-view';
 import {
   ADMIN_LOADING_MESSAGES, ADMIN_SUCCESS_MESSAGES, confirmApprove, confirmReject, runWithFeedback,
 } from '@/lib/admin-alert';
@@ -181,6 +182,8 @@ export default function OrderDetailPage() {
             <div className="space-y-3">
               {order.items.map((item) => {
                 const reservation = order.reservations?.find((r) => r.product?.id === item.productId);
+                // Priced from the order's own snapshots (unitPrice + stored topping prices).
+                const pricing = orderItemPricing(item);
                 return (
                   <div key={item.id} className="flex gap-3 rounded-xl border border-gray-100 p-3">
                     <div className="h-16 w-16 shrink-0 overflow-hidden rounded-lg bg-gray-100">
@@ -192,12 +195,27 @@ export default function OrderDetailPage() {
                     <div className="min-w-0 flex-1">
                       <p className="font-medium text-gray-900">{item.productName}</p>
                       <p className="mt-1 text-sm text-gray-500">Qty {item.quantity} × {rp(item.unitPrice)}</p>
-                      {item.toppings.length > 0 ? <p className="text-xs text-gray-500">Toppings: {item.toppings.map((t) => t.name).join(', ')}</p> : null}
+                      {pricing.toppings.length > 0 ? (
+                        <div className="mt-1 max-w-xs text-xs text-gray-500">
+                          <ul aria-label="Toppings">
+                            {pricing.toppings.map((t) => (
+                              <li key={t.key} className="flex justify-between gap-4">
+                                <span>+ {t.name}</span>
+                                <span>{rp(t.price)}</span>
+                              </li>
+                            ))}
+                          </ul>
+                          <p className="mt-0.5 flex justify-between gap-4 border-t border-gray-100 pt-0.5 font-medium text-gray-700">
+                            <span>Per item incl. toppings</span>
+                            <span>{rp(pricing.unitTotal)}</span>
+                          </p>
+                        </div>
+                      ) : null}
                       {reservation ? (
                         <p className="mt-1 text-xs text-indigo-600">Reserved {reservation.reservedQty} @ {reservation.outlet?.name ?? 'outlet'} ({reservation.status})</p>
                       ) : null}
                     </div>
-                    <p className="text-sm font-semibold text-gray-900">{rp(item.unitPrice * item.quantity)}</p>
+                    <p className="text-sm font-semibold text-gray-900">{rp(pricing.lineTotal)}</p>
                   </div>
                 );
               })}

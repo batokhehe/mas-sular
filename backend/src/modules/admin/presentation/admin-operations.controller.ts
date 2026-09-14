@@ -5,6 +5,7 @@ import { AdminUser, CurrentAdmin } from '../../../common/decorators/current-admi
 import { Permissions } from '../../../common/decorators/permissions.decorator';
 import { AdminGuard } from '../../../common/guards/admin.guard';
 import { PermissionGuard } from '../../../common/guards/permission.guard';
+import { SuperAdminGuard } from '../../../common/guards/super-admin.guard';
 import { AdminService } from '../admin.service';
 import { ExecutiveDashboardService } from '../executive-dashboard.service';
 import { AdminOrderNotesService } from '../admin-order-notes.service';
@@ -224,10 +225,12 @@ export class AdminOperationsController {
     return this.adminService.updateUser(id, dto);
   }
 
+  // H1: role administration is SUPER_ADMIN-only, on top of the permission check.
   @Permissions('Role.create')
+  @UseGuards(SuperAdminGuard)
   @Post('roles')
-  createRole(@Body() dto: CreateRoleDto) {
-    return this.adminService.createRole(dto);
+  createRole(@Body() dto: CreateRoleDto, @CurrentAdmin() admin: AdminUser) {
+    return this.adminService.createRole(dto, admin);
   }
 
   @Permissions('Role.read')
@@ -243,9 +246,10 @@ export class AdminOperationsController {
   }
 
   @Permissions('Role.update')
+  @UseGuards(SuperAdminGuard)
   @Patch('roles/:id')
-  updateRole(@Param('id') id: string, @Body() dto: UpdateRoleDto) {
-    return this.adminService.updateRole(id, dto);
+  updateRole(@Param('id') id: string, @Body() dto: UpdateRoleDto, @CurrentAdmin() admin: AdminUser) {
+    return this.adminService.updateRole(id, dto, admin);
   }
 
   @Permissions('Role.read')

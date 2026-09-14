@@ -30,13 +30,20 @@ export const PaymentMethod = {
 } as const
 export type PaymentMethod = keyof typeof PaymentMethod
 
+// Must list every value of the backend's Prisma `enum ShipmentStatus` (pinned by
+// lib/orders/shipment-status-label.test.ts): /orders crashed on a real CREATED shipment.
 export const ShipmentStatus = {
   PENDING: 'PENDING',
   RATE_SELECTED: 'RATE_SELECTED',
+  CREATED: 'CREATED',
+  WAITING_PICKUP: 'WAITING_PICKUP',
   PICKED_UP: 'PICKED_UP',
   IN_TRANSIT: 'IN_TRANSIT',
+  OUT_FOR_DELIVERY: 'OUT_FOR_DELIVERY',
   DELIVERED: 'DELIVERED',
   FAILED: 'FAILED',
+  CANCELLED: 'CANCELLED',
+  UNKNOWN: 'UNKNOWN',
 } as const
 export type ShipmentStatus = keyof typeof ShipmentStatus
 

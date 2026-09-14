@@ -19,6 +19,7 @@ jest.mock('amqplib', () => ({ connect: (...args: unknown[]) => connectMock(...ar
 // Imported after the mock so the controller binds to it.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { HealthController } = require('../../src/health.controller') as typeof import('../../src/health.controller');
+const { RabbitConnectionManager } = require('../../src/infrastructure/outbox/rabbit-connection.manager') as typeof import('../../src/infrastructure/outbox/rabbit-connection.manager');
 
 const RABBIT_URL = 'amqps://user:pass@broker.example.test:5671/vhost';
 
@@ -33,8 +34,11 @@ function controller(opts: { redisOk?: boolean; postgresOk?: boolean } = {}) {
     set: jest.fn(async () => undefined),
     get: jest.fn(async () => (opts.redisOk === false ? 'nope' : 'ok')),
   };
+  // L4: readiness probes the SHARED connection manager (the real one, over the mock).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return new HealthController(prisma as any, cache as any);
+  const rabbit = new RabbitConnectionManager({ rabbitmqUrl: process.env.RABBITMQ_URL } as any);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return new HealthController(prisma as any, cache as any, rabbit);
 }
 
 // Readiness answers with an HTTP STATUS CODE as well as a body (F69). These
@@ -76,28 +80,34 @@ describe('the amqplib import shape', () => {
     expect(actual.default).toBeUndefined();
   });
 
-  it('the health controller uses the namespace import, like every other call site', () => {
-    const src = readFileSync(join(__dirname, '..', '..', 'src', 'health.controller.ts'), 'utf8');
+  it('the connection manager the probe relies on uses the namespace import', () => {
+    const src = readFileSync(join(__dirname, '..', '..', 'src', 'infrastructure', 'outbox', 'rabbit-connection.manager.ts'), 'utf8');
     expect(src).toMatch(/import \* as amqp from 'amqplib'/);
     // A default import here would compile fine and fail at runtime.
     expect(src).not.toMatch(/^import amqp from 'amqplib'/m);
+  });
+
+  it('L4: the health controller no longer opens its own AMQP connections', () => {
+    const src = readFileSync(join(__dirname, '..', '..', 'src', 'health.controller.ts'), 'utf8');
+    expect(src).not.toMatch(/from 'amqplib'/);
+    expect(src).not.toMatch(/amqp\.connect\(/);
   });
 });
 
 // =================================================== the probe behaviour ====
 
 describe('RabbitMQ readiness probe', () => {
-  it('calls connect with the configured RABBITMQ_URL and reports ok', async () => {
+  it('connects the SHARED connection with the configured RABBITMQ_URL and reports ok', async () => {
     const close = jest.fn(async () => undefined);
-    connectMock.mockResolvedValue({ close });
+    connectMock.mockResolvedValue({ close, on: jest.fn() });
 
     const { body: result, code } = await probe();
 
     expect(code).toBe(200);
     expect(connectMock).toHaveBeenCalledTimes(1);
     expect(connectMock).toHaveBeenCalledWith(RABBIT_URL);
-    // The probe owns a short-lived connection and must always close it.
-    expect(close).toHaveBeenCalledTimes(1);
+    // L4: the shared connection belongs to the relay/consumers; a probe never closes it.
+    expect(close).not.toHaveBeenCalled();
     expect(result.checks.rabbitmq).toBe('ok');
     expect(result.status).toBe('ready');
   });
@@ -153,7 +163,7 @@ describe('health response semantics are unchanged', () => {
   });
 
   it('still reports the other dependencies independently', async () => {
-    connectMock.mockResolvedValue({ close: jest.fn() });
+    connectMock.mockResolvedValue({ close: jest.fn(), on: jest.fn() });
 
     const postgresDown = await probe({ postgresOk: false });
     expect(postgresDown.body.checks.postgres).toBe('failed');

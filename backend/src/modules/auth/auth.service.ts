@@ -51,6 +51,14 @@ export class AuthService {
         this.logger.error(`[GOOGLE PAYLOAD] Invalid payload - email: ${!!payload?.email}, sub: ${!!payload?.sub}, name: ${!!payload?.name}`);
         throw new UnauthorizedException('Invalid Google profile - missing required fields');
       }
+
+      // M5: accounts are matched by email, so an UNVERIFIED Google email must never be
+      // trusted - otherwise a Google account registered with someone else's address
+      // could sign in as that customer. Only the literal boolean `true` is accepted.
+      if (payload.email_verified !== true) {
+        this.logger.warn('[GOOGLE PAYLOAD] Rejected: email_verified is not true');
+        throw new UnauthorizedException('Your Google account email is not verified');
+      }
       
       return this.loginWithGoogleProfile({
         googleId: payload.sub,
@@ -66,7 +74,7 @@ export class AuthService {
   }
 
   async loginWithGoogleProfile(profile: { googleId: string; email: string; name: string; avatarUrl?: string }) {
-    this.logger.log(`[USER LOOKUP] Looking up user by email: ${profile.email}`);
+    this.logger.log('[USER LOOKUP] Resolving user for Google profile');
     
     try {
       // First verify CUSTOMER role exists
@@ -80,7 +88,7 @@ export class AuthService {
       
       this.logger.log(`[ROLE LOOKUP] CUSTOMER role found: ${customerRole.id}`);
       
-      this.logger.log(`[USER CREATE] Upserting user with email ${profile.email}`);
+      this.logger.log('[USER CREATE] Upserting user for Google profile');
       const user = await this.prisma.user.upsert({
         where: { email: profile.email },
         update: {

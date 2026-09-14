@@ -1,4 +1,4 @@
-import { api, apiBaseUrl, getAuthToken } from './api';
+import { api, apiBaseUrl, csrfHeaders } from './api';
 import type { ServiceFeeRuleSnapshot } from './orders/service-fee-view';
 
 /** Standard paginated envelope returned by admin list endpoints. */
@@ -25,6 +25,9 @@ export type AdminCategory = {
   sortOrder: number;
   icon?: string | null;
 };
+
+import type { AdminTopping, ToppingPayload } from './toppings/topping-form';
+export type { AdminTopping, ToppingPayload };
 
 // No `sku` (P2 #5): the API still returns it (it is the courier item code), but it is
 // internal and must never be rendered - omitting it here makes any attempt a compile error.
@@ -340,6 +343,34 @@ export function deleteAdminCategory(id: string) {
   });
 }
 
+export function fetchAdminToppings() {
+  return api<AdminTopping[]>('/admin/catalog/toppings');
+}
+
+export function fetchAdminTopping(id: string) {
+  return api<AdminTopping>(`/admin/catalog/toppings/${id}`);
+}
+
+export function createAdminTopping(input: ToppingPayload) {
+  return api<AdminTopping>('/admin/catalog/toppings', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateAdminTopping(id: string, input: Partial<ToppingPayload>) {
+  return api<AdminTopping>(`/admin/catalog/toppings/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+}
+
+export function deleteAdminTopping(id: string) {
+  return api<void>(`/admin/catalog/toppings/${id}`, {
+    method: 'DELETE',
+  });
+}
+
 export function fetchAdminProducts() {
   return api<AdminProduct[]>('/admin/catalog/products');
 }
@@ -477,7 +508,8 @@ export type AdminOrderDetail = AdminOrder & {
     quantity: number;
     spicyLevel?: number | null;
     notes?: string | null;
-    toppings: Array<{ id: string; name: string; price: number }>;
+    // OrderItemTopping rows: name + price are snapshotted at checkout.
+    toppings: Array<{ toppingId: string; name: string; price: number }>;
     product?: { id: string; imageUrl: string } | null; // `sku` intentionally omitted (P2 #5)
   }>;
   reservations?: Array<{
@@ -1750,7 +1782,6 @@ export function fetchAuditEntry(id: string) {
 
 /** CSV export — raw fetch (the JSON api client cannot stream text/csv). */
 export async function exportAuditCsv(f: AuditFilters = {}): Promise<Blob> {
-  const token = getAuthToken();
   const base = apiBaseUrl();
   const body: Record<string, string> = {};
   auditQueryString(f).forEach((v, k) => {
@@ -1758,7 +1789,8 @@ export async function exportAuditCsv(f: AuditFilters = {}): Promise<Blob> {
   });
   const res = await fetch(`${base}/admin/system/audit/export`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', ...(await csrfHeaders('POST')) },
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`Export failed (${res.status})`);

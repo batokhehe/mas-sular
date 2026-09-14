@@ -6,6 +6,11 @@ export const ROUTE_PERMISSIONS = {
   categories: ['Category.read'],
   categoryCreate: ['Category.create'],
   categoryUpdate: ['Category.update'],
+  // Toppings are product add-ons: they reuse the Product.* permissions (see the API).
+  toppings: ['Product.read'],
+  toppingCreate: ['Product.create'],
+  toppingUpdate: ['Product.update'],
+  toppingDelete: ['Product.delete'],
   banners: ['Banner.read'],
   bannerCreate: ['Banner.create'],
   bannerUpdate: ['Banner.update'],

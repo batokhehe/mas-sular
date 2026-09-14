@@ -17,7 +17,10 @@ export const MIN_ADMIN_PASSWORD_LENGTH = 12;
 /** Passwords that are refused outright, whatever their length. */
 const REFUSED_PASSWORDS = new Set(['admin', 'password', 'administrator', 'changeme', 'change_me', '123456789012', 'superadmin']);
 
-const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** The development seed's admin address (prisma/seed.ts). Never a real admin. */
+export const DEV_ADMIN_EMAIL = 'admin@test.com';
 
 /** A refusal the operator must act on. Raised BEFORE any database write where possible. */
 export class BootstrapError extends Error {
@@ -41,15 +44,31 @@ export function readBootstrapCredentials(env: NodeJS.ProcessEnv = process.env): 
 
   const missing = [!email && 'BOOTSTRAP_ADMIN_EMAIL', !password && 'BOOTSTRAP_ADMIN_PASSWORD'].filter(Boolean);
   if (missing.length) throw new BootstrapError(`missing required credentials: ${missing.join(', ')}`);
-  if (!EMAIL_SHAPE.test(email)) throw new BootstrapError('BOOTSTRAP_ADMIN_EMAIL is not a valid email address');
-  if (email === 'admin@test.com') throw new BootstrapError('BOOTSTRAP_ADMIN_EMAIL must not be the development admin address');
+  assertAdminEmail(email, 'BOOTSTRAP_ADMIN_EMAIL');
+  assertAdminPassword(password, email, 'BOOTSTRAP_ADMIN_PASSWORD');
+  return { email, password, name };
+}
+
+/**
+ * The admin email rules, shared by the bootstrap and prisma/create-admin.ts.
+ * `email` must already be trimmed and lower-cased. `label` names the input in the message.
+ */
+export function assertAdminEmail(email: string, label: string): void {
+  if (!EMAIL_SHAPE.test(email)) throw new BootstrapError(`${label} is not a valid email address`);
+  if (email === DEV_ADMIN_EMAIL) throw new BootstrapError(`${label} must not be the development admin address`);
+}
+
+/**
+ * The admin password rules, shared by the bootstrap and prisma/create-admin.ts, so
+ * every admin password passes the same checks. Never echoes the password.
+ */
+export function assertAdminPassword(password: string, email: string, label: string): void {
   if (password.length < MIN_ADMIN_PASSWORD_LENGTH) {
-    throw new BootstrapError(`BOOTSTRAP_ADMIN_PASSWORD must be at least ${MIN_ADMIN_PASSWORD_LENGTH} characters`);
+    throw new BootstrapError(`${label} must be at least ${MIN_ADMIN_PASSWORD_LENGTH} characters`);
   }
   if (REFUSED_PASSWORDS.has(password.toLowerCase()) || password.toLowerCase() === email) {
-    throw new BootstrapError('BOOTSTRAP_ADMIN_PASSWORD is a well-known or trivially guessable value');
+    throw new BootstrapError(`${label} is a well-known or trivially guessable value`);
   }
-  return { email, password, name };
 }
 
 export type BootstrapOutcome =
@@ -59,7 +78,9 @@ export type BootstrapOutcome =
 type BootstrapClient = Pick<PrismaClient, 'role' | 'permission' | 'rolePermission' | 'admin' | 'adminRole' | '$transaction'>;
 
 // Serialises concurrent bootstrap runs inside PostgreSQL (released at commit).
-const BOOTSTRAP_LOCK_KEY = 7_274_274_014;
+// Also taken by prisma/create-admin.ts and prisma/disable-admin.ts, so every admin
+// lifecycle change is serialised against every other one.
+export const BOOTSTRAP_LOCK_KEY = 7_274_274_014;
 
 export async function bootstrapProduction(prisma: BootstrapClient, credentials: BootstrapCredentials): Promise<BootstrapOutcome> {
   const rbac = await ensureRbac(prisma);

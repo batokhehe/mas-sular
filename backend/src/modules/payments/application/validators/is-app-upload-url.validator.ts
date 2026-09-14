@@ -1,14 +1,21 @@
 import { registerDecorator, ValidationOptions } from 'class-validator';
-
-// An application-owned upload path: /uploads/<normalized-filename>.<image-ext>.
-// normalizeUploadFilename() produces "<ts>-<hex>.<ext>", so only safe chars + an
-// allowed image extension are accepted (no path traversal, no javascript: URLs).
-const APP_UPLOAD_PATH = /^\/uploads\/[A-Za-z0-9._-]+\.(jpg|jpeg|png|webp)$/i;
+import { apiRouteBase } from '../../../upload/upload.service';
+import { STORED_UPLOAD_NAME } from '../../../upload/upload.util';
 
 /**
- * True only when `value` references an application-owned upload — either a
- * root-relative `/uploads/<file>` path or an absolute URL on the configured
- * APP_URL host under `/uploads/`. Arbitrary/external/`javascript:` URLs are rejected.
+ * The PRIVATE receipt URL the receipt-upload endpoints return (L8):
+ * `<API base>/payments/receipts/<ms>-<32 hex>.<jpg|png|webp>`. Public `/uploads/...`
+ * paths are no longer accepted for a receipt - receipts must not be publicly readable.
+ */
+function isReceiptPath(pathname: string): boolean {
+  const prefix = `${apiRouteBase()}/payments/receipts/`;
+  return pathname.startsWith(prefix) && STORED_UPLOAD_NAME.test(pathname.slice(prefix.length));
+}
+
+/**
+ * True only when `value` references an application-owned private receipt - a
+ * root-relative receipt path or an absolute URL on the configured APP_URL host.
+ * Arbitrary/external/`javascript:` URLs and path tricks are rejected.
  */
 export function isAppUploadUrl(value: unknown): boolean {
   if (typeof value !== 'string' || value.length === 0) return false;
@@ -16,7 +23,7 @@ export function isAppUploadUrl(value: unknown): boolean {
   let pathname: string;
   let host: string | null = null;
 
-  if (value.startsWith('/uploads/')) {
+  if (value.startsWith('/')) {
     pathname = value.split(/[?#]/)[0];
   } else {
     let url: URL;
@@ -30,7 +37,7 @@ export function isAppUploadUrl(value: unknown): boolean {
     host = url.host;
   }
 
-  if (!APP_UPLOAD_PATH.test(pathname)) return false;
+  if (!isReceiptPath(pathname)) return false;
 
   // When an absolute URL is given and APP_URL is configured, the host must match.
   const appUrl = process.env.APP_URL;
@@ -53,7 +60,7 @@ export function IsAppUploadUrl(options?: ValidationOptions) {
       options,
       validator: {
         validate: (value: unknown) => isAppUploadUrl(value),
-        defaultMessage: () => 'receiptUrl must reference an application-owned upload (/uploads/<file>)',
+        defaultMessage: () => 'receiptUrl must reference a receipt uploaded through this application',
       },
     });
   };

@@ -5,10 +5,47 @@
 const UPLOAD_TOKEN_PATH = /(\/payments\/upload\/)[^/?#]+/g;
 const INVOICE_TOKEN_PATH = /(\/invoices\/)[^/?#]+/g;
 
-/** Replace capability-token path segments with [REDACTED], preserving the rest of the URL. */
+/** Any JWT (three base64url segments, header starting `eyJ`) wherever it appears. */
+const JWT_SHAPE = /eyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]*/g;
+
+/** Scrub every JWT-shaped substring. Last line of defence for free-form text. */
+export function redactJwts(text: string): string {
+  return text.replace(JWT_SHAPE, '[REDACTED_JWT]');
+}
+
+/** Replace the VALUE of credential-like query parameters, keeping the key for debugging. */
+function redactQueryString(url: string): string {
+  const q = url.indexOf('?');
+  if (q === -1) return url;
+  const hash = url.indexOf('#', q);
+  const query = url.slice(q + 1, hash === -1 ? undefined : hash);
+  const redacted = query
+    .split('&')
+    .map((pair) => {
+      const eq = pair.indexOf('=');
+      const rawKey = eq === -1 ? pair : pair.slice(0, eq);
+      let key = rawKey;
+      try {
+        key = decodeURIComponent(rawKey.replace(/\+/g, ' '));
+      } catch {
+        // keep the raw key
+      }
+      return eq !== -1 && SENSITIVE_QUERY_KEY.test(key) ? `${rawKey}=[REDACTED]` : pair;
+    })
+    .join('&');
+  return `${url.slice(0, q + 1)}${redacted}${hash === -1 ? '' : url.slice(hash)}`;
+}
+
+/**
+ * Make a URL safe to log: capability-token path segments, credential-like query
+ * VALUES (H2 - the admin SSE stream used to carry the JWT as ?token=) and any
+ * JWT-shaped substring are all replaced. Used for pino's req.url, the SystemLog
+ * request log and the exception filter.
+ */
 export function redactSensitivePath<T extends string | undefined>(url: T): T {
   if (!url) return url;
-  return url.replace(UPLOAD_TOKEN_PATH, '$1[REDACTED]').replace(INVOICE_TOKEN_PATH, '$1[REDACTED]') as T;
+  const pathRedacted = url.replace(UPLOAD_TOKEN_PATH, '$1[REDACTED]').replace(INVOICE_TOKEN_PATH, '$1[REDACTED]');
+  return redactJwts(redactQueryString(pathRedacted)) as T;
 }
 
 /**
@@ -38,18 +75,31 @@ export function redactSensitiveParams(params: unknown): unknown {
  * reach request logs - pino-http logs `req.params`, which carries the path too.
  */
 export const PINO_HTTP_REDACT = {
-  paths: ['req.headers.authorization', 'req.headers.cookie', 'req.headers["x-paxel-signature"]', 'req.url', 'req.params'],
+  paths: [
+    'req.headers.authorization',
+    'req.headers.cookie',
+    'req.headers["x-paxel-signature"]',
+    'req.headers["x-csrf-token"]',
+    'req.url',
+    'req.params',
+    // H2: pino-http logs the parsed query separately from the URL.
+    'req.query',
+    // H2: the admin login response's Set-Cookie carries the access JWT (found in
+    // the staging logs during the audit follow-up).
+    'res.headers["set-cookie"]',
+  ],
   censor: (value: unknown, path: string[]): unknown => {
     const field = path[path.length - 1];
     if (field === 'url') return redactSensitivePath(String(value));
     if (field === 'params') return redactSensitiveParams(value);
+    if (field === 'query') return redactSensitiveQuery(value);
     return '[Redacted]';
   },
 };
 
 // Query-string keys whose VALUES must never be persisted (the SSE stream carries
 // the admin JWT as ?token=, and future endpoints may carry similar credentials).
-const SENSITIVE_QUERY_KEY = /token|secret|password|authorization|api[-_]?key/i;
+const SENSITIVE_QUERY_KEY = /token|secret|password|passwd|authorization|api[-_]?key|jwt|session|^sid$|^auth$|signature|credential/i;
 
 /**
  * Shallow-redact credential-bearing values in a parsed query object before it is
@@ -60,7 +110,7 @@ export function redactSensitiveQuery<T>(query: T): T {
   if (query === null || typeof query !== 'object' || Array.isArray(query)) return query;
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(query as Record<string, unknown>)) {
-    out[key] = SENSITIVE_QUERY_KEY.test(key) ? '[REDACTED]' : value;
+    out[key] = SENSITIVE_QUERY_KEY.test(key) ? '[REDACTED]' : typeof value === 'string' ? redactJwts(value) : value;
   }
   return out as T;
 }

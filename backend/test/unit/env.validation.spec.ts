@@ -28,6 +28,22 @@ describe('validateEnv', () => {
     expect(() => validateEnv(valid({ REDIS_URL: undefined }))).toThrow(/REDIS_URL/);
   });
 
+  describe('H4: admin session lifetime', () => {
+    it.each(['8h', '12h', '30m'])('accepts JWT_ADMIN_ACCESS_TTL=%s', (ttl) => {
+      expect(() => validateEnv(valid({ JWT_ADMIN_ACCESS_TTL: ttl }))).not.toThrow();
+    });
+    it.each(['6d', '1d', '24h', '7d'])('refuses JWT_ADMIN_ACCESS_TTL=%s at boot (days-long admin tokens)', (ttl) => {
+      expect(() => validateEnv(valid({ JWT_ADMIN_ACCESS_TTL: ttl }))).toThrow(/JWT_ADMIN_ACCESS_TTL/);
+    });
+    it('unset is fine (defaults to 8h)', () => {
+      expect(() => validateEnv(valid({ JWT_ADMIN_ACCESS_TTL: undefined }))).not.toThrow();
+    });
+    it('METRICS_TOKEN, when set, must be long', () => {
+      expect(() => validateEnv(valid({ METRICS_TOKEN: 'short' }))).toThrow(/METRICS_TOKEN/);
+      expect(() => validateEnv(valid({ METRICS_TOKEN: 'm'.repeat(40) }))).not.toThrow();
+    });
+  });
+
   describe('secrets', () => {
     it('rejects short secrets (< 32 chars)', () => {
       expect(() => validateEnv(valid({ JWT_ACCESS_SECRET: 'short' }))).toThrow(/JWT_ACCESS_SECRET/);

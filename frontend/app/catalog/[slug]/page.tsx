@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { useQuery } from '@tanstack/react-query'
@@ -8,7 +8,7 @@ import { toast } from 'sonner'
 import { Star, Flame, Minus, Plus, ShoppingCart, ChevronLeft } from 'lucide-react'
 import { productsApi } from '@/lib/api/products.api'
 import { qk } from '@/lib/query/keys'
-import { useProducts } from '@/lib/query/hooks'
+import { useProducts, useToppings } from '@/lib/query/hooks'
 import { StorefrontShell } from '@/components/storefront/shell'
 import { StorefrontSkeleton } from '@/components/layout/storefront/storefront-skeleton'
 import { ErrorState } from '@/components/common/error-state'
@@ -16,13 +16,15 @@ import { ProductCard } from '@/components/storefront/product-card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { formatIDR } from '@/lib/utils/format'
-import { useCartStore } from '@/lib/stores/cart-store'
+import { Checkbox } from '@/components/ui/checkbox'
+import { useCartStore, toppingsTotal } from '@/lib/stores/cart-store'
 
 export default function ProductDetailPage() {
   const params = useParams<{ slug: string }>()
   const slug = params?.slug
   const add = useCartStore((s) => s.add)
   const [qty, setQty] = useState(1)
+  const [toppingIds, setToppingIds] = useState<string[]>([])
 
   const { data: product, isLoading, isError, refetch } = useQuery({
     queryKey: qk.catalog.product(slug ?? ''),
@@ -39,6 +41,19 @@ export default function ProductDetailPage() {
     : 0
   const spicy = product?.spicyLevel ?? 0
   const outOfStock = (product?.stock ?? 0) <= 0
+
+  // Toppings are global in the catalog (no per-product eligibility exists in the
+  // schema). Only what GET /catalog/toppings returns - active ones - can be chosen;
+  // while it loads or if it fails there is simply no selector (a plain add still
+  // works). The order endpoint re-validates and reprices every topping.
+  const toppingsQuery = useToppings()
+  const availableToppings = toppingsQuery.data ?? []
+  const chosenToppings = availableToppings.filter((t) => toppingIds.includes(t.id))
+  const unitPrice = (product?.price ?? 0) + toppingsTotal(chosenToppings)
+  const toggleTopping = (id: string, checked: boolean) =>
+    setToppingIds((ids) => (checked ? [...ids.filter((x) => x !== id), id] : ids.filter((x) => x !== id)))
+  // A different product starts with no toppings chosen.
+  useEffect(() => setToppingIds([]), [product?.id])
 
   return (
     <StorefrontShell>
@@ -111,6 +126,31 @@ export default function ProductDetailPage() {
                   </p>
                 </div>
 
+                {!outOfStock && availableToppings.length > 0 ? (
+                  <fieldset>
+                    <legend className="mb-2 font-semibold">
+                      Toppings <span className="text-sm font-normal text-muted-foreground">(optional)</span>
+                    </legend>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {availableToppings.map((topping) => (
+                        <label
+                          key={topping.id}
+                          htmlFor={`topping-${topping.id}`}
+                          className="flex cursor-pointer items-center gap-3 rounded-xl border p-3 text-sm transition-colors has-[[data-state=checked]]:border-primary has-[[data-state=checked]]:bg-primary/5"
+                        >
+                          <Checkbox
+                            id={`topping-${topping.id}`}
+                            checked={toppingIds.includes(topping.id)}
+                            onCheckedChange={(checked) => toggleTopping(topping.id, checked === true)}
+                          />
+                          <span className="flex-1 font-medium">{topping.name}</span>
+                          <span className="text-muted-foreground">+{formatIDR(topping.price)}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+                ) : null}
+
                 {/* Quantity + add to cart — the real cart store supports qty. */}
                 <div className="flex flex-wrap items-center gap-3 pt-2">
                   <div className="flex items-center gap-2 rounded-full bg-secondary p-1">
@@ -140,12 +180,12 @@ export default function ProductDetailPage() {
                     className="flex-1 rounded-full sm:flex-none"
                     disabled={outOfStock}
                     onClick={() => {
-                      add(product, qty)
+                      add(product, qty, chosenToppings)
                       toast.success('Added to cart')
                     }}
                   >
                     <ShoppingCart className="mr-2 size-4" />
-                    {outOfStock ? 'Out of stock' : `Add to cart · ${formatIDR(product.price * qty)}`}
+                    {outOfStock ? 'Out of stock' : `Add to cart · ${formatIDR(unitPrice * qty)}`}
                   </Button>
                 </div>
               </div>

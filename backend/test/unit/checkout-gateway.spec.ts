@@ -217,8 +217,11 @@ function checkoutService(initiate?: jest.Mock, feeEnabled = true) {
   const idempotency = { isCheckoutEnabled: jest.fn().mockReturnValue(false) };
   const uploadTokens = { issue: jest.fn().mockResolvedValue({ uploadUrl: 'https://app/u/raw' }) };
   const midtransStub = { name: 'midtrans', supportedChannels: () => ['QRIS' as const] };
+  // Manual transfer is always registered in the app; P0-3 makes a BANK_TRANSFER
+  // checkout require it to be READY (an active bank account) - here it is.
+  const manualStub = { name: 'manual', supportedChannels: () => ['MANUAL_TRANSFER' as const], isReady: async () => true };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const registry = new PaymentChannelRegistry(new PaymentProviderFactory([midtransStub as any]));
+  const registry = new PaymentChannelRegistry(new PaymentProviderFactory([manualStub as any, midtransStub as any]));
   const initiation = initiate ? { initiate } : undefined;
   const service = new OrdersService(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

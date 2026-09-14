@@ -92,6 +92,7 @@ export const ENTITY_DELEGATES: Record<string, string> = {
   Product: 'product',
   Category: 'category',
   Promo: 'promo',
+  Topping: 'topping',
   Banner: 'banner',
   Order: 'order',
   Payment: 'payment',

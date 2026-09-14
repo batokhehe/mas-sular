@@ -1,126 +1,125 @@
 import type { PrismaClient } from '@prisma/client';
+import {
+  PERMISSIONS,
+  ROLE_PERMISSION_MATRIX,
+  SUPER_ADMIN_ROLE,
+  SYSTEM_ROLES,
+} from './permission-catalogue';
 
 /**
- * The role and permission catalogue - the single source for BOTH the development
- * seed (prisma/seed.ts) and the production bootstrap (prisma/bootstrap-production.ts),
- * so the two can never drift apart. Moved verbatim from seed.ts.
+ * Applies the canonical catalogue (./permission-catalogue.ts) to a database - the
+ * single path for the development seed, the production bootstrap and the
+ * operator-run prisma/sync-rbac.ts, so the three can never drift apart.
+ *
+ * Split into a READ-ONLY plan and an apply step so an operator can see exactly what
+ * would change on a live database before anything is written (sync-rbac --dry-run).
  */
-export const ROLES = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'STAFF', 'CUSTOMER'] as const;
-
-export const SUPER_ADMIN_ROLE = 'SUPER_ADMIN';
-
-export const PERMISSIONS: ReadonlyArray<{ subject: string; action: string }> = [
-  { subject: 'Dashboard', action: 'read' },
-  { subject: 'Product', action: 'read' },
-  { subject: 'Product', action: 'create' },
-  { subject: 'Product', action: 'update' },
-  { subject: 'Product', action: 'delete' },
-  { subject: 'Category', action: 'read' },
-  { subject: 'Category', action: 'create' },
-  { subject: 'Category', action: 'update' },
-  { subject: 'Category', action: 'delete' },
-  { subject: 'Promo', action: 'read' },
-  { subject: 'Promo', action: 'create' },
-  { subject: 'Promo', action: 'update' },
-  { subject: 'Promo', action: 'delete' },
-  { subject: 'Banner', action: 'read' },
-  { subject: 'Banner', action: 'create' },
-  { subject: 'Banner', action: 'update' },
-  { subject: 'Banner', action: 'delete' },
-  { subject: 'Order', action: 'read' },
-  { subject: 'Order', action: 'update' },
-  { subject: 'Payment', action: 'read' },
-  { subject: 'Payment', action: 'verify' },
-  { subject: 'Payment', action: 'reject' },
-  { subject: 'Shipment', action: 'read' },
-  { subject: 'Shipment', action: 'create' },
-  { subject: 'Shipment', action: 'update' },
-  { subject: 'Shipment', action: 'delete' },
-  { subject: 'User', action: 'read' },
-  { subject: 'User', action: 'update' },
-  { subject: 'Role', action: 'read' },
-  { subject: 'Role', action: 'create' },
-  { subject: 'Role', action: 'update' },
-  { subject: 'Role', action: 'delete' },
-  { subject: 'DeliveryCoverage', action: 'read' },
-  { subject: 'DeliveryCoverage', action: 'create' },
-  { subject: 'DeliveryCoverage', action: 'update' },
-  { subject: 'DeliveryCoverage', action: 'delete' },
-  { subject: 'SystemLog', action: 'read' },
-  { subject: 'Queue', action: 'read' },
-  { subject: 'Queue', action: 'retry' },
-  { subject: 'Incident', action: 'read' },
-  { subject: 'Incident', action: 'manage' },
-  { subject: 'Notification', action: 'read' },
-  { subject: 'Notification', action: 'resend' },
-  { subject: 'Notification', action: 'send' },
-  { subject: 'Audit', action: 'read' },
-  { subject: 'Audit', action: 'export' },
-  { subject: 'Notification', action: 'manage' },
-  { subject: 'dashboard', action: 'view' },
-  { subject: 'products', action: 'view' },
-  { subject: 'products', action: 'create' },
-  { subject: 'products', action: 'update' },
-  { subject: 'products', action: 'delete' },
-  { subject: 'categories', action: 'view' },
-  { subject: 'categories', action: 'create' },
-  { subject: 'categories', action: 'update' },
-  { subject: 'categories', action: 'delete' },
-  { subject: 'orders', action: 'view' },
-  { subject: 'orders', action: 'update' },
-  { subject: 'customers', action: 'view' },
-  { subject: 'roles', action: 'view' },
-  { subject: 'roles', action: 'create' },
-  { subject: 'roles', action: 'update' },
-  { subject: 'roles', action: 'delete' },
-  { subject: 'paymentAccounts', action: 'view' },
-  { subject: 'paymentAccounts', action: 'create' },
-  { subject: 'paymentAccounts', action: 'update' },
-  { subject: 'paymentAccounts', action: 'delete' },
-  { subject: 'paymentAccounts', action: 'activate' },
-  { subject: 'Outlet', action: 'read' },
-  { subject: 'Outlet', action: 'create' },
-  { subject: 'Outlet', action: 'update' },
-  { subject: 'Outlet', action: 'delete' },
-  { subject: 'Outlet', action: 'activate' },
-  { subject: 'InventoryReservation', action: 'read' },
-  { subject: 'ProductInventory', action: 'read' },
-  { subject: 'ProductInventory', action: 'update' },
-  { subject: 'StockTransfer', action: 'read' },
-  { subject: 'StockTransfer', action: 'create' },
-  { subject: 'StockTransfer', action: 'update' },
-];
+export { PERMISSIONS, SUPER_ADMIN_ROLE } from './permission-catalogue';
+export const ROLES = SYSTEM_ROLES;
 
 type RbacClient = Pick<PrismaClient, 'role' | 'permission' | 'rolePermission'>;
 
-/**
- * Create-only and idempotent: every role, every permission, and SUPER_ADMIN's
- * grant of every permission are inserted if missing. Nothing existing is updated,
- * so re-running never alters a role or permission an operator has edited.
- */
-export async function ensureRbac(prisma: RbacClient): Promise<{ superAdminRoleId: string; roles: number; permissions: number }> {
-  for (const name of ROLES) {
-    await prisma.role.upsert({ where: { name }, update: {}, create: { name } });
+export interface RbacPlan {
+  missingRoles: string[];
+  missingPermissions: Array<{ subject: string; action: string }>;
+  /** Grants to add, as `ROLE:Subject.action`. */
+  grantsToAdd: string[];
+  /** Grants on system roles that the matrix does not contain (drift), as `ROLE:Subject.action`. */
+  grantsToRemove: string[];
+  /** Permission rows outside the catalogue (e.g. the retired `orders.view` family). Reported, never deleted. */
+  legacyPermissions: string[];
+}
+
+const key = (p: { subject: string; action: string }) => `${p.subject}.${p.action}`;
+
+/** Target grants per system role. SUPER_ADMIN is given every catalogue permission for UI/listing parity. */
+function targetGrants(): Map<string, Set<string>> {
+  const target = new Map<string, Set<string>>();
+  target.set(SUPER_ADMIN_ROLE, new Set(PERMISSIONS.map(key)));
+  for (const [role, perms] of Object.entries(ROLE_PERMISSION_MATRIX)) target.set(role, new Set(perms));
+  return target;
+}
+
+/** Computes what applyRbacPlan would do. Performs reads only. */
+export async function planRbacSync(prisma: RbacClient): Promise<RbacPlan> {
+  const roles = await prisma.role.findMany({ select: { id: true, name: true } });
+  const permissions = await prisma.permission.findMany({ select: { id: true, subject: true, action: true } });
+  const grants = await prisma.rolePermission.findMany({ select: { roleId: true, permissionId: true } });
+
+  const roleNames = new Set(roles.map((r) => r.name));
+  const permissionById = new Map(permissions.map((p) => [p.id, key(p)]));
+  const existingPermissions = new Set(permissions.map(key));
+  const catalogue = new Set(PERMISSIONS.map(key));
+
+  const currentByRole = new Map<string, Set<string>>();
+  const roleNameById = new Map(roles.map((r) => [r.id, r.name]));
+  for (const g of grants) {
+    const roleName = roleNameById.get(g.roleId);
+    const perm = permissionById.get(g.permissionId);
+    if (!roleName || !perm) continue;
+    if (!currentByRole.has(roleName)) currentByRole.set(roleName, new Set());
+    currentByRole.get(roleName)!.add(perm);
   }
 
-  const permissionIds: string[] = [];
-  for (const perm of PERMISSIONS) {
-    const row = await prisma.permission.upsert({
+  const grantsToAdd: string[] = [];
+  const grantsToRemove: string[] = [];
+  for (const [role, target] of targetGrants()) {
+    const current = currentByRole.get(role) ?? new Set<string>();
+    for (const perm of target) if (!current.has(perm)) grantsToAdd.push(`${role}:${perm}`);
+    // SUPER_ADMIN's extra rows are harmless (it bypasses every check); only the
+    // matrix-governed roles are held to their exact set.
+    if (role === SUPER_ADMIN_ROLE) continue;
+    for (const perm of current) if (!target.has(perm)) grantsToRemove.push(`${role}:${perm}`);
+  }
+
+  return {
+    missingRoles: SYSTEM_ROLES.filter((r) => !roleNames.has(r)),
+    missingPermissions: PERMISSIONS.filter((p) => !existingPermissions.has(key(p))),
+    grantsToAdd: grantsToAdd.sort(),
+    grantsToRemove: grantsToRemove.sort(),
+    legacyPermissions: [...existingPermissions].filter((p) => !catalogue.has(p)).sort(),
+  };
+}
+
+/** Applies a plan: creates roles/permissions/grants and removes drifted system-role grants. Idempotent. */
+export async function applyRbacPlan(prisma: RbacClient, plan: RbacPlan): Promise<void> {
+  for (const name of plan.missingRoles) {
+    await prisma.role.upsert({ where: { name }, update: {}, create: { name } });
+  }
+  for (const perm of plan.missingPermissions) {
+    await prisma.permission.upsert({
       where: { action_subject: { action: perm.action, subject: perm.subject } },
       update: {},
       create: { action: perm.action, subject: perm.subject, description: `Permission for ${perm.subject} ${perm.action}` },
     });
-    permissionIds.push(row.id);
   }
 
+  const resolve = async (grant: string) => {
+    const [roleName, perm] = grant.split(':');
+    const [subject, action] = perm.split('.');
+    const role = await prisma.role.findUniqueOrThrow({ where: { name: roleName } });
+    const permission = await prisma.permission.findUniqueOrThrow({ where: { action_subject: { action, subject } } });
+    return { roleId: role.id, permissionId: permission.id };
+  };
+
+  for (const grant of plan.grantsToAdd) {
+    const ids = await resolve(grant);
+    await prisma.rolePermission.upsert({ where: { roleId_permissionId: ids }, update: {}, create: ids });
+  }
+  for (const grant of plan.grantsToRemove) {
+    const ids = await resolve(grant);
+    await prisma.rolePermission.deleteMany({ where: ids });
+  }
+}
+
+/**
+ * Plan + apply. Roles and permissions are create-only; system-role grants are
+ * brought to exactly the code matrix (those roles are not editable through the API,
+ * so any difference is drift). Custom roles and legacy permission rows are never touched.
+ */
+export async function ensureRbac(prisma: RbacClient): Promise<{ superAdminRoleId: string; roles: number; permissions: number; plan: RbacPlan }> {
+  const plan = await planRbacSync(prisma);
+  await applyRbacPlan(prisma, plan);
   const superAdmin = await prisma.role.findUniqueOrThrow({ where: { name: SUPER_ADMIN_ROLE } });
-  for (const permissionId of permissionIds) {
-    await prisma.rolePermission.upsert({
-      where: { roleId_permissionId: { roleId: superAdmin.id, permissionId } },
-      update: {},
-      create: { roleId: superAdmin.id, permissionId },
-    });
-  }
-
-  return { superAdminRoleId: superAdmin.id, roles: ROLES.length, permissions: permissionIds.length };
+  return { superAdminRoleId: superAdmin.id, roles: SYSTEM_ROLES.length, permissions: PERMISSIONS.length, plan };
 }

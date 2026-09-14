@@ -6,9 +6,9 @@ import { authApi } from '@/lib/api/auth.api'
 import { qk } from '@/lib/query/keys'
 import type { User } from '@/lib/types/models'
 import {
-  setAdminToken,
-  clearAdminToken,
+  clearCustomerSessionMarker,
   hasCustomerSession,
+  removeLegacyAdminCookie,
   removeLegacyCustomerCookies,
 } from './tokens'
 
@@ -60,6 +60,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // so local cleanup always runs afterward.
     await authApi.logout().catch(() => undefined)
     removeLegacyCustomerCookies()
+    // P0-2: the backend clears ms_session on a successful logout; if that call
+    // failed, the marker would otherwise survive and re-enable /users/me.
+    clearCustomerSessionMarker()
     // Write `null` into the cache; do NOT removeQueries() first. `removeQueries`
     // destroys the cache entry this provider's mounted `meQuery` observer is bound
     // to WITHOUT notifying it, and the `setQueryData` below then builds a brand new,
@@ -72,8 +75,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const adminLogin = useCallback(
     async (email: string, password: string) => {
-      const res = await authApi.adminLogin(email, password)
-      setAdminToken(res.accessToken)
+      // H4: the API sets the admin session as an httpOnly cookie on its own host;
+      // the response carries no token and nothing is stored client-side.
+      await authApi.adminLogin(email, password)
+      removeLegacyAdminCookie()
       await qc.invalidateQueries({ queryKey: qk.admin.me })
     },
     [qc],
@@ -85,7 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // best-effort
     }
-    clearAdminToken()
+    removeLegacyAdminCookie()
     qc.removeQueries({ queryKey: qk.admin.me })
   }, [qc])
 

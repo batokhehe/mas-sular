@@ -1,4 +1,4 @@
-import { redactSensitiveParams, redactSensitivePath } from '../../src/common/logging/redact';
+import { PINO_HTTP_REDACT, redactJwts, redactSensitiveParams, redactSensitivePath, redactSensitiveQuery } from '../../src/common/logging/redact';
 
 describe('redactSensitiveParams (pino-http logs req.params)', () => {
   const raw = 'f'.repeat(64);
@@ -51,5 +51,37 @@ describe('redactSensitivePath', () => {
 
   it('passes through undefined', () => {
     expect(redactSensitivePath(undefined)).toBeUndefined();
+  });
+});
+
+describe('H2: credentials never survive into logged URLs, queries or headers', () => {
+  const JWT = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhZG0tMSIsInNpZCI6InMiLCJ0eXAiOiJhZG1pbl9hY2Nlc3MifQ.c2lnbmF0dXJlLXZhbHVl';
+
+  it('strips the VALUE of credential-like query parameters but keeps the key', () => {
+    expect(redactSensitivePath(`/api/v1/admin/notifications/stream?token=${JWT}`)).toBe('/api/v1/admin/notifications/stream?token=[REDACTED]');
+    expect(redactSensitivePath(`/x?cursor=abc&access_token=${JWT}&limit=5`)).toBe('/x?cursor=abc&access_token=[REDACTED]&limit=5');
+    expect(redactSensitivePath('/x?refresh_token=abc#frag')).toBe('/x?refresh_token=[REDACTED]#frag');
+    expect(redactSensitivePath('/x?cursor=abc')).toBe('/x?cursor=abc');
+  });
+
+  it('scrubs a JWT anywhere, whatever the parameter is called', () => {
+    expect(redactSensitivePath(`/x?q=${JWT}`)).not.toContain(JWT);
+    expect(redactSensitivePath(`/x/${JWT}/y`)).not.toContain(JWT);
+    expect(redactJwts(`Bearer ${JWT} and more`)).toBe('Bearer [REDACTED_JWT] and more');
+  });
+
+  it('redactSensitiveQuery masks credential keys and JWT-shaped values', () => {
+    expect(redactSensitiveQuery({ token: JWT, jwt: 'x', sid: 'y', cursor: 'c', q: JWT })).toEqual({
+      token: '[REDACTED]', jwt: '[REDACTED]', sid: '[REDACTED]', cursor: 'c', q: '[REDACTED_JWT]',
+    });
+  });
+
+  it('pino-http redacts authorization, cookie, CSRF, query and the Set-Cookie response header', () => {
+    for (const path of ['req.headers.authorization', 'req.headers.cookie', 'req.headers["x-csrf-token"]', 'req.query', 'req.url', 'res.headers["set-cookie"]']) {
+      expect(PINO_HTTP_REDACT.paths).toContain(path);
+    }
+    expect(PINO_HTTP_REDACT.censor([`ms_admin_access=${JWT}; HttpOnly`], ['res', 'headers', 'set-cookie'])).toBe('[Redacted]');
+    expect(PINO_HTTP_REDACT.censor({ token: JWT }, ['req', 'query'])).toEqual({ token: '[REDACTED]' });
+    expect(String(PINO_HTTP_REDACT.censor(`/s?token=${JWT}`, ['req', 'url']))).not.toContain(JWT);
   });
 });

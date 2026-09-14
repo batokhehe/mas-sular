@@ -80,7 +80,8 @@ test('the order is placed with the SELECTED address id, and cannot be placed wit
 test('after an order the stored choice is cleared (next checkout starts from the default)', () => {
   const success = CHECKOUT.split('onSuccess: (order) => {')[1]?.split('router.push')[0] ?? ''
   // P2 #6: the order's own lines leave the cart (was clearCart() - the whole cart).
-  assert.match(success, /removeLines\(purchasedIds\)/)
+  // P0-1: by line id (product + toppings), not product id.
+  assert.match(success, /removeLines\(purchasedLineIds\)/)
   assert.match(success, /clearChosenAddress\(\)/)
 })
 
