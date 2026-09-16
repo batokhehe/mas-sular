@@ -1459,3 +1459,88 @@ enum JneMappingMethod {
   REVIEWED_ALIAS
   MANUAL
 }
+
+/// Which external system the call belongs to. An enum (not free text) so the
+/// admin filter and the retention policies can never drift from a typo.
+enum IntegrationProvider {
+  PAXEL
+  JNE
+  MIDTRANS
+}
+
+/// OUTBOUND: we called the provider. INBOUND: the provider called us (webhook).
+enum IntegrationDirection {
+  OUTBOUND
+  INBOUND
+}
+
+/// What the APPLICATION made of the exchange, which HTTP status alone cannot say:
+/// a JNE `generatecnote` answers 200 and still returns no cnote (PARSE_FAILED).
+enum IntegrationOutcome {
+  OK
+  HTTP_ERROR
+  NETWORK_ERROR
+  TIMEOUT
+  PARSE_FAILED
+  REJECTED
+}
+
+/// One record per ACTUAL external HTTP exchange — one per retry attempt outbound,
+/// one per received webhook inbound, plus (where the provider response still has to
+/// be interpreted) one application-outcome record sharing the same `operationId`.
+///
+/// Deliberately NOT SystemLog: the Performance Profiler aggregates every SystemLog
+/// row with a durationMs and no module filter, so provider latencies would corrupt
+/// the request percentiles an existing admin page shows.
+///
+/// Payloads are SANITIZED before they arrive here (integration-log.sanitizer.ts):
+/// headers are never stored at all, credentials and unnecessary PII are replaced,
+/// and oversized bodies are truncated with an explicit marker. Written best-effort —
+/// a failed insert never fails the payment, shipment, quote or webhook.
+model IntegrationApiLog {
+  id                 String               @id @default(uuid())
+  createdAt          DateTime             @default(now())
+  provider           IntegrationProvider
+  /// Provider's own vocabulary, kept verbatim: RATE / GENERATE_CNOTE / CANCEL_CNOTE
+  /// / TRACK / WEBHOOK (JNE), charge / status / cancel / expire (Midtrans).
+  operation          String               @db.VarChar(48)
+  direction          IntegrationDirection
+  /// Groups every attempt AND the application-outcome record of ONE logical call.
+  operationId        String               @db.VarChar(36)
+  /// 1-based HTTP attempt; null on the application-outcome record.
+  attempt            Int?
+  maxAttempts        Int?
+  /// Correlation with the inbound HTTP request that triggered the call (null in workers).
+  requestId          String?              @db.VarChar(64)
+  /// Provider-side correlator when one exists (Midtrans order_id, JNE AWB, …).
+  correlationId      String?              @db.VarChar(128)
+  orderId            String?              @db.VarChar(36)
+  paymentId          String?              @db.VarChar(36)
+  shipmentId         String?              @db.VarChar(36)
+  method             String?              @db.VarChar(8)
+  /// Host + path only, run through redactSensitivePath — never a raw query string.
+  endpoint           String?              @db.VarChar(512)
+  httpStatus         Int?
+  durationMs         Int?
+  applicationOutcome IntegrationOutcome
+  /// The transport's own classification, unchanged: network / timeout / rate_limited
+  /// / provider_5xx / permanent_4xx / transient_exhausted / parse_failed.
+  errorClass         String?              @db.VarChar(32)
+  errorMessage       String?              @db.VarChar(512)
+  sanitizedRequest   Json?
+  sanitizedResponse  Json?
+
+  @@index([createdAt])
+  @@index([provider, createdAt])
+  @@index([operation, createdAt])
+  @@index([applicationOutcome, createdAt])
+  @@index([httpStatus, createdAt])
+  @@index([operationId])
+  /// Free-text admin search matches this column (order number, AWB, Midtrans
+  /// order_id) — the identifier an operator actually pastes into the filter.
+  @@index([correlationId])
+  @@index([orderId])
+  @@index([paymentId])
+  @@index([shipmentId])
+  @@index([requestId])
+}

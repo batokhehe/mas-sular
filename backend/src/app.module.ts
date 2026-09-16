@@ -10,6 +10,7 @@ import { DatabaseModule } from './database/database.module';
 import { CacheInfrastructureModule } from './infrastructure/cache/cache.module';
 import { ConsumersModule } from './infrastructure/consumers/consumers.module';
 import { LifecycleModule } from './infrastructure/lifecycle/lifecycle.module';
+import { IntegrationLogModule } from './infrastructure/integration-log/integration-log.module';
 import { LoggingModule } from './infrastructure/logging/logging.module';
 import { AuditTrailModule } from './infrastructure/audit/audit.module';
 import { AdminNotificationsModule } from './infrastructure/admin-notifications/admin-notifications.module';
@@ -59,6 +60,7 @@ import { InvoicesModule } from './modules/invoices/invoices.module';
     QueueModule,
     OutboxModule,
     LoggingModule,
+    IntegrationLogModule,
     AuditTrailModule,
     AdminNotificationsModule,
     NotificationsModule,

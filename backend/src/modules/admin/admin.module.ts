@@ -8,6 +8,7 @@ import { AdminCmsController } from './presentation/admin-cms.controller';
 import { AdminCatalogController } from './presentation/admin-catalog.controller';
 import { AdminOperationsController } from './presentation/admin-operations.controller';
 import { AdminSystemLogController } from './presentation/admin-system-log.controller';
+import { AdminIntegrationLogController } from './presentation/admin-integration-log.controller';
 import { AdminQueueController } from './presentation/admin-queue.controller';
 import { AdminIncidentController } from './presentation/admin-incident.controller';
 import { AdminNotificationCenterController } from './presentation/admin-notification-center.controller';
@@ -23,7 +24,7 @@ import { AdminInvoiceLinkService } from './admin-invoice-link.service';
 
 @Module({
   imports: [ShipmentModule, LifecycleModule, PaymentSettlementModule, InvoicesModule],
-  controllers: [AdminCatalogController, AdminCmsController, AdminOperationsController, AdminSystemLogController, AdminQueueController, AdminIncidentController, AdminNotificationCenterController, AdminCommunicationController, AdminAuditController, AdminBellController, AdminPushController],
+  controllers: [AdminCatalogController, AdminCmsController, AdminOperationsController, AdminSystemLogController, AdminIntegrationLogController, AdminQueueController, AdminIncidentController, AdminNotificationCenterController, AdminCommunicationController, AdminAuditController, AdminBellController, AdminPushController],
   providers: [AdminService, ExecutiveDashboardService, AdminOrderNotesService, OrderCancellationService, CustomerCommunicationService, AdminInvoiceLinkService, PermissionGuard],
   exports: [AdminService],
 })

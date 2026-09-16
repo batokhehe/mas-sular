@@ -1796,3 +1796,80 @@ export async function exportAuditCsv(f: AuditFilters = {}): Promise<Blob> {
   if (!res.ok) throw new Error(`Export failed (${res.status})`);
   return res.blob();
 }
+
+// ---------------------------------------------------------------------------
+// Integration API logs (P1) — external calls to Paxel / JNE / Midtrans.
+// Rows are stored already sanitized by the API; nothing here needs redacting.
+// ---------------------------------------------------------------------------
+
+export type IntegrationProvider = 'PAXEL' | 'JNE' | 'MIDTRANS';
+export type IntegrationDirection = 'OUTBOUND' | 'INBOUND';
+export type IntegrationOutcome = 'OK' | 'HTTP_ERROR' | 'NETWORK_ERROR' | 'TIMEOUT' | 'PARSE_FAILED' | 'REJECTED';
+
+export type IntegrationLog = {
+  id: string;
+  createdAt: string;
+  provider: IntegrationProvider;
+  operation: string;
+  direction: IntegrationDirection;
+  operationId: string;
+  attempt: number | null;
+  maxAttempts: number | null;
+  requestId: string | null;
+  correlationId: string | null;
+  orderId: string | null;
+  paymentId: string | null;
+  shipmentId: string | null;
+  method: string | null;
+  endpoint: string | null;
+  httpStatus: number | null;
+  durationMs: number | null;
+  applicationOutcome: IntegrationOutcome;
+  errorClass: string | null;
+  errorMessage: string | null;
+  sanitizedRequest: unknown;
+  sanitizedResponse: unknown;
+};
+
+export type IntegrationLogFilters = {
+  search?: string;
+  provider?: IntegrationProvider | '';
+  operation?: string;
+  direction?: IntegrationDirection | '';
+  applicationOutcome?: IntegrationOutcome | '';
+  httpStatus?: string;
+  operationId?: string;
+  orderId?: string;
+  paymentId?: string;
+  shipmentId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  sort?: 'asc' | 'desc';
+} & PageParams;
+
+export function fetchIntegrationLogs(filters: IntegrationLogFilters = {}) {
+  const q = new URLSearchParams();
+  const set = (k: string, v?: string) => {
+    if (v) q.set(k, v);
+  };
+  set('search', filters.search);
+  set('provider', filters.provider || undefined);
+  set('operation', filters.operation);
+  set('direction', filters.direction || undefined);
+  set('applicationOutcome', filters.applicationOutcome || undefined);
+  set('httpStatus', filters.httpStatus);
+  set('operationId', filters.operationId);
+  set('orderId', filters.orderId);
+  set('paymentId', filters.paymentId);
+  set('shipmentId', filters.shipmentId);
+  set('dateFrom', filters.dateFrom);
+  set('dateTo', filters.dateTo);
+  set('sort', filters.sort);
+  appendPage(q, filters);
+  const query = q.toString();
+  return api<Paginated<IntegrationLog>>(`/admin/integration-logs${query ? `?${query}` : ''}`);
+}
+
+export function fetchIntegrationLog(id: string) {
+  return api<IntegrationLog>(`/admin/integration-logs/${id}`);
+}

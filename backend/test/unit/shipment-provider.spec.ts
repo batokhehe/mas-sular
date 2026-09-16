@@ -129,29 +129,31 @@ describe('PaxelShipmentProvider', () => {
 });
 
 describe('JneShipmentProvider', () => {
+  // Booking moved from generatecnote to /pickupcashless (JNE's instruction). The full
+  // request/response contract lives in jne-pickup-cashless.spec.ts and
+  // integration-log-providers.spec.ts; these cases pin the refusals that happen before
+  // any request is sent.
   function build(enabled = true) {
-    const provider = new JneShipmentProvider(config(false, enabled));
+    const destinations = { resolve: jest.fn().mockResolvedValue('BDO10060') };
+    const provider = new JneShipmentProvider(config(false, enabled), undefined, destinations as never);
     const http = jest.fn();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (provider as any).http = http;
-    return { provider, http };
+    return { provider, http, destinations };
   }
 
-  it('maps a successful generate response to a cnote tracking number', async () => {
+  it('refuses to book before any HTTP request when the pickup configuration is missing', async () => {
     const { provider, http } = build();
-    http.mockResolvedValue(res(200, JSON.stringify({ detail: [{ cnote_no: 'JNE00099', status: 'SUCCESS' }] })));
-    const result = await provider.createShipment(INPUT);
-    expect(result.trackingNumber).toBe('JNE00099');
-    expect(result.status).toBe(ShipmentStatus.CREATED);
-    const body = String(http.mock.calls[0][1].body);
-    expect(body).toContain('api_key=secret');
-    expect(body).toContain('origin_code=BDO10000');
+    // This harness has no /pickupcashless configuration: the refusal names what is
+    // missing, and nothing is sent.
+    await expect(provider.createShipment(INPUT)).rejects.toBeInstanceOf(PermanentError);
+    await expect(provider.createShipment(INPUT)).rejects.toThrow(/JNE_PICKUP_NAME is required/);
+    expect(http).not.toHaveBeenCalled();
   });
 
-  it('classifies 4xx as PermanentError (no retry)', async () => {
-    const { provider, http } = build();
-    http.mockResolvedValue(res(400, 'bad'));
-    await expect(provider.createShipment(INPUT)).rejects.toBeInstanceOf(PermanentError);
-    expect(http).toHaveBeenCalledTimes(1);
+  it('a disabled courier still refuses first, without touching the network', async () => {
+    const { provider, http } = build(false);
+    await expect(provider.createShipment(INPUT)).rejects.toThrow(/JNE fulfillment is disabled/);
+    expect(http).not.toHaveBeenCalled();
   });
 });

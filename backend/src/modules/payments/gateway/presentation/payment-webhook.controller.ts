@@ -1,6 +1,10 @@
-import { Body, Controller, HttpCode, Post, ValidationPipe } from '@nestjs/common';
+import { Body, Controller, HttpCode, Logger, Optional, Post, ValidationPipe } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 import { ApiTags } from '@nestjs/swagger';
+import { IntegrationDirection, IntegrationOutcome, IntegrationProvider } from '@prisma/client';
+import { randomUUID } from 'crypto';
+import { safeRecord } from '../../../../infrastructure/integration-log/safe-record';
+import { IntegrationLogService } from '../../../../infrastructure/integration-log/integration-log.service';
 import { MidtransWebhookDto } from '../application/dto/midtrans-webhook.dto';
 import { PaymentWebhookService, WebhookAck } from '../payment-webhook.service';
 
@@ -27,7 +31,35 @@ import { PaymentWebhookService, WebhookAck } from '../payment-webhook.service';
 @ApiTags('payments')
 @Controller({ path: 'payments', version: '1' })
 export class PaymentWebhookController {
-  constructor(private readonly webhooks: PaymentWebhookService) {}
+  /** Only ever used to report a failed integration-log write (best-effort). */
+  private readonly logger = new Logger('PaymentWebhookController');
+
+  constructor(
+    private readonly webhooks: PaymentWebhookService,
+    // P1 integration logging (INBOUND). Recorded AFTER the service has run, so
+    // signature verification, fingerprint dedup and replay protection are untouched.
+    // `signature_key` is a sensitive key and is redacted by the sanitizer.
+    @Optional() private readonly integrationLogs?: IntegrationLogService,
+  ) {}
+
+  private record(body: Record<string, unknown>, httpStatus: number, durationMs: number, errorMessage?: string): void {
+    safeRecord(this.integrationLogs, {
+      provider: IntegrationProvider.MIDTRANS,
+      operation: 'WEBHOOK',
+      direction: IntegrationDirection.INBOUND,
+      operationId: randomUUID(),
+      correlationId: typeof body?.order_id === 'string' ? body.order_id : null,
+      method: 'POST',
+      endpoint: '/api/v1/payments/webhook/midtrans',
+      httpStatus,
+      durationMs,
+      applicationOutcome: httpStatus < 400 ? IntegrationOutcome.OK : IntegrationOutcome.REJECTED,
+      errorMessage: errorMessage ?? null,
+      requestPayload: body,
+    }, (err) =>
+      this.logger?.warn({ event: 'integration_log.record_failed', reason: err instanceof Error ? err.message : String(err) }),
+    );
+  }
 
   /**
    * POST /api/v1/payments/webhook/midtrans
@@ -57,9 +89,19 @@ export class PaymentWebhookController {
     // untouched and this call becomes the single validation authority. Every
     // constraint still applies: the four signature-covered fields remain required,
     // and `gross_amount` keeps the exact string Midtrans signed.
-    const dto = await WEBHOOK_VALIDATION.transform(body, { type: 'body', metatype: MidtransWebhookDto });
-    await this.webhooks.handleMidtransNotification(dto);
-    return { received: true, handled: false };
+    const startedAt = Date.now();
+    try {
+      const dto = await WEBHOOK_VALIDATION.transform(body, { type: 'body', metatype: MidtransWebhookDto });
+      await this.webhooks.handleMidtransNotification(dto);
+      this.record(body, 200, Date.now() - startedAt);
+      return { received: true, handled: false };
+    } catch (err) {
+      // Recorded, then rethrown UNCHANGED: the rejection (401 bad signature, 400
+      // malformed, 503 disabled) reaches Midtrans exactly as before.
+      const status = typeof (err as { getStatus?: () => number })?.getStatus === 'function' ? (err as { getStatus: () => number }).getStatus() : 500;
+      this.record(body, status, Date.now() - startedAt, err instanceof Error ? err.message : String(err));
+      throw err;
+    }
   }
 }
 

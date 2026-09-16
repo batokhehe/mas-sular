@@ -51,6 +51,8 @@ export const ROUTE_PERMISSIONS = {
   stockTransferCreate: ['StockTransfer.create'],
   stockTransferUpdate: ['StockTransfer.update'],
   systemLogs: ['SystemLog.read'],
+  // External API call log (Paxel / JNE / Midtrans) — SUPER_ADMIN only for now.
+  integrationLogs: ['IntegrationLog.read'],
   queues: ['Queue.read'],
   queueRetry: ['Queue.retry'],
   incidents: ['Incident.read'],

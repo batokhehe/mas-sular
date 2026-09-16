@@ -1,4 +1,8 @@
-import { Body, Controller, Headers, HttpCode, Post, Res } from '@nestjs/common';
+import { Body, Controller, Headers, HttpCode, Logger, Optional, Post, Res } from '@nestjs/common';
+import { IntegrationDirection, IntegrationOutcome, IntegrationProvider } from '@prisma/client';
+import { randomUUID } from 'crypto';
+import { safeRecord } from '../../../infrastructure/integration-log/safe-record';
+import { IntegrationLogService } from '../../../infrastructure/integration-log/integration-log.service';
 import { ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import type { Response } from 'express';
@@ -31,7 +35,36 @@ import { JneWebhookBody, JneWebhookService } from '../jne-webhook.service';
 @ApiTags('shipments')
 @Controller({ path: 'shipments', version: '1' })
 export class JneWebhookController {
-  constructor(private readonly webhooks: JneWebhookService) {}
+  /** Only ever used to report a failed integration-log write (best-effort). */
+  private readonly logger = new Logger('JneWebhookController');
+
+  constructor(
+    private readonly webhooks: JneWebhookService,
+    // P1 integration logging (INBOUND). Optional and best-effort: it runs AFTER the
+    // service has decided, so validation, AWB/order matching and the forward-only
+    // transition rules are untouched.
+    @Optional() private readonly integrationLogs?: IntegrationLogService,
+  ) {}
+
+  /** One record per received webhook. The signature header is never passed in. */
+  private record(body: Record<string, unknown>, httpStatus: number, durationMs: number, reason?: string): void {
+    safeRecord(this.integrationLogs, {
+      provider: IntegrationProvider.JNE,
+      operation: 'WEBHOOK',
+      direction: IntegrationDirection.INBOUND,
+      operationId: randomUUID(),
+      correlationId: typeof body?.awb === 'string' ? body.awb : null,
+      method: 'POST',
+      endpoint: '/api/v1/shipments/webhook/jne',
+      httpStatus,
+      durationMs,
+      applicationOutcome: httpStatus < 400 ? IntegrationOutcome.OK : IntegrationOutcome.REJECTED,
+      errorMessage: reason ?? null,
+      requestPayload: body,
+    }, (err) =>
+      this.logger?.warn({ event: 'integration_log.record_failed', reason: err instanceof Error ? err.message : String(err) }),
+    );
+  }
 
   @Post('webhook/jne')
   @HttpCode(200)
@@ -44,12 +77,15 @@ export class JneWebhookController {
     @Headers('content-type') contentType: string | undefined,
     @Res({ passthrough: true }) res: Response,
   ): Promise<JneWebhookBody> {
+    const startedAt = Date.now();
     if (!/^application\/json\b/i.test(contentType ?? '')) {
       res.status(415);
+      this.record(body, 415, Date.now() - startedAt, 'Content-Type must be application/json');
       return { status: false, reason: 'Content-Type must be application/json' };
     }
     const result = await this.webhooks.handle(body);
     res.status(result.httpStatus);
+    this.record(body, result.httpStatus, Date.now() - startedAt, 'reason' in result.body ? result.body.reason : undefined);
     return result.body;
   }
 }

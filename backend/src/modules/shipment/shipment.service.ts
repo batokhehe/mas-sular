@@ -181,13 +181,14 @@ export class ShipmentService {
       }
     }
 
-    // JNE has no pickup contract - `generatecnote` carries no pickup field - yet the
-    // shop's single pickup rule applies to it all the same (P1 #13), so the slot is
-    // RECORDED on the shipment for operations. Informational only: it never reaches
-    // the JNE payload (`pickupAtIso` above stays Paxel's) and can never block or fail
-    // the booking. An already-recorded slot is kept, never recomputed.
-    if (provider.name === 'jne' && !readPickupDatetime(shipment.metadata, 'jne')) {
-      await this.recordJnePickupSlot(shipment.id, order.payment?.verifiedAt ?? null, orderId);
+    // The shop's single pickup rule (P1 #13) is RECORDED on the JNE shipment, and
+    // JNE /pickupcashless now sends it as PICKUP_DATE / PICKUP_TIME. Recording itself
+    // still never throws; a booking with no recorded slot is refused by the provider
+    // before anything is sent, never sent with an invented time. An already-recorded
+    // slot is kept, never recomputed. (`pickupAtIso` above stays Paxel's.)
+    let jnePickupAtIso = provider.name === 'jne' ? readPickupDatetime(shipment.metadata, 'jne') : undefined;
+    if (provider.name === 'jne' && !jnePickupAtIso) {
+      jnePickupAtIso = await this.recordJnePickupSlot(shipment.id, order.payment?.verifiedAt ?? null, orderId);
     }
 
     // CAS-claim the booking BEFORE the courier call (audit F3): exactly one caller
@@ -245,6 +246,10 @@ export class ShipmentService {
       paymentMethod: order.paymentMethod,
       pickupAtIso,
       items,
+      // JNE /pickupcashless needs these; Paxel ignores them.
+      goodsAmount: order.subtotal,
+      destinationDistrictId: order.address.districtId,
+      recordedPickupAtIso: jnePickupAtIso,
       origin: {
         name: outlet.name,
         postalCode: outlet.postalCode,
@@ -361,11 +366,11 @@ export class ShipmentService {
    * booking proceeds exactly as it did before the rule existed. Merges into
    * metadata like every other write here, so failure diagnostics survive.
    */
-  private async recordJnePickupSlot(shipmentId: string, verifiedAt: Date | null, orderId: string): Promise<void> {
-    if (!this.pickupScheduler) return;
+  private async recordJnePickupSlot(shipmentId: string, verifiedAt: Date | null, orderId: string): Promise<string | undefined> {
+    if (!this.pickupScheduler) return undefined;
     if (!verifiedAt) {
       this.logger.warn({ event: 'shipment.pickup_reference_missing', orderId, provider: 'jne' });
-      return;
+      return undefined;
     }
     try {
       const pickupAtIso = this.pickupScheduler.resolvePolicyIso(verifiedAt);
@@ -378,6 +383,9 @@ export class ShipmentService {
         data: { metadata: withPickupDatetime(current?.metadata, pickupAtIso, 'jne') },
       });
       this.logger.log({ event: 'shipment.pickup_recorded', orderId, provider: 'jne', pickupAtIso });
+      // Returned only once it is actually persisted: JNE is sent a slot that the
+      // shipment records, never one that exists only in memory.
+      return pickupAtIso;
     } catch (err) {
       this.logger.warn({
         event: 'shipment.pickup_record_failed',
@@ -385,6 +393,7 @@ export class ShipmentService {
         provider: 'jne',
         error: err instanceof Error ? err.message : String(err),
       });
+      return undefined;
     }
   }
 

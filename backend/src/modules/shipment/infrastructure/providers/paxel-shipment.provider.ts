@@ -1,4 +1,6 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { IntegrationProvider } from '@prisma/client';
+import { IntegrationLogService } from '../../../../infrastructure/integration-log/integration-log.service';
 import { ShipmentStatus } from '@prisma/client';
 import { PermanentError } from '../../../shipping/domain/shipping-errors';
 import {
@@ -131,7 +133,22 @@ export class PaxelShipmentProvider implements ShipmentProvider {
   private readonly logger = new Logger('PaxelShipmentProvider');
   private http: ShippingHttpClient = defaultShippingHttpClient;
 
-  constructor(@Inject(SHIPPING_CONFIG) private readonly config: ShippingConfig) {}
+  constructor(
+    @Inject(SHIPPING_CONFIG) private readonly config: ShippingConfig,
+    // P1 integration logging. Optional — absent, nothing is recorded.
+    @Optional() private readonly integrationLogs?: IntegrationLogService,
+  ) {}
+
+  /** Business context for one external call; the transport owns the rest. */
+  private integration(operation: string, extra: { orderId?: string | null; correlationId?: string | null } = {}) {
+    return {
+      provider: IntegrationProvider.PAXEL,
+      operation,
+      recorder: this.integrationLogs,
+      orderId: extra.orderId ?? null,
+      correlationId: extra.correlationId ?? null,
+    };
+  }
 
   private get cfg() {
     return this.config.paxel;
@@ -176,6 +193,7 @@ export class PaxelShipmentProvider implements ShipmentProvider {
       // no way to detect a replay, so a retry after a lost response can issue a
       // SECOND airwaybill for one order. A failed create is surfaced to a human.
       maxRetry: 0,
+      integration: this.integration('CREATE_SHIPMENT', { orderId: input.orderId, correlationId: input.orderNumber }),
       logger: this.logger,
       // City only. Never the street address, phone, recipient name, item names,
       // invoice value, API key, secret or signature.
@@ -358,6 +376,7 @@ export class PaxelShipmentProvider implements ShipmentProvider {
       logger: this.logger,
       // No AWB, no reason, no signature in the log context.
       logBase: { provider: this.name, origin: '-', destination: '-', service: 'CANCEL' },
+      integration: this.integration('CANCEL', { correlationId: airwaybillCode }),
     });
   }
 
@@ -394,6 +413,7 @@ export class PaxelShipmentProvider implements ShipmentProvider {
       maxRetry: this.cfg.maxRetry,
       logger: this.logger,
       logBase: { provider: this.name, origin: '-', destination: '-', service: 'TRACK' },
+      integration: this.integration('TRACK', { correlationId: airwaybillCode }),
     });
     const parsed = safeParse<PaxelShipmentResponse>(text);
     return { latestStatus: parsed?.data?.latest_status ?? '', payload: parsed ?? text };

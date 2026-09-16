@@ -14,7 +14,7 @@ export type NavIconName =
   | 'dashboard' | 'products' | 'categories' | 'toppings' | 'banners' | 'orders' | 'payments' | 'shipping'
   | 'coverage' | 'reservations' | 'warehouse' | 'store' | 'transfer' | 'voucher'
   | 'users' | 'roles' | 'activity' | 'logs' | 'requests' | 'queues' | 'performance'
-  | 'incidents' | 'notifications' | 'communications' | 'audit';
+  | 'incidents' | 'notifications' | 'communications' | 'audit' | 'integrations';
 
 export interface NavItem {
   href: string;
@@ -64,6 +64,7 @@ export const ADMIN_NAV_SECTIONS: readonly NavSection[] = [
     items: [
       { href: '/system/dashboard', label: 'Dashboard', icon: 'activity', permissions: ROUTE_PERMISSIONS.systemLogs },
       { href: '/system/logs', label: 'Logs', icon: 'logs', permissions: ROUTE_PERMISSIONS.systemLogs },
+      { href: '/system/integration-logs', label: 'Integration Logs', icon: 'integrations', permissions: ROUTE_PERMISSIONS.integrationLogs },
       { href: '/system/requests', label: 'Request Explorer', icon: 'requests', permissions: ROUTE_PERMISSIONS.systemLogs },
       { href: '/system/queues', label: 'Queue Center', icon: 'queues', permissions: ROUTE_PERMISSIONS.queues },
       { href: '/system/performance', label: 'Performance', icon: 'performance', permissions: ROUTE_PERMISSIONS.systemLogs },

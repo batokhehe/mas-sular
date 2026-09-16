@@ -1,4 +1,8 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { randomUUID } from 'crypto';
+import { IntegrationDirection, IntegrationOutcome, IntegrationProvider } from '@prisma/client';
+import { safeRecord } from '../../../../../infrastructure/integration-log/safe-record';
+import { IntegrationLogService } from '../../../../../infrastructure/integration-log/integration-log.service';
 import { GatewayTransactionStatus, PaymentStatus } from '@prisma/client';
 import { mapGatewayStatusToPaymentStatus } from '../../domain/gateway-status.mapper';
 import {
@@ -74,7 +78,11 @@ export class MidtransPaymentProvider implements PaymentProvider {
   private readonly logger = new Logger('MidtransPaymentProvider');
   private http: MidtransHttpClient = defaultMidtransHttpClient;
 
-  constructor(@Inject(MIDTRANS_CONFIG) private readonly config: MidtransConfig) {}
+  constructor(
+    @Inject(MIDTRANS_CONFIG) private readonly config: MidtransConfig,
+    // P1 integration logging. Optional — absent, nothing is recorded.
+    @Optional() private readonly integrationLogs?: IntegrationLogService,
+  ) {}
 
   /** Test seam — swap the transport without touching the provider logic. */
   setHttpClient(client: MidtransHttpClient): void {
@@ -117,6 +125,8 @@ export class MidtransPaymentProvider implements PaymentProvider {
     const response = await this.send<MidtransChargeResponse>('POST', '/v2/charge', body, {
       idempotencyKey: orderId,
       logBase: { op: 'charge', channel: request.channel, orderId },
+      // Midtrans's own word for the operation, kept verbatim (see decision 5).
+      integration: { operation: 'charge', correlationId: orderId, paymentId: request.paymentId, orderId: request.orderId },
     });
 
     const artifacts = extractChannelArtifacts(request.channel, response);
@@ -161,6 +171,7 @@ export class MidtransPaymentProvider implements PaymentProvider {
     const key = this.requireProviderKey(ref, 'status');
     const response = await this.send<MidtransChargeResponse>('GET', `/v2/${encodeURIComponent(key)}/status`, undefined, {
       logBase: { op: 'status', key },
+      integration: { operation: 'status', correlationId: key, paymentId: ref.paymentId },
       expectTransaction: true,
     });
     return this.toProviderStatus(response, key);
@@ -171,6 +182,7 @@ export class MidtransPaymentProvider implements PaymentProvider {
     const key = this.requireProviderKey(ref, 'cancel');
     const response = await this.send<MidtransChargeResponse>('POST', `/v2/${encodeURIComponent(key)}/cancel`, undefined, {
       logBase: { op: 'cancel', key },
+      integration: { operation: 'cancel', correlationId: key, paymentId: ref.paymentId },
       expectTransaction: true,
     });
     return this.toProviderStatus(response, key);
@@ -181,6 +193,7 @@ export class MidtransPaymentProvider implements PaymentProvider {
     const key = this.requireProviderKey(ref, 'expire');
     const response = await this.send<MidtransChargeResponse>('POST', `/v2/${encodeURIComponent(key)}/expire`, undefined, {
       logBase: { op: 'expire', key },
+      integration: { operation: 'expire', correlationId: key, paymentId: ref.paymentId },
       expectTransaction: true,
     });
     return this.toProviderStatus(response, key);
@@ -201,11 +214,16 @@ export class MidtransPaymentProvider implements PaymentProvider {
       logBase: Record<string, unknown>;
       /** Transaction-state endpoints (status/cancel/expire) must answer with one. */
       expectTransaction?: boolean;
+      /** P1: business context for the durable integration record. */
+      integration?: { operation: string; correlationId?: string | null; paymentId?: string | null; orderId?: string | null };
     },
   ): Promise<T> {
     if (!this.config.serverKey) {
       throw new PermanentGatewayError('MIDTRANS_SERVER_KEY is not configured', this.name);
     }
+    // Pre-generated so the HTTP attempts and any application-outcome record below
+    // share one operationId (the admin UI groups a logical call by it).
+    const operationId = randomUUID();
     const response = await executeMidtransRequest<T>({
       http: this.http,
       url: `${this.config.baseUrl}${path}`,
@@ -227,9 +245,48 @@ export class MidtransPaymentProvider implements PaymentProvider {
       maxRetry: this.config.maxRetry,
       logger: this.logger,
       logBase: { provider: this.name, ...opts.logBase },
+      ...(opts.integration
+        ? {
+            integration: {
+              provider: IntegrationProvider.MIDTRANS,
+              operation: opts.integration.operation,
+              recorder: this.integrationLogs,
+              operationId,
+              correlationId: opts.integration.correlationId ?? null,
+              paymentId: opts.integration.paymentId ?? null,
+              orderId: opts.integration.orderId ?? null,
+            },
+          }
+        : {}),
     });
 
-    this.assertBodyOk(response, opts.expectTransaction === true);
+    // HTTP 200 is not success on its own: Midtrans overloads `status_code` per
+    // endpoint, so a rejected charge arrives as 200. That rejection is an
+    // APPLICATION outcome and gets its own record, sharing this operationId.
+    try {
+      this.assertBodyOk(response, opts.expectTransaction === true);
+    } catch (err) {
+      if (opts.integration) {
+        safeRecord(this.integrationLogs, {
+          provider: IntegrationProvider.MIDTRANS,
+          operation: opts.integration.operation,
+          direction: IntegrationDirection.OUTBOUND,
+          operationId,
+          correlationId: opts.integration.correlationId ?? null,
+          paymentId: opts.integration.paymentId ?? null,
+          orderId: opts.integration.orderId ?? null,
+          method,
+          endpoint: `${this.config.baseUrl}${path}`,
+          applicationOutcome: IntegrationOutcome.REJECTED,
+          errorClass: 'rejected',
+          errorMessage: err instanceof Error ? err.message : String(err),
+          responsePayload: response,
+        }, (err) =>
+          this.logger?.warn({ event: 'integration_log.record_failed', reason: err instanceof Error ? err.message : String(err) }),
+        );
+      }
+      throw err;
+    }
     return response;
   }
 

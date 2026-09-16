@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { SHIPPING_CONFIG, assertJneEnvironment, loadShippingConfig } from '../shipping/shipping.config';
 import { JneShipmentProvider } from './infrastructure/providers/jne-shipment.provider';
+import { JneDestinationResolver } from '../shipping/infrastructure/jne-destination.resolver';
 import { JneOriginBootValidator } from './jne-origin-boot.validator';
 import { PaxelShipmentProvider } from './infrastructure/providers/paxel-shipment.provider';
 import { PaxelPickupScheduler } from './paxel-pickup-scheduler';
@@ -40,6 +41,10 @@ import { ShipmentSyncService } from './shipment-sync.service';
       },
     },
     PaxelShipmentProvider,
+    // The verified district -> JNE destination mapping (quote side's resolver; it
+    // needs only the global PrismaService). JNE booking resolves DESTINATION_CODE
+    // with it and never falls back to a postal code.
+    JneDestinationResolver,
     JneShipmentProvider,
     // Checks JNE_ORIGIN_CODE against JNE's own ORIGIN master at bootstrap -
     // the check that would have caught BDO10056 (PAXELBOX-61P).

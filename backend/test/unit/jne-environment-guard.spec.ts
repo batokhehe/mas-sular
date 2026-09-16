@@ -198,6 +198,29 @@ describe('validateEnv', () => {
     JNE_API_KEY: 'k',
     JNE_USERNAME: 'u',
     JNE_ORIGIN_CODE: 'BDO10000',
+    // JNE /pickupcashless master data is now required whenever JNE is enabled
+    // (placeholder fixture values, not real JNE data). These cases are about the
+    // environment/endpoint guard, so they carry a complete, valid set.
+    JNE_PICKUP_NAME: 'Pickup Test',
+    JNE_PICKUP_PIC: 'Pic Test',
+    JNE_PICKUP_PIC_PHONE: '081200000001',
+    JNE_PICKUP_ADDRESS: 'Jl. Test 1',
+    JNE_PICKUP_DISTRICT: 'District Test',
+    JNE_PICKUP_CITY: 'City Test',
+    JNE_PICKUP_SERVICE: 'Domestic',
+    JNE_PICKUP_VEHICLE: 'Motor',
+    JNE_BRANCH: 'BRANCH-TEST',
+    JNE_CUST_ID: 'CUST-TEST',
+    JNE_MERCHANT_ID: 'MERCHANT-TEST',
+    JNE_SHIPPER_NAME: 'Shipper Test',
+    JNE_SHIPPER_ADDR1: 'Jl. Test 1',
+    JNE_SHIPPER_ADDR2: 'Kel. Test',
+    JNE_SHIPPER_CITY: 'City Test',
+    JNE_SHIPPER_ZIP: '40111',
+    JNE_SHIPPER_REGION: 'Region Test',
+    JNE_SHIPPER_CONTACT: 'Contact Test',
+    JNE_SHIPPER_PHONE: '081200000002',
+    JNE_TYPE: 'PICKUP',
   };
   const valid = (over: Record<string, string | undefined> = {}) => ({ ...VALID, ...over });
 

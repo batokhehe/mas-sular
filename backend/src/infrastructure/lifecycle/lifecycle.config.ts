@@ -22,6 +22,10 @@ export interface LifecycleConfig {
   notificationSentDays: number; // NotificationOutbox status=SENT (by sentAt)
   notificationFailedDays: number; // NotificationOutbox status=FAILED (retained long)
   uploadTokenExpiredDays: number; // PaymentUploadToken, retained N days AFTER expiresAt
+  /** IntegrationApiLog: successful high-volume reads (RATE / QUOTE / TRACK). */
+  integrationLogVolatileDays: number;
+  /** IntegrationApiLog: bookings, cancellations, payment operations, webhooks — and every failure. */
+  integrationLogDurableDays: number;
 }
 
 export function loadLifecycleConfig(env: NodeJS.ProcessEnv = process.env): LifecycleConfig {
@@ -38,5 +42,7 @@ export function loadLifecycleConfig(env: NodeJS.ProcessEnv = process.env): Lifec
     notificationSentDays: positiveInt(env.RETENTION_NOTIFICATION_SENT_DAYS, 30),
     notificationFailedDays: positiveInt(env.RETENTION_NOTIFICATION_FAILED_DAYS, 90),
     uploadTokenExpiredDays: positiveInt(env.RETENTION_UPLOAD_TOKEN_DAYS, 14),
+    integrationLogVolatileDays: positiveInt(env.RETENTION_INTEGRATION_LOG_VOLATILE_DAYS, 14),
+    integrationLogDurableDays: positiveInt(env.RETENTION_INTEGRATION_LOG_DURABLE_DAYS, 90),
   };
 }

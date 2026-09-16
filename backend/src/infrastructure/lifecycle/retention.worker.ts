@@ -124,6 +124,22 @@ export class RetentionWorker implements OnApplicationBootstrap, OnModuleDestroy 
       // PaymentUploadToken: deleted only N days AFTER expiry, so active and recently-
       // expired tokens (future or within-window expiresAt) are never matched.
       { name: 'PaymentUploadToken', table: `"PaymentUploadToken"`, where: `"expiresAt" < $1`, cutoff: cutoff(this.config.uploadTokenExpiredDays) },
+      // IntegrationApiLog, two windows (P1). The high-volume read operations that
+      // succeeded age out quickly; everything that can be needed for an
+      // investigation — bookings, cancellations, payment calls, webhooks, and ANY
+      // failed record whatever its operation — is kept for the long window.
+      {
+        name: 'IntegrationApiLog.volatile',
+        table: `"IntegrationApiLog"`,
+        where: `"applicationOutcome" = 'OK' AND "operation" IN ('RATE', 'QUOTE', 'TRACK') AND "createdAt" < $1`,
+        cutoff: cutoff(this.config.integrationLogVolatileDays),
+      },
+      {
+        name: 'IntegrationApiLog.durable',
+        table: `"IntegrationApiLog"`,
+        where: `NOT ("applicationOutcome" = 'OK' AND "operation" IN ('RATE', 'QUOTE', 'TRACK')) AND "createdAt" < $1`,
+        cutoff: cutoff(this.config.integrationLogDurableDays),
+      },
     ];
   }
 

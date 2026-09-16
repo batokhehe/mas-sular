@@ -54,7 +54,7 @@ interface CivilFields {
 }
 
 /** The civil (wall-clock) fields of `instant` as read in `timeZone`. */
-function zonedCivil(instant: Date, timeZone: string): Omit<CivilFields, 'millisecond'> {
+export function zonedCivil(instant: Date, timeZone: string): Omit<CivilFields, 'millisecond'> {
   const parts: Record<string, string> = {};
   for (const { type, value } of new Intl.DateTimeFormat('en-US', {
     timeZone,

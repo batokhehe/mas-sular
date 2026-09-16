@@ -122,8 +122,10 @@ test('navigation filtering is unchanged: STAFF sees exactly the 13 pages it may 
 });
 
 test('navigation filtering is unchanged for ADMIN, MANAGER and SUPER_ADMIN', () => {
+  // '/system/integration-logs' needs IntegrationLog.read, which NO role holds in the
+  // matrix — so it is visible to SUPER_ADMIN only, exactly like the other System pages.
   const all = visibleHrefs(ROLE_PERMISSIONS.SUPER_ADMIN);
-  assert.equal(all.length, 27); // every menu item (26 + Toppings)
+  assert.equal(all.length, 28); // every menu item (26 + Toppings + Integration Logs)
   assert.ok(visibleHrefs(ROLE_PERMISSIONS.ADMIN).includes('/dashboard'));
   assert.ok(!visibleHrefs(ROLE_PERMISSIONS.ADMIN).includes('/roles')); // Role.read is SUPER_ADMIN-only
   assert.deepEqual(visibleHrefs(ROLE_PERMISSIONS.MANAGER).slice(0, 3), ['/dashboard', '/products', '/categories']);

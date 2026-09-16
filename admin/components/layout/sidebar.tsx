@@ -29,6 +29,7 @@ import {
   MessagesSquare,
   History,
   Soup,
+  Plug,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -63,6 +64,7 @@ const ICONS: Record<NavIconName, LucideIcon> = {
   notifications: BellRing,
   communications: MessagesSquare,
   audit: History,
+  integrations: Plug,
 };
 
 export function Sidebar() {

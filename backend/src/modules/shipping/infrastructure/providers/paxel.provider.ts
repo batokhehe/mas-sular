@@ -1,4 +1,6 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { IntegrationProvider } from '@prisma/client';
+import { IntegrationLogService } from '../../../../infrastructure/integration-log/integration-log.service';
 import { PermanentError } from '../../domain/shipping-errors';
 import { ShippingProvider, ShippingQuote, ShippingRateRequest, TrackingResult } from '../../domain/shipping-provider.interface';
 import { isPersistableCoordinate } from '../../../geocoding/geocoding.service';
@@ -65,7 +67,23 @@ export class PaxelProvider implements ShippingProvider {
   private readonly logger = new Logger('PaxelProvider');
   private http: ShippingHttpClient = defaultShippingHttpClient;
 
-  constructor(@Inject(SHIPPING_CONFIG) private readonly config: ShippingConfig) {}
+  constructor(
+    @Inject(SHIPPING_CONFIG) private readonly config: ShippingConfig,
+    // P1 integration logging. Optional so existing unit tests can build the provider
+    // with the config alone; absent, no integration record is written.
+    @Optional() private readonly integrationLogs?: IntegrationLogService,
+  ) {}
+
+  /** Business context for one external call; the transport owns attempt/duration/status. */
+  private integration(operation: string, extra: { shipmentId?: string | null; correlationId?: string | null } = {}) {
+    return {
+      provider: IntegrationProvider.PAXEL,
+      operation,
+      recorder: this.integrationLogs,
+      shipmentId: extra.shipmentId ?? null,
+      correlationId: extra.correlationId ?? null,
+    };
+  }
 
   private get cfg() {
     return this.config.paxel;
@@ -276,6 +294,7 @@ export class PaxelProvider implements ShippingProvider {
       maxRetry: this.cfg.maxRetry,
       logger: this.logger,
       logBase: { provider: this.name, origin: '-', destination: '-', service: 'TRACK' },
+      integration: this.integration('TRACK', { correlationId: trackingNumber }),
     });
     const status = ((): string => {
       try {

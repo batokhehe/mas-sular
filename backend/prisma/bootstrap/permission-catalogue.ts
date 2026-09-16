@@ -40,6 +40,10 @@ export const PERMISSION_CATALOGUE = {
   Role: ['read', 'create', 'update'],
   DeliveryCoverage: ['read', 'create', 'update', 'delete'],
   SystemLog: ['read'],
+  /// External API call log (Paxel / JNE / Midtrans). Deliberately SUPER_ADMIN-only
+  /// for now: the records carry sanitized provider payloads, so they are troubleshooting
+  /// data for whoever operates the integrations, not day-to-day shop administration.
+  IntegrationLog: ['read'],
   Queue: ['read', 'retry'],
   Incident: ['read', 'manage'],
   Notification: ['read', 'send', 'resend', 'manage'],

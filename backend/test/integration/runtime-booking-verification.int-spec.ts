@@ -35,6 +35,9 @@ import { ShipmentService } from '../../src/modules/shipment/shipment.service'
 import { ShipmentProviderFactory } from '../../src/modules/shipment/shipment-provider.factory'
 import { PaxelShipmentProvider } from '../../src/modules/shipment/infrastructure/providers/paxel-shipment.provider'
 import { JneShipmentProvider } from '../../src/modules/shipment/infrastructure/providers/jne-shipment.provider'
+import { IntegrationLogService } from '../../src/infrastructure/integration-log/integration-log.service'
+import { loadIntegrationLogConfig } from '../../src/infrastructure/integration-log/integration-log.config'
+import { JneDestinationResolver } from '../../src/modules/shipping/infrastructure/jne-destination.resolver'
 import { PaxelPickupScheduler } from '../../src/modules/shipment/paxel-pickup-scheduler'
 import { readPickupDatetime } from '../../src/modules/shipment/shipment-metadata'
 import type { ShippingConfig } from '../../src/modules/shipping/shipping.config'
@@ -80,20 +83,33 @@ function shippingConfig(autoPickupEnabled = true): ShippingConfig {
       originCode: 'CGK10000',
       timeoutMs: 1000,
       maxRetry: 0,
+      // Placeholder /pickupcashless master data (not real JNE values), complete so the
+      // booking reaches the response-contract stop rather than a configuration refusal.
+      pickup: {
+        pickupName: 'Pickup Test', pickupPic: 'Pic Test', pickupPicPhone: '081200000001', pickupAddress: 'Jl. Origin No. 1',
+        pickupDistrict: 'Buahbatu', pickupCity: 'Kota Bandung', pickupService: 'Domestic', pickupVehicle: 'Motor',
+        branch: 'BRANCH-TEST', custId: 'CUST-TEST', merchantId: 'MERCHANT-TEST',
+        shipperName: 'Mas Sular Pusat', shipperAddr1: 'Jl. Origin No. 1', shipperAddr2: 'Kel. Jatisari', shipperCity: 'Kota Bandung',
+        shipperZip: '40286', shipperRegion: 'Jawa Barat', shipperContact: 'Contact Test', shipperPhone: '081200000002',
+        type: 'PICKUP',
+      },
     },
   }
 }
 
-interface Captured { url: string; body: unknown }
+interface Captured { url: string; body: unknown; headers: Record<string, string> }
 
 /** Replaces ONLY the transport under a real provider; captures what it would send. */
 function stubTransport(provider: object, respond: () => unknown, captured: Captured[], fail?: string) {
-  ;(provider as { http: unknown }).http = async (url: string, init: { body?: string }) => {
-    captured.push({ url, body: init.body ? JSON.parse(safeJson(init.body)) : undefined })
+  ;(provider as { http: unknown }).http = async (url: string, init: { body?: string; headers?: Record<string, string> }) => {
+    captured.push({ url, body: init.body ? JSON.parse(safeJson(init.body)) : undefined, headers: init.headers ?? {} })
     if (fail) return { status: 500, headers: { get: () => null }, text: async () => fail }
     return { status: 200, headers: { get: () => null }, text: async () => JSON.stringify(respond()) }
   }
 }
+
+/** The /pickupcashless SUCCESS body exactly as JNE confirmed it. */
+const jneSuccess = (cnote: string) => ({ detail: [{ status: 'success', cnote_no: cnote }] })
 
 /** JNE posts form-encoded; Paxel posts JSON. Normalise both to an object. */
 function safeJson(body: string): string {
@@ -205,7 +221,7 @@ describe('61AG.3.33 runtime verification — real couriers, stubbed transport', 
   }
 
   /** The real stack, with only the two transports replaced. */
-  function stack(opts: { awb?: string; autoPickup?: boolean; failCourier?: boolean } = {}) {
+  function stack(opts: { awb?: string; autoPickup?: boolean; failCourier?: boolean; jneBody?: unknown } = {}) {
     const config = shippingConfig(opts.autoPickup ?? true)
     const awb = opts.awb ?? 'AWB-DEFAULT'
     const paxelCalls: Captured[] = []
@@ -215,8 +231,11 @@ describe('61AG.3.33 runtime verification — real couriers, stubbed transport', 
     stubTransport(paxel, () => ({ data: { airwaybill_code: awb } }), paxelCalls,
       opts.failCourier ? JSON.stringify({ message: 'paxel upstream unavailable' }) : undefined)
 
-    const jne = new JneShipmentProvider(config)
-    stubTransport(jne, () => ({ detail: [{ cnote_no: awb, status: 'SUCCESS' }] }), jneCalls,
+    // The REAL integration recorder over the real database: every /pickupcashless
+    // exchange must land in IntegrationApiLog, sanitized.
+    const integrationLogs = new IntegrationLogService(world.prisma as never, loadIntegrationLogConfig({} as NodeJS.ProcessEnv))
+    const jne = new JneShipmentProvider(config, integrationLogs, new JneDestinationResolver(world.prisma as never))
+    stubTransport(jne, () => opts.jneBody ?? jneSuccess(awb), jneCalls,
       opts.failCourier ? JSON.stringify({ error: 'jne upstream unavailable' }) : undefined)
 
     const factory = new ShipmentProviderFactory([paxel, jne])
@@ -269,11 +288,13 @@ describe('61AG.3.33 runtime verification — real couriers, stubbed transport', 
   describe.each([
     ['PART 4', PaymentMethod.BANK_TRANSFER, 'paxel', 'PAXEL_NEXTDAY', 'PXL-RT-0001', 'PAXEL'],
     ['PART 5', PaymentMethod.QRIS, 'paxel', 'PAXEL_NEXTDAY', 'PXL-RT-0002', 'PAXEL'],
-    ['PART 6', PaymentMethod.BANK_TRANSFER, 'jne', 'REG', 'JNE-RT-0001', 'JNE'],
-    ['PART 7', PaymentMethod.QRIS, 'jne', 'REG', 'JNE-RT-0002', 'JNE'],
+    // JNE /pickupcashless: the first cnote is the one JNE confirmed in its sample.
+    ['PART 6', PaymentMethod.BANK_TRANSFER, 'jne', 'REG', '0109401600067399', 'JNE'],
+    ['PART 7', PaymentMethod.QRIS, 'jne', 'REG', '0109401600067400', 'JNE'],
   ])('%s: %s -> %s', (_part, method, providerName, service, awb, courier) => {
     it('books automatically through the real provider and announces it once', async () => {
       const { order, payment } = await seed(method, providerName, service)
+      const destinationCode = providerName === 'jne' ? await mapDestination(order.id) : null
 
       // Precondition (Part 4 §3).
       const before = await shipmentOf(order.id)
@@ -301,25 +322,59 @@ describe('61AG.3.33 runtime verification — real couriers, stubbed transport', 
       const body = calls[0].body as Record<string, unknown>
       const shipment = await shipmentOf(order.id)
 
+      const verifiedAt = (await paymentOf(order.id)).verifiedAt!
       if (providerName === 'paxel') {
         // Part 4/5: pickup_datetime exists and follows the business rule.
-        const verifiedAt = (await paymentOf(order.id)).verifiedAt!
         expect(body.pickup_datetime).toBe(`${expectedPickupDate(verifiedAt)} 17:00:00`)
         expect(body.invoice_number).toBe(order.orderNumber)
         expect(body.service_type).toBe('NEXTDAY')
         // The instant sent is exactly the one persisted on the shipment.
         expect(readPickupDatetime(shipment.metadata)).toBeTruthy()
       } else {
-        // Part 6/7: the JNE booking really happened — no manual AWB anywhere.
-        expect(body.order_no).toBe(order.orderNumber)
-        expect(body.service_code).toBe(service)
-        expect(body.origin_code).toBe('CGK10000')
-        expect(body.pickup_datetime).toBeUndefined()
-        // P1 #13: the same rule, RECORDED for JNE (never on its wire, above).
-        const verifiedAt = (await paymentOf(order.id)).verifiedAt!
+        // Part 6/7: exactly one /pickupcashless request, form-encoded, fully mapped.
+        expect(calls[0].url).toBe('https://jne.invalid/pickupcashless')
+        expect(calls[0].headers['Content-Type']).toBe('application/x-www-form-urlencoded')
         const recorded = readPickupDatetime(shipment.metadata, 'jne') as string
+        const [yyyy, mm, dd] = jakartaDate(new Date(recorded)).split('-')
         expect(jakartaDate(new Date(recorded))).toBe(expectedPickupDate(verifiedAt))
-        expect(jakartaMinutes(new Date(recorded))).toBe(17 * 60)
+        expect(body).toMatchObject({
+          username: 'fake-user',
+          // Business rule: hyphens removed, last character removed. The order row keeps its number.
+          ORDER_ID: order.orderNumber.replaceAll('-', '').slice(0, -1),
+          SPECIAL_INS: 'NO SPECIAL INSTRUCTION',
+          ORIGIN_CODE: 'CGK10000',
+          DESTINATION_CODE: destinationCode, // the verified mapping, never the postal code
+          SERVICE_CODE: service,
+          WEIGHT: '1', // 1 x 800 g -> 1 kg
+          QTY: '1',
+          GOODS_DESC: 'Bakso Urat x1',
+          GOODS_AMOUNT: '30000', // Order.subtotal, not totalPrice (40000)
+          INSURANCE_FLAG: 'N',
+          TYPE: 'PICKUP',
+          PICKUP_DATE: `${dd}-${mm}-${yyyy}`,
+          PICKUP_TIME: '17:00', // Asia/Jakarta
+          RECEIVER_NAME: 'Budi Santoso',
+          RECEIVER_ZIP: '40286',
+          RECEIVER_CITY: 'Kota Bandung',
+          RECEIVER_REGION: 'Jawa Barat',
+          RECEIVER_ADDR2: 'Kel. Jatisari, Kec. Buahbatu',
+        })
+        expect(body.DESTINATION_CODE).not.toBe('40286')
+        expect(body).not.toHaveProperty('pickup_datetime')
+
+        // IntegrationApiLog: the attempt and the application outcome, sanitized.
+        const logs = await integrationRows(order.id, 2)
+        const attemptRow = logs.find((row) => row.attempt === 1)!
+        const outcomeRow = logs.find((row) => row.attempt === null)!
+        expect(attemptRow).toMatchObject({ provider: 'JNE', operation: 'PICKUP_CASHLESS', direction: 'OUTBOUND', httpStatus: 200, applicationOutcome: 'OK' })
+        expect(attemptRow.endpoint).toBe('https://jne.invalid/pickupcashless')
+        expect(outcomeRow).toMatchObject({ operation: 'PICKUP_CASHLESS', applicationOutcome: 'OK', correlationId: awb, operationId: attemptRow.operationId })
+        expect(attemptRow.sanitizedResponse).toEqual(jneSuccess(awb))
+        expect(attemptRow.sanitizedRequest).toMatchObject({ username: '[REDACTED]', api_key: '[REDACTED]', RECEIVER_NAME: '[REDACTED_PII]', RECEIVER_PHONE: '[REDACTED_PII]', SHIPPER_PHONE: '[REDACTED_PII]', ORDER_ID: order.orderNumber.replaceAll('-', '').slice(0, -1), SPECIAL_INS: 'NO SPECIAL INSTRUCTION' })
+        const persisted = JSON.stringify(logs)
+        for (const secret of ['fake-key-not-a-real-credential', 'fake-user', CUSTOMER_PHONE, 'Jl. Tujuan No. 9', '081200000002']) {
+          expect([secret, persisted.includes(secret)]).toEqual([secret, false])
+        }
       }
 
       // --- AWB persisted ---
@@ -416,6 +471,7 @@ describe('61AG.3.33 runtime verification — real couriers, stubbed transport', 
   ])('PART 11: %s failure then retry', (providerName, service) => {
     it('fails safely, then a retry books exactly once', async () => {
       const { order, payment } = await seed(PaymentMethod.BANK_TRANSFER, providerName, service)
+      if (providerName === 'jne') await mapDestination(order.id)
       const failing = stack({ failCourier: true })
 
       const result = await failing.settlement.settle(payment.id, { kind: 'ADMIN', adminId: 'a', note: null })
@@ -448,6 +504,7 @@ describe('61AG.3.33 runtime verification — real couriers, stubbed transport', 
   ])('PART 12: %s idempotency', (providerName, service) => {
     it('a replayed settlement books once and announces once', async () => {
       const { order, payment } = await seed(PaymentMethod.QRIS, providerName, service)
+      if (providerName === 'jne') await mapDestination(order.id)
       const s = stack({ awb: `${providerName}-REPLAY` })
 
       const first = await s.settlement.settle(payment.id, { kind: 'ADMIN', adminId: 'a', note: null })
@@ -461,6 +518,7 @@ describe('61AG.3.33 runtime verification — real couriers, stubbed transport', 
 
     it('concurrent booking attempts produce exactly one courier request', async () => {
       const { order, payment } = await seed(PaymentMethod.BANK_TRANSFER, providerName, service)
+      if (providerName === 'jne') await mapDestination(order.id)
       const s = stack({ awb: `${providerName}-RACE` })
       await s.settlement.settle(payment.id, { kind: 'ADMIN', adminId: 'a', note: null })
 
@@ -476,6 +534,87 @@ describe('61AG.3.33 runtime verification — real couriers, stubbed transport', 
       expect(await shippedRows(order.id)).toHaveLength(1)
       expect((await shipmentOf(order.id)).trackingNumber).toBe(`${providerName}-RACE`)
     })
+  })
+
+  // ===================== JNE /pickupcashless helpers + the HTTP-200 rejection ==
+
+  /** Approve a JNE destination for the order's district (the verified mapping the quote uses). */
+  async function mapDestination(orderId: string): Promise<string> {
+    const { prisma } = world
+    const address = (await prisma.order.findUniqueOrThrow({ where: { id: orderId }, include: { address: true } })).address
+    const code = `BDO${randomUUID().slice(0, 5)}`
+    const location = await prisma.jneLocation.create({
+      data: {
+        code, rawName: 'BUAHBATU', normalizedName: 'BUAHBATU', parsedChild: 'BUAHBATU', parsedParent: 'BANDUNG',
+        partCount: 2, kind: 'DESTINATION', source: 'SANDBOX', sourceFetchedAt: new Date(),
+      },
+    })
+    await prisma.jneDistrictMapping.create({
+      data: { districtId: address.districtId!, jneLocationId: location.id, status: 'MATCHED', method: 'EXACT_NAME', isActive: true },
+    })
+    return code
+  }
+
+  /** IntegrationApiLog rows for an order; the recorder is fire-and-forget, so wait for them. */
+  async function integrationRows(orderId: string, expected: number) {
+    for (let i = 0; i < 100; i += 1) {
+      const rows = await world.prisma.integrationApiLog.findMany({ where: { orderId }, orderBy: { createdAt: 'asc' } })
+      if (rows.length >= expected) return rows
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+    return world.prisma.integrationApiLog.findMany({ where: { orderId }, orderBy: { createdAt: 'asc' } })
+  }
+
+  it('JNE HTTP 200 + status Error: the booking FAILS with JNE\'s reason; never SHIPPED, never announced', async () => {
+    const { order, payment } = await seed(PaymentMethod.BANK_TRANSFER, 'jne', 'REG')
+    await mapDestination(order.id)
+    const { settlement, jneCalls } = stack({
+      jneBody: { detail: [{ reason: 'Please do not let field OLSHOP_GOODSVALUE empty', status: 'Error' }] },
+    })
+
+    const result = await settlement.settle(payment.id, { kind: 'ADMIN', adminId: 'a', note: null })
+
+    expect(result.result).toBe('SETTLED')
+    expect((await paymentOf(order.id)).status).toBe(PaymentStatus.PAID)
+    expect(jneCalls).toHaveLength(1)
+
+    const shipment = await shipmentOf(order.id)
+    expect(shipment.status).toBe(ShipmentStatus.FAILED)
+    expect(shipment.trackingNumber).toBeNull()
+    expect(shipment.providerShipmentId).toBeNull()
+    expect((shipment.metadata as Record<string, unknown>).error).toBe('JNE rejected the pickup: Please do not let field OLSHOP_GOODSVALUE empty')
+
+    expect((await orderOf(order.id)).status).toBe(OrderStatus.PROCESSING)
+    expect((await orderOf(order.id)).trackingNumber).toBeNull()
+    expect((await eventsOf(order.id)).map((e) => e.status)).toEqual([OrderStatus.PROCESSING])
+    expect(await shippedRows(order.id)).toHaveLength(0)
+
+    const logs = await integrationRows(order.id, 2)
+    expect(logs.find((row) => row.attempt === 1)).toMatchObject({ operation: 'PICKUP_CASHLESS', httpStatus: 200 })
+    expect(logs.find((row) => row.attempt === null)).toMatchObject({
+      operation: 'PICKUP_CASHLESS',
+      httpStatus: 200,
+      applicationOutcome: 'REJECTED',
+      errorClass: 'rejected',
+      errorMessage: 'Please do not let field OLSHOP_GOODSVALUE empty',
+    })
+  })
+
+  it('JNE with an UNMAPPED district refuses on the destination, never falling back to the postal code', async () => {
+    const { order, payment } = await seed(PaymentMethod.BANK_TRANSFER, 'jne', 'REG') // no mapDestination()
+    const { settlement, jneCalls } = stack()
+
+    await settlement.settle(payment.id, { kind: 'ADMIN', adminId: 'a', note: null })
+
+    expect(jneCalls).toHaveLength(0)
+    const shipment = await shipmentOf(order.id)
+    expect(shipment.status).toBe(ShipmentStatus.FAILED)
+    expect(String((shipment.metadata as Record<string, unknown>).error)).toMatch(/no approved JNE destination mapping .*postal code is never used as a fallback/)
+    expect((await orderOf(order.id)).status).toBe(OrderStatus.PROCESSING)
+    expect(await shippedRows(order.id)).toHaveLength(0)
+    // Nothing was sent, so nothing is logged as an outbound request.
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    expect(await world.prisma.integrationApiLog.count({ where: { orderId: order.id } })).toBe(0)
   })
 
   // ========================================== the feature flag, at this level =

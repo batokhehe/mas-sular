@@ -21,8 +21,8 @@ export type JneEnvironment = 'sandbox' | 'production';
  *
  * One rule for EVERY courier, not one per provider: the shop has one packing
  * run and one pickup appointment a day. Paxel's create endpoint requires
- * `pickup_datetime` and is sent the resolved slot; JNE's `generatecnote` has no
- * pickup field, so the same slot is only recorded on the shipment for operations.
+ * `pickup_datetime` and is sent the resolved slot. The same slot is recorded on the
+ * JNE shipment and is what JNE /pickupcashless sends as PICKUP_DATE / PICKUP_TIME.
  *
  * The cutoff and the pickup are DIFFERENT times and must never be conflated:
  *   cutoffTime - the latest payment VERIFICATION still eligible for today's run
@@ -114,6 +114,109 @@ export interface PaxelProviderConfig {
   autoPickup?: PaxelAutoPickupConfig;
 }
 
+/**
+ * JNE `/pickupcashless` enumerations, exactly as the JNE documentation supplied by
+ * the project owner defines them. Case-sensitive: the documented spelling is sent.
+ */
+export const JNE_PICKUP_SERVICES = ['Domestic', 'Intracity', 'All'] as const;
+export const JNE_PICKUP_VEHICLES = ['Motor', 'Mobil', 'Truck'] as const;
+export const JNE_PICKUP_TYPES = ['DROP', 'PICKUP'] as const;
+
+/**
+ * Static merchant / pickup master data for JNE `/pickupcashless`. It is JNE account
+ * and warehouse configuration, not per-order data, so it lives in the environment
+ * rather than the database. Every value is REQUIRED when JNE is enabled; none has a
+ * default, because each one is either issued by JNE (BRANCH, CUST_ID, MERCHANT_ID)
+ * or is a real-world fact about the shop that must never be invented.
+ */
+export interface JnePickupConfig {
+  pickupName?: string;
+  pickupPic?: string;
+  pickupPicPhone?: string;
+  pickupAddress?: string;
+  pickupDistrict?: string;
+  pickupCity?: string;
+  pickupService?: string;
+  pickupVehicle?: string;
+  branch?: string;
+  custId?: string;
+  merchantId?: string;
+  shipperName?: string;
+  shipperAddr1?: string;
+  shipperAddr2?: string;
+  shipperCity?: string;
+  shipperZip?: string;
+  shipperRegion?: string;
+  shipperContact?: string;
+  shipperPhone?: string;
+  type?: string;
+}
+
+/** Config field → environment variable. The ONE list both validation layers use. */
+export const JNE_PICKUP_ENV: Readonly<Record<keyof JnePickupConfig, string>> = Object.freeze({
+  pickupName: 'JNE_PICKUP_NAME',
+  pickupPic: 'JNE_PICKUP_PIC',
+  pickupPicPhone: 'JNE_PICKUP_PIC_PHONE',
+  pickupAddress: 'JNE_PICKUP_ADDRESS',
+  pickupDistrict: 'JNE_PICKUP_DISTRICT',
+  pickupCity: 'JNE_PICKUP_CITY',
+  pickupService: 'JNE_PICKUP_SERVICE',
+  pickupVehicle: 'JNE_PICKUP_VEHICLE',
+  branch: 'JNE_BRANCH',
+  custId: 'JNE_CUST_ID',
+  merchantId: 'JNE_MERCHANT_ID',
+  shipperName: 'JNE_SHIPPER_NAME',
+  shipperAddr1: 'JNE_SHIPPER_ADDR1',
+  shipperAddr2: 'JNE_SHIPPER_ADDR2',
+  shipperCity: 'JNE_SHIPPER_CITY',
+  shipperZip: 'JNE_SHIPPER_ZIP',
+  shipperRegion: 'JNE_SHIPPER_REGION',
+  shipperContact: 'JNE_SHIPPER_CONTACT',
+  shipperPhone: 'JNE_SHIPPER_PHONE',
+  type: 'JNE_TYPE',
+});
+
+const JNE_PICKUP_ENUMS: Partial<Record<keyof JnePickupConfig, readonly string[]>> = {
+  pickupService: JNE_PICKUP_SERVICES,
+  pickupVehicle: JNE_PICKUP_VEHICLES,
+  type: JNE_PICKUP_TYPES,
+};
+
+/** Trimmed value, or undefined for absent / blank - an empty placeholder means "unset". */
+function presentOrUndefined(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+export function loadJnePickupConfig(env: NodeJS.ProcessEnv = process.env): JnePickupConfig {
+  const out: JnePickupConfig = {};
+  for (const [field, key] of Object.entries(JNE_PICKUP_ENV) as Array<[keyof JnePickupConfig, string]>) {
+    out[field] = presentOrUndefined(env[key]);
+  }
+  return out;
+}
+
+/**
+ * Every missing or invalid `/pickupcashless` configuration value, as the operator
+ * would fix it (env var names). Empty means complete. Used at boot (env.validation)
+ * and again before every booking, so a hand-built config cannot skip the check.
+ */
+export function jnePickupConfigIssues(pickup: JnePickupConfig | undefined): string[] {
+  const issues: string[] = [];
+  for (const [field, key] of Object.entries(JNE_PICKUP_ENV) as Array<[keyof JnePickupConfig, string]>) {
+    const value = pickup?.[field];
+    if (!value) {
+      issues.push(`${key} is required`);
+      continue;
+    }
+    const allowed = JNE_PICKUP_ENUMS[field];
+    if (allowed && !allowed.includes(value)) {
+      issues.push(`${key} must be one of ${allowed.join(' | ')}`);
+    }
+  }
+  return issues;
+}
+
 export interface JneProviderConfig {
   enabled: boolean;
   /**
@@ -132,6 +235,12 @@ export interface JneProviderConfig {
   originCode?: string;
   timeoutMs: number;
   maxRetry: number;
+  /**
+   * `/pickupcashless` merchant and pickup master data. Optional on the TYPE so every
+   * hand-built config keeps compiling; absent or incomplete means booking refuses
+   * before any request is built (see jnePickupConfigIssues).
+   */
+  pickup?: JnePickupConfig;
 }
 
 /**
@@ -285,6 +394,7 @@ export function loadShippingConfig(env: NodeJS.ProcessEnv = process.env): Shippi
       originCode: env.JNE_ORIGIN_CODE,
       timeoutMs: positiveInt(env.JNE_TIMEOUT_MS, 8_000),
       maxRetry: positiveInt(env.JNE_MAX_RETRY, 2),
+      pickup: loadJnePickupConfig(env),
     },
     rajaongkir: {
       // Enabled only with an explicit key: without one the provider must not

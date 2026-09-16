@@ -8,11 +8,12 @@ import { DEFAULT_PICKUP_POLICY, ShippingConfig } from '../../src/modules/shippin
  * P1 #13 — the shop-wide pickup rule (cut-off 15:00 WIB, pickup 17:00 WIB) applied
  * to JNE.
  *
- * JNE's `generatecnote` has no pickup field, so JNE is NOT sent a slot and its
- * booking is NOT gated on one. The same slot Paxel would get is RECORDED on the
- * shipment (`metadata.jne.pickupDatetime`) for operations. These tests pin all
- * three halves: the slot is correct, the payload is unchanged, and the booking
- * proceeds exactly as before whatever happens to the recording.
+ * The same slot Paxel would get is RECORDED on the shipment
+ * (`metadata.jne.pickupDatetime`). JNE booking now goes through /pickupcashless,
+ * which sends that recorded slot as PICKUP_DATE / PICKUP_TIME, so the service hands
+ * it to the provider as `recordedPickupAtIso` (Paxel's `pickupAtIso` stays untouched).
+ * Recording still never throws from the SERVICE; when no slot could be recorded the
+ * provider refuses the booking (jne-pickup-cashless.spec.ts), never inventing a time.
  *
  * The scheduler is the REAL one, with Paxel's automatic booking switched OFF: the
  * switch decides whether Paxel books on its own, not what the shop's pickup is.
@@ -25,6 +26,7 @@ function jneOrder(verifiedAt: Date | null, shipmentMetadata: unknown = null) {
   return {
     id: 'o1',
     orderNumber: 'BMS-JNE-1',
+    subtotal: 135000,
     totalPrice: 150000,
     paymentMethod: 'BANK_TRANSFER',
     shippingProvider: 'jne',
@@ -45,6 +47,7 @@ function jneOrder(verifiedAt: Date | null, shipmentMetadata: unknown = null) {
       addressDetail: 'Jl. Test 1',
       fullAddress: 'Jl. Test 1',
       postalCode: '40131',
+      districtId: 'district-sukajadi',
       notes: null,
       latitude: -6.8,
       longitude: 107.5,
@@ -150,13 +153,26 @@ describe('JNE carries the shop-wide pickup slot (P1 #13)', () => {
     expect(readPickupDatetime(recordedMetadata(prisma) as never, 'jne')).toBe(expected);
   });
 
-  it('never sends the slot to JNE - the courier payload is unchanged', async () => {
+  it('hands JNE the RECORDED slot (for PICKUP_DATE/TIME), never Paxel\'s pickupAtIso', async () => {
     const { service, provider } = build(jneOrder(new Date('2026-09-05T14:59:00+07:00')));
 
     await service.createForOrder('o1');
 
     expect(provider.createShipment).toHaveBeenCalledTimes(1);
-    expect(provider.createShipment.mock.calls[0][0].pickupAtIso).toBeUndefined();
+    const input = provider.createShipment.mock.calls[0][0];
+    expect(input.pickupAtIso).toBeUndefined(); // Paxel's field, unchanged
+    expect(input.recordedPickupAtIso).toBe(SAME_DAY_17_WIB); // exactly what was persisted
+  });
+
+  it('passes the merchandise value and the address district for /pickupcashless', async () => {
+    const { service, provider } = build(jneOrder(new Date('2026-09-05T14:59:00+07:00')));
+
+    await service.createForOrder('o1');
+
+    const input = provider.createShipment.mock.calls[0][0];
+    expect(input.goodsAmount).toBe(135000); // Order.subtotal - NOT totalPrice (150000)
+    expect(input.invoiceValue).toBe(150000); // the existing field keeps its meaning
+    expect(input.destinationDistrictId).toBe('district-sukajadi');
   });
 
   it("writes JNE's own namespace, never Paxel's", async () => {
@@ -186,6 +202,7 @@ describe('JNE carries the shop-wide pickup slot (P1 #13)', () => {
 
     expect(recordedMetadata(prisma)).toBeUndefined();
     expect(provider.createShipment).toHaveBeenCalledTimes(1);
+    expect(provider.createShipment.mock.calls[0][0].recordedPickupAtIso).toBe('2026-09-04T10:00:00.000Z');
   });
 });
 
@@ -207,5 +224,7 @@ describe('the JNE slot never gates or fails the JNE booking', () => {
 
     expect(outcome).toMatchObject({ ok: true, trackingNumber: 'JNE-CNOTE-1' });
     expect(provider.createShipment).toHaveBeenCalledTimes(1);
+    // A slot that was never persisted is never passed on: the real provider refuses.
+    expect(provider.createShipment.mock.calls[0][0].recordedPickupAtIso).toBeUndefined();
   });
 });

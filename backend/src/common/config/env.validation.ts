@@ -1,5 +1,12 @@
 import { z } from 'zod';
-import { isJneSandboxUrl, isValidTimeZone } from '../../modules/shipping/shipping.config';
+import {
+  isJneSandboxUrl,
+  isValidTimeZone,
+  JNE_PICKUP_ENV,
+  JNE_PICKUP_SERVICES,
+  JNE_PICKUP_TYPES,
+  JNE_PICKUP_VEHICLES,
+} from '../../modules/shipping/shipping.config';
 import { TRUST_PROXY_MAX_HOPS } from '../http/trust-proxy';
 import { ADMIN_ACCESS_TTL_MAX_MS, adminAccessTtlToMs } from '../../modules/admin-auth/admin-session.config';
 
@@ -12,6 +19,15 @@ const HOUR_MS = 60 * 60 * 1000;
 const UNFILLED_PLACEHOLDER = /CHANGE_ME|<[A-Z][A-Z0-9_]*>/;
 
 const boolFlag = z.enum(['true', 'false']).default('false');
+
+/**
+ * An empty / whitespace-only value means UNSET. Used for the JNE `/pickupcashless`
+ * keys, whose template placeholders are deliberately empty (`JNE_PICKUP_NAME=`):
+ * without this an empty enum placeholder would fail boot even with JNE disabled.
+ * Required-ness is enforced separately, only when JNE_ENABLED=true.
+ */
+const blankAsUnset = (value: unknown) => (typeof value === 'string' && value.trim() === '' ? undefined : value);
+const optionalText = z.preprocess(blankAsUnset, z.string().optional());
 
 const secret = z
   .string()
@@ -178,6 +194,28 @@ const baseSchema = z
     JNE_ORIGIN_CODE: z.string().optional(),
     JNE_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
     JNE_MAX_RETRY: z.coerce.number().int().nonnegative().optional(),
+    // JNE /pickupcashless merchant & pickup master data (required when JNE_ENABLED=true,
+    // cross-field below). Enums are the documented values, case-sensitive.
+    JNE_PICKUP_NAME: optionalText,
+    JNE_PICKUP_PIC: optionalText,
+    JNE_PICKUP_PIC_PHONE: optionalText,
+    JNE_PICKUP_ADDRESS: optionalText,
+    JNE_PICKUP_DISTRICT: optionalText,
+    JNE_PICKUP_CITY: optionalText,
+    JNE_PICKUP_SERVICE: z.preprocess(blankAsUnset, z.enum(JNE_PICKUP_SERVICES).optional()),
+    JNE_PICKUP_VEHICLE: z.preprocess(blankAsUnset, z.enum(JNE_PICKUP_VEHICLES).optional()),
+    JNE_BRANCH: optionalText,
+    JNE_CUST_ID: optionalText,
+    JNE_MERCHANT_ID: optionalText,
+    JNE_SHIPPER_NAME: optionalText,
+    JNE_SHIPPER_ADDR1: optionalText,
+    JNE_SHIPPER_ADDR2: optionalText,
+    JNE_SHIPPER_CITY: optionalText,
+    JNE_SHIPPER_ZIP: optionalText,
+    JNE_SHIPPER_REGION: optionalText,
+    JNE_SHIPPER_CONTACT: optionalText,
+    JNE_SHIPPER_PHONE: optionalText,
+    JNE_TYPE: z.preprocess(blankAsUnset, z.enum(JNE_PICKUP_TYPES).optional()),
     // Inbound JNE Webhook Status V2. OFF by default: JNE's V2 documentation defines no
     // webhook authentication, so the endpoint is only reachable once deliberately enabled.
     JNE_WEBHOOK_ENABLED: boolFlag,
@@ -313,6 +351,13 @@ export const envSchema = baseSchema.superRefine((env, ctx) => {
   if (env.JNE_ENABLED === 'true') {
     for (const key of ['JNE_API_KEY', 'JNE_USERNAME', 'JNE_ORIGIN_CODE'] as const) {
       if (!env[key]) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: `${key} is required when JNE_ENABLED=true` });
+      }
+    }
+    // JNE /pickupcashless master data: no defaults exist for any of it, so an enabled
+    // courier without it must not boot (the booking would otherwise fail per order).
+    for (const key of Object.values(JNE_PICKUP_ENV)) {
+      if (!(env as Record<string, unknown>)[key]) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: `${key} is required when JNE_ENABLED=true` });
       }
     }

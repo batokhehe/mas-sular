@@ -17,6 +17,8 @@ function cfg(over: Partial<LifecycleConfig> = {}): LifecycleConfig {
     notificationSentDays: 30,
     notificationFailedDays: 90,
     uploadTokenExpiredDays: 14,
+    integrationLogVolatileDays: 14,
+    integrationLogDurableDays: 90,
     ...over,
   };
 }
@@ -107,11 +109,13 @@ describe('RetentionWorker', () => {
       expect(result.deletedCount).toBe(30);
     });
 
-    it('runOnce sweeps all seven policies', async () => {
+    it('runOnce sweeps every policy', async () => {
       const { worker, prisma } = build();
       await worker.runOnce();
-      // 7 policies, each one DELETE (returns 0 → single batch)
-      expect(prisma.$executeRawUnsafe).toHaveBeenCalledTimes(7);
+      // One DELETE per policy (each returns 0 → a single batch). 7 original policies
+      // plus the two IntegrationApiLog windows added with P1 integration logging.
+      expect(worker.policies()).toHaveLength(9);
+      expect(prisma.$executeRawUnsafe).toHaveBeenCalledTimes(9);
     });
 
     it('batches the PaymentUploadToken sweep with the 14-day cutoff bound', async () => {

@@ -1,4 +1,6 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { IntegrationProvider } from '@prisma/client';
+import { IntegrationLogService } from '../../../../infrastructure/integration-log/integration-log.service';
 import { ShippingProvider, ShippingQuote, ShippingRateRequest, TrackingResult } from '../../domain/shipping-provider.interface';
 import { JneDestinationResolver } from '../jne-destination.resolver';
 import { SHIPPING_CONFIG, ShippingConfig, assertJneEnvironment } from '../../shipping.config';
@@ -50,7 +52,19 @@ export class JneProvider implements ShippingProvider {
   constructor(
     @Inject(SHIPPING_CONFIG) private readonly config: ShippingConfig,
     private readonly destinations: JneDestinationResolver,
+    // P1 integration logging. Optional — absent, nothing is recorded.
+    @Optional() private readonly integrationLogs?: IntegrationLogService,
   ) {}
+
+  /** Business context for one external call; the transport owns the rest. */
+  private integration(operation: string, correlationId?: string | null) {
+    return {
+      provider: IntegrationProvider.JNE,
+      operation,
+      recorder: this.integrationLogs,
+      correlationId: correlationId ?? null,
+    };
+  }
 
   private get cfg() {
     return this.config.jne;
@@ -136,6 +150,7 @@ export class JneProvider implements ShippingProvider {
       maxRetry: 0,
       logger: this.logger,
       logBase: { provider: this.name, origin: from, destination: thru, service: 'RATE' },
+      integration: this.integration('RATE'),
     });
 
     return this.mapPricedevResponse(text, from, thru);
@@ -254,6 +269,7 @@ export class JneProvider implements ShippingProvider {
       maxRetry: this.cfg.maxRetry,
       logger: this.logger,
       logBase: { provider: this.name, origin: '-', destination: '-', service: 'TRACK' },
+      integration: this.integration('TRACK', trackingNumber),
     });
     const status = ((): string => {
       try {
