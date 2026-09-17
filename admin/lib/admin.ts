@@ -1799,7 +1799,9 @@ export async function exportAuditCsv(f: AuditFilters = {}): Promise<Blob> {
 
 // ---------------------------------------------------------------------------
 // Integration API logs (P1) — external calls to Paxel / JNE / Midtrans.
-// Rows are stored already sanitized by the API; nothing here needs redacting.
+// The list carries the sanitized columns only. The detail (SUPER_ADMIN) also carries
+// the exchange EXACTLY as captured — credentials and personal data included — and
+// the view shows it verbatim: never redact, reformat or trim it here.
 // ---------------------------------------------------------------------------
 
 export type IntegrationProvider = 'PAXEL' | 'JNE' | 'MIDTRANS';
@@ -1829,6 +1831,13 @@ export type IntegrationLog = {
   errorMessage: string | null;
   sanitizedRequest: unknown;
   sanitizedResponse: unknown;
+};
+
+/** GET /admin/integration-logs/:id — the row plus the exact exchange (null = not captured). */
+export type IntegrationLogDetail = IntegrationLog & {
+  rawEndpoint: string | null;
+  rawRequestBody: string | null;
+  rawResponseBody: string | null;
 };
 
 export type IntegrationLogFilters = {
@@ -1871,5 +1880,5 @@ export function fetchIntegrationLogs(filters: IntegrationLogFilters = {}) {
 }
 
 export function fetchIntegrationLog(id: string) {
-  return api<IntegrationLog>(`/admin/integration-logs/${id}`);
+  return api<IntegrationLogDetail>(`/admin/integration-logs/${id}`);
 }

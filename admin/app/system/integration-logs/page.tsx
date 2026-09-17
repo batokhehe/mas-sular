@@ -11,21 +11,22 @@ import {
   fetchIntegrationLog,
   fetchIntegrationLogs,
   IntegrationLog,
+  IntegrationLogDetail,
   IntegrationLogFilters,
   IntegrationOutcome,
   IntegrationProvider,
 } from '@/lib/admin';
 import {
   contextLabel,
+  exactBody,
+  exactEndpoint,
   formatAttempt,
   formatDuration,
-  hasPayload,
   httpStatusTone,
   INTEGRATION_OUTCOMES,
   INTEGRATION_PROVIDERS,
   operationOptions,
   outcomeTone,
-  prettyPayload,
 } from '@/lib/system/integration-log-view';
 
 const dt = (iso: string) => new Date(iso).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'medium' });
@@ -75,8 +76,8 @@ export default function IntegrationLogsPage() {
       <div className="mb-6">
         <h2 className="text-xl font-semibold text-gray-900">Integration Logs</h2>
         <p className="mt-1 text-sm text-gray-500">
-          Every external API exchange with Paxel, JNE and Midtrans — one record per HTTP attempt, plus the application outcome. Payloads
-          are stored sanitized: credentials and personal data are removed before they are written.
+          Every external API exchange with Paxel, JNE and Midtrans — one record per HTTP attempt, plus the application outcome. The
+          detail view shows the request and response exactly as exchanged, including credentials and personal data.
         </p>
       </div>
 
@@ -185,7 +186,7 @@ export default function IntegrationLogsPage() {
   );
 }
 
-function LogDrawer({ log, loading, onClose }: { log?: IntegrationLog; loading: boolean; onClose: () => void }) {
+function LogDrawer({ log, loading, onClose }: { log?: IntegrationLogDetail; loading: boolean; onClose: () => void }) {
   return (
     <>
       <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />
@@ -209,9 +210,9 @@ function LogDrawer({ log, loading, onClose }: { log?: IntegrationLog; loading: b
                 <p className="mb-2 text-xs font-semibold uppercase text-gray-400">Request</p>
                 <dl className="space-y-1.5">
                   <Field label="Method" value={log.method ?? '—'} />
-                  <Field label="Endpoint" value={<span className="break-all font-mono text-xs">{log.endpoint ?? '—'}</span>} />
+                  <Field label="URL" value={<span className="break-all font-mono text-xs">{exactEndpoint(log) ?? '—'}</span>} />
                 </dl>
-                <Payload title="Sanitized request payload" value={log.sanitizedRequest} />
+                <ExactPayload title="Request body" value={log.rawRequestBody} />
               </section>
 
               <section>
@@ -222,7 +223,7 @@ function LogDrawer({ log, loading, onClose }: { log?: IntegrationLog; loading: b
                   {log.errorMessage ? <Field label="Error" value={<span className="whitespace-pre-wrap break-words text-right">{log.errorMessage}</span>} /> : null}
                   {log.errorClass ? <Field label="Error class" value={log.errorClass} /> : null}
                 </dl>
-                <Payload title="Sanitized response payload" value={log.sanitizedResponse} />
+                <ExactPayload title="Response body" value={log.rawResponseBody} />
               </section>
 
               <section>
@@ -249,13 +250,19 @@ function LogDrawer({ log, loading, onClose }: { log?: IntegrationLog; loading: b
   );
 }
 
-/** Collapsed by default — payloads are opened deliberately, not scrolled past. */
-function Payload({ title, value }: { title: string; value: unknown }) {
-  if (!hasPayload(value)) return <p className="mt-2 text-xs text-gray-400">{title}: (empty)</p>;
+/**
+ * The body EXACTLY as exchanged with the provider — rendered verbatim (whitespace
+ * preserved, no pretty-printing, masking or truncation). Collapsed by default:
+ * opened deliberately, because it can hold credentials and personal data.
+ */
+function ExactPayload({ title, value }: { title: string; value: string | null }) {
+  const body = exactBody(value);
+  if (!body.captured) return <p className="mt-2 text-xs text-gray-400">{title}: not captured for this record</p>;
+  if (body.empty) return <p className="mt-2 text-xs text-gray-400">{title}: (empty body)</p>;
   return (
     <details className="mt-2 rounded-lg border border-gray-100">
-      <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-gray-600">{title}</summary>
-      <pre className="max-h-80 overflow-auto rounded-b-lg bg-gray-50 p-3 text-xs text-gray-700">{prettyPayload(value)}</pre>
+      <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-gray-600">{title} (exact)</summary>
+      <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all rounded-b-lg bg-gray-50 p-3 font-mono text-xs text-gray-700">{body.text}</pre>
     </details>
   );
 }

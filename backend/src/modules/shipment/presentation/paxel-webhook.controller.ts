@@ -1,9 +1,10 @@
-import { Body, Controller, Headers, HttpCode, Logger, Optional, Post, Res } from '@nestjs/common';
+import { Body, Controller, Headers, HttpCode, Logger, Optional, Post, Req, Res } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { IntegrationDirection, IntegrationOutcome, IntegrationProvider } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { safeRecord } from '../../../infrastructure/integration-log/safe-record';
 import { IntegrationLogService } from '../../../infrastructure/integration-log/integration-log.service';
+import { rawBodyText, sentJsonBody } from '../../../infrastructure/integration-log/raw-body';
 import { Throttle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import { PaxelWebhookBody, PaxelWebhookService } from '../paxel-webhook.service';
@@ -45,7 +46,13 @@ export class PaxelWebhookController {
     @Optional() private readonly integrationLogs?: IntegrationLogService,
   ) {}
 
-  private record(body: Record<string, unknown>, httpStatus: number, durationMs: number, reason?: string): void {
+  private record(
+    body: Record<string, unknown>,
+    httpStatus: number,
+    durationMs: number,
+    reason?: string,
+    exchange: { requestBody?: string | null; responseBody?: string | null } = {},
+  ): void {
     safeRecord(this.integrationLogs, {
       provider: IntegrationProvider.PAXEL,
       operation: 'WEBHOOK',
@@ -59,6 +66,10 @@ export class PaxelWebhookController {
       applicationOutcome: httpStatus < 400 ? IntegrationOutcome.OK : IntegrationOutcome.REJECTED,
       errorMessage: reason ?? null,
       requestPayload: body,
+      // Exact exchange for the SUPER_ADMIN detail view; the sanitized column still
+      // comes from requestPayload.
+      requestBody: exchange.requestBody ?? null,
+      responseBody: exchange.responseBody ?? null,
     }, (err) =>
       this.logger?.warn({ event: 'integration_log.record_failed', reason: err instanceof Error ? err.message : String(err) }),
     );
@@ -75,11 +86,15 @@ export class PaxelWebhookController {
     @Headers('content-type') contentType: string | undefined,
     @Headers('x-paxel-signature') signature: string | undefined,
     @Res({ passthrough: true }) res: Response,
+    @Req() req?: { rawBody?: unknown },
   ): Promise<PaxelWebhookBody> {
     const startedAt = Date.now();
     const result = await this.webhooks.handle(body, { contentType, signature });
     res.status(result.httpStatus);
-    this.record(body, result.httpStatus, Date.now() - startedAt, 'reason' in result.body ? result.body.reason : undefined);
+    this.record(body, result.httpStatus, Date.now() - startedAt, 'reason' in result.body ? result.body.reason : undefined, {
+      requestBody: rawBodyText(req),
+      responseBody: sentJsonBody(result.body),
+    });
     return result.body;
   }
 }

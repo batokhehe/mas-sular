@@ -25,10 +25,14 @@ export interface IntegrationLogEntry {
   applicationOutcome: IntegrationOutcome;
   errorClass?: string | null;
   errorMessage?: string | null;
-  /** RAW body text; the recorder sanitizes it (never store an already-logged string). */
+  /**
+   * RAW body text EXACTLY as sent (outbound) or received (inbound). Persisted twice:
+   * sanitized into `sanitizedRequest`, and verbatim into `rawRequestBody` for the
+   * SUPER_ADMIN detail view. Never pass an already-logged or reformatted string.
+   */
   requestBody?: string | null;
   requestContentType?: string | null;
-  /** RAW response text; sanitized by the recorder. */
+  /** RAW response text EXACTLY as received (outbound) or sent (inbound); same two columns. */
   responseBody?: string | null;
   responseContentType?: string | null;
   /** Already-parsed payloads (webhook DTOs); sanitized structurally. */

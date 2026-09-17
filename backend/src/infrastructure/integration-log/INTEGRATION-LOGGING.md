@@ -58,7 +58,38 @@ classification words (`network`, `timeout`, `rate_limited`, `provider_5xx`,
 `permanent_4xx`, `permanent`, `gateway_5xx`, `transient_exhausted`, `parse_failed`,
 `rejected`).
 
-## Redaction policy
+## Exact exchange (detail view)
+
+Every row also stores the exchange **exactly as captured**, for the SUPER_ADMIN detail
+view (**Admin → System → Integration Logs → detail**):
+
+| Column | Holds |
+|---|---|
+| `rawEndpoint` | the request URL exactly as called |
+| `rawRequestBody` | the request body exactly as sent (outbound) or received (inbound webhook, from `req.rawBody`) |
+| `rawResponseBody` | the response body exactly as received (outbound) or sent (inbound, the serialized JSON answer) |
+
+No redaction, masking, truncation, normalization or pretty-printing is applied — to
+the stored value or in the drawer. **These columns contain provider credentials (JNE
+`username`/`api_key` form fields, Midtrans `signature_key`, …) and customer personal
+data.** Rules:
+
+- Only `GET /admin/integration-logs/:id` returns them (`Cache-Control: no-store`).
+  The list and `/operations/:operationId` omit them (`RAW_EXCHANGE_OMIT`). Never add
+  them to any other API, export, customer, storefront or public surface.
+- `null` means not captured: rows written before this existed, a record built from an
+  already-parsed payload (the Midtrans body-rejection outcome), or a webhook rejection
+  whose body is written later by the exception filter. Nothing is ever reconstructed.
+- HTTP **headers are still not captured** (neither request nor response), so the
+  Midtrans `Authorization` header, the Paxel API-key header and `X-Paxel-Signature`
+  do not appear.
+- Rows are deleted by the same retention policies below; database backups contain
+  the raw values too.
+
+## Redaction policy (sanitized columns)
+
+The `sanitizedRequest` / `sanitizedResponse` / `endpoint` / `errorMessage` columns keep
+the policy below; the list view and every non-detail consumer read only these.
 
 `integration-log.sanitizer.ts` is the single sanitizer, reusing
 `common/logging/redact.ts` so the codebase has one redaction vocabulary.
@@ -118,14 +149,15 @@ repository envelope `{ items, page, limit, total, totalPages }`.
 
 UI: **Admin → System → Integration Logs**, a filter row, a table
 (Time / Provider / Operation / Direction / HTTP / Duration / Order / Outcome) and a
-detail drawer with request, response and context. Payloads are collapsed by default.
+detail drawer with request, response and context. The drawer shows the exact URL,
+request body and response body verbatim (collapsed by default).
 
 ## Troubleshooting a provider failure
 
 1. Open **System → Integration Logs** and filter by the order number (`search`).
 2. Read the rows newest-first: each outbound attempt, then the application outcome.
-3. A `PARSE_FAILED` row carries the provider's actual (sanitized) answer — for the
-   JNE case, whatever came back instead of a cnote.
+3. A `PARSE_FAILED` row carries the provider's actual answer, exactly as received —
+   for the JNE case, whatever came back instead of a cnote.
 4. `NETWORK_ERROR` / `TIMEOUT` rows mean the call never got an answer; the
    `attempt` / `maxAttempts` columns show how often it was retried.
 5. `REJECTED` means the provider answered but refused the operation (a Midtrans

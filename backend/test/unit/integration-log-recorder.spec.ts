@@ -164,4 +164,74 @@ describe('IntegrationLogService', () => {
     expect(JSON.stringify(data.sanitizedRequest)).not.toContain('buyer@example.com');
     expect(data.attempt).toBeNull();
   });
+
+  it('stores the exchange EXACTLY as captured beside the sanitized copy: URL, request body, response body', async () => {
+    const { service, create } = build();
+    const endpoint = 'https://api.example.test/v2/charge?server_key=SECRET&token=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig';
+    const responseBody = '{\n  "error" : "Please do not let paramaters empty.",\n  "status" : false\n}\n';
+    service.record({ ...ENTRY, endpoint, responseBody });
+    await flush();
+    const { data } = create.mock.calls[0][0];
+
+    // Verbatim: credentials, PII, JWT, spacing and trailing newline all kept.
+    expect(data.rawEndpoint).toBe(endpoint);
+    expect(data.rawRequestBody).toBe(ENTRY.requestBody);
+    expect(data.rawResponseBody).toBe(responseBody);
+    // The sanitized columns are unchanged by it.
+    expect(data.sanitizedRequest).toMatchObject({ username: REDACTED, api_key: REDACTED, receiver_name: REDACTED_PII });
+    expect(data.endpoint).toContain('token=[REDACTED]');
+    expect(data.rawEndpoint).toContain('token=eyJhbGciOiJIUzI1NiJ9');
+  });
+
+  it('never truncates the exact bodies, even far past the sanitized payload cap', async () => {
+    const { service, create } = build();
+    const requestBody = `api_key=SECRET&blob=${'a'.repeat(300_000)}`;
+    const responseBody = JSON.stringify({ data: 'b'.repeat(300_000), phone: '6285861470308' });
+    service.record({ ...ENTRY, requestBody, responseBody });
+    await flush();
+    const { data } = create.mock.calls[0][0];
+    expect(data.rawRequestBody).toBe(requestBody);
+    expect(data.rawResponseBody).toBe(responseBody);
+    expect(JSON.stringify(data.sanitizedResponse).length).toBeLessThan(responseBody.length);
+  });
+
+  it('an empty body stays "", a missing one stays null - nothing is reconstructed from a parsed payload', async () => {
+    const { service, create } = build();
+    service.record({ ...ENTRY, requestBody: '', responseBody: undefined, endpoint: undefined });
+    service.record({
+      provider: IntegrationProvider.MIDTRANS,
+      operation: 'charge',
+      direction: IntegrationDirection.OUTBOUND,
+      operationId: 'op-3',
+      applicationOutcome: IntegrationOutcome.REJECTED,
+      responsePayload: { status_code: '406', status_message: 'duplicate order_id' },
+    });
+    await flush();
+    const [first, second] = create.mock.calls.map((c) => c[0].data);
+    expect(first).toMatchObject({ rawRequestBody: '', rawResponseBody: null, rawEndpoint: null });
+    expect(second).toMatchObject({ rawRequestBody: null, rawResponseBody: null });
+    expect(second.sanitizedResponse).toMatchObject({ status_code: '406' });
+  });
+
+  it('an INBOUND webhook keeps its raw body verbatim while the sanitized column comes from the parsed payload', async () => {
+    const { service, create } = build();
+    const raw = '{"order_id":"BMS-1","signature_key":"' + 'a'.repeat(128) + '","customer_details":{"email":"buyer@example.com"}}';
+    service.record({
+      provider: IntegrationProvider.MIDTRANS,
+      operation: 'WEBHOOK',
+      direction: IntegrationDirection.INBOUND,
+      operationId: 'op-4',
+      httpStatus: 200,
+      applicationOutcome: IntegrationOutcome.OK,
+      requestPayload: JSON.parse(raw),
+      requestBody: raw,
+      responseBody: '{"received":true,"handled":false}',
+    });
+    await flush();
+    const { data } = create.mock.calls[0][0];
+    expect(data.rawRequestBody).toBe(raw);
+    expect(data.rawResponseBody).toBe('{"received":true,"handled":false}');
+    expect(data.sanitizedRequest).toMatchObject({ signature_key: REDACTED });
+    expect(JSON.stringify(data.sanitizedRequest)).not.toContain('buyer@example.com');
+  });
 });

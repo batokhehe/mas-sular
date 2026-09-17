@@ -4,7 +4,7 @@ import { Reflector } from '@nestjs/core';
 import { IntegrationDirection, IntegrationOutcome, IntegrationProvider } from '@prisma/client';
 import { AdminIntegrationLogController } from '../../src/modules/admin/presentation/admin-integration-log.controller';
 import { ListIntegrationLogsQueryDto } from '../../src/modules/admin/application/dto/integration-log-query.dto';
-import { IntegrationLogQueryService } from '../../src/infrastructure/integration-log/integration-log-query.service';
+import { IntegrationLogQueryService, RAW_EXCHANGE_OMIT } from '../../src/infrastructure/integration-log/integration-log-query.service';
 import { PERMISSIONS_KEY } from '../../src/common/decorators/permissions.decorator';
 import { PermissionGuard } from '../../src/common/guards/permission.guard';
 import { AdminGuard } from '../../src/common/guards/admin.guard';
@@ -146,10 +146,32 @@ describe('query service', () => {
   it('a missing record answers 404, and one logical call can be fetched whole', async () => {
     const { service, findMany, findUnique } = build();
     await expect(service.get('nope')).rejects.toBeInstanceOf(NotFoundException);
+    // The detail query selects EVERY column, including the exact exchange.
     expect(findUnique).toHaveBeenCalledWith({ where: { id: 'nope' } });
 
     await service.byOperation('op-1');
-    expect(findMany).toHaveBeenCalledWith({ where: { operationId: 'op-1' }, orderBy: { createdAt: 'asc' } });
+    expect(findMany).toHaveBeenCalledWith({ where: { operationId: 'op-1' }, orderBy: { createdAt: 'asc' }, omit: RAW_EXCHANGE_OMIT });
+  });
+
+  it('the exact exchange (credentials + PII) is returned by the detail query ONLY', async () => {
+    const detailRow = { id: 'l1', rawEndpoint: 'https://jne.test/pickupcashless', rawRequestBody: 'username=store&api_key=jne-secret', rawResponseBody: '{"status":false}' };
+    const { service, findMany, findUnique } = build();
+    findUnique.mockResolvedValue(detailRow);
+
+    await expect(service.get('l1')).resolves.toEqual(detailRow);
+    expect(findUnique.mock.calls[0][0]).not.toHaveProperty('omit');
+    expect(findUnique.mock.calls[0][0]).not.toHaveProperty('select');
+
+    await service.list({});
+    expect(findMany.mock.calls[0][0].omit).toEqual({ rawEndpoint: true, rawRequestBody: true, rawResponseBody: true });
+    await service.byOperation('op-1');
+    expect(findMany.mock.calls[1][0].omit).toEqual({ rawEndpoint: true, rawRequestBody: true, rawResponseBody: true });
+  });
+
+  it('the detail route is SUPER_ADMIN-gated like every route and is never cached', () => {
+    const handler = AdminIntegrationLogController.prototype.get;
+    expect(Reflect.getMetadata('__headers__', handler)).toEqual([{ name: 'Cache-Control', value: 'no-store' }]);
+    expect(Reflect.getMetadata(PERMISSIONS_KEY, handler)).toEqual(['IntegrationLog.read']);
   });
 
   it('the controller delegates without touching the payloads', async () => {

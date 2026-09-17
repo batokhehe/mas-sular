@@ -17,7 +17,10 @@ import { publicUploadDir } from './modules/upload/upload.util';
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(
     AppModule,
-    { bufferLogs: true },
+    // rawBody keeps the unparsed request bytes on req.rawBody (parsing is unchanged) so
+    // the inbound webhook bodies reach the Integration Logs detail view exactly as
+    // received. Only the webhook controllers read it.
+    { bufferLogs: true, rawBody: true },
   ); const logger = app.get(Logger);
   app.useLogger(logger);
   // B3: trust exactly the reverse-proxy hop(s) in front of the API, so req.ip - and

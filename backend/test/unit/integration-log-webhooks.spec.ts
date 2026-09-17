@@ -152,3 +152,52 @@ describe('Midtrans webhook', () => {
     expect(rec.entries[0]).toMatchObject({ applicationOutcome: IntegrationOutcome.REJECTED });
   });
 });
+
+describe('exact inbound exchange (req.rawBody -> rawRequestBody, the sent JSON -> rawResponseBody)', () => {
+  const raw = (text: string) => ({ rawBody: Buffer.from(text, 'utf8') });
+
+  it('JNE: the raw bytes as received and the JSON actually answered', async () => {
+    const rec = recorder();
+    const text = '{ "awb" : "JNE00099",\n  "receiver_phone": "6285861470308" }';
+    const service = { handle: jest.fn().mockResolvedValue({ httpStatus: 404, body: { status: false, reason: 'unknown AWB' } }) };
+    await new JneWebhookController(service as never, rec as never).jne(JSON.parse(text), 'application/json', resStub() as never, raw(text));
+    expect(rec.entries[0].requestBody).toBe(text);
+    expect(rec.entries[0].responseBody).toBe('{"status":false,"reason":"unknown AWB"}');
+  });
+
+  it('JNE 415: the raw body and the rejection body are both kept', async () => {
+    const rec = recorder();
+    await new JneWebhookController({ handle: jest.fn() } as never, rec as never).jne({}, 'text/plain', resStub() as never, raw('awb=JNE1'));
+    expect(rec.entries[0]).toMatchObject({ requestBody: 'awb=JNE1', responseBody: '{"status":false,"reason":"Content-Type must be application/json"}' });
+  });
+
+  it('Paxel: raw body kept verbatim; the signature HEADER is still never recorded', async () => {
+    const rec = recorder();
+    const text = '{"airwaybill_code":"PXL123","receiver":{"name":"Budi Santoso"}}';
+    const service = { handle: jest.fn().mockResolvedValue({ httpStatus: 200, body: { received: true } }) };
+    await new PaxelWebhookController(service as never, rec as never).paxel(JSON.parse(text), 'application/json', 'sha256=deadbeefsignature', resStub() as never, raw(text));
+    expect(rec.entries[0]).toMatchObject({ requestBody: text, responseBody: '{"received":true}' });
+    expect(JSON.stringify(rec.entries)).not.toContain('deadbeefsignature');
+  });
+
+  it('Midtrans: raw body verbatim (signature_key included) and the exact ack; a rejection keeps the request body', async () => {
+    const text = JSON.stringify({ order_id: 'BMS-20260914-QSVGENC3', status_code: '200', gross_amount: '50000.00', transaction_status: 'settlement', signature_key: 'f'.repeat(128) });
+    const ok = recorder();
+    await new PaymentWebhookController({ handleMidtransNotification: jest.fn().mockResolvedValue({}) } as never, ok as never).midtrans(JSON.parse(text), raw(text));
+    expect(ok.entries[0]).toMatchObject({ requestBody: text, responseBody: '{"received":true,"handled":false}' });
+
+    const bad = recorder();
+    await expect(
+      new PaymentWebhookController({ handleMidtransNotification: jest.fn().mockRejectedValue(new UnauthorizedException('invalid signature')) } as never, bad as never).midtrans(JSON.parse(text), raw(text)),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+    // The error body is written later by the exception filter: not captured, never invented.
+    expect(bad.entries[0]).toMatchObject({ requestBody: text, responseBody: null });
+  });
+
+  it('without req.rawBody nothing is reconstructed from the parsed body', async () => {
+    const rec = recorder();
+    const service = { handle: jest.fn().mockResolvedValue({ httpStatus: 200, body: { status: true } }) };
+    await new JneWebhookController(service as never, rec as never).jne({ awb: 'JNE1' }, 'application/json', resStub() as never);
+    expect(rec.entries[0].requestBody).toBeNull();
+  });
+});

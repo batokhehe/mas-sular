@@ -371,10 +371,16 @@ describe('61AG.3.33 runtime verification — real couriers, stubbed transport', 
         expect(outcomeRow).toMatchObject({ operation: 'PICKUP_CASHLESS', applicationOutcome: 'OK', correlationId: awb, operationId: attemptRow.operationId })
         expect(attemptRow.sanitizedResponse).toEqual(jneSuccess(awb))
         expect(attemptRow.sanitizedRequest).toMatchObject({ username: '[REDACTED]', api_key: '[REDACTED]', RECEIVER_NAME: '[REDACTED_PII]', RECEIVER_PHONE: '[REDACTED_PII]', SHIPPER_PHONE: '[REDACTED_PII]', ORDER_ID: order.orderNumber.replaceAll('-', '').slice(0, -1), SPECIAL_INS: 'NO SPECIAL INSTRUCTION' })
-        const persisted = JSON.stringify(logs)
+        // The sanitized columns carry no credentials or PII...
+        const persisted = JSON.stringify(logs.map(({ rawEndpoint, rawRequestBody, rawResponseBody, ...sanitized }) => sanitized))
         for (const secret of ['fake-key-not-a-real-credential', 'fake-user', CUSTOMER_PHONE, 'Jl. Tujuan No. 9', '081200000002']) {
           expect([secret, persisted.includes(secret)]).toEqual([secret, false])
         }
+        // ...and the exact exchange is persisted verbatim in Postgres for the detail view.
+        expect(attemptRow.rawEndpoint).toBe('https://jne.invalid/pickupcashless')
+        expect(Object.fromEntries(new URLSearchParams(attemptRow.rawRequestBody!))).toEqual(body)
+        expect(attemptRow.rawRequestBody).toContain('api_key=fake-key-not-a-real-credential')
+        expect(JSON.parse(attemptRow.rawResponseBody!)).toEqual(jneSuccess(awb))
       }
 
       // --- AWB persisted ---

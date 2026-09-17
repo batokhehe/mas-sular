@@ -1,10 +1,11 @@
-import { Body, Controller, HttpCode, Logger, Optional, Post, ValidationPipe } from '@nestjs/common';
+import { Body, Controller, HttpCode, Logger, Optional, Post, Req, ValidationPipe } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 import { ApiTags } from '@nestjs/swagger';
 import { IntegrationDirection, IntegrationOutcome, IntegrationProvider } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { safeRecord } from '../../../../infrastructure/integration-log/safe-record';
 import { IntegrationLogService } from '../../../../infrastructure/integration-log/integration-log.service';
+import { rawBodyText, sentJsonBody } from '../../../../infrastructure/integration-log/raw-body';
 import { MidtransWebhookDto } from '../application/dto/midtrans-webhook.dto';
 import { PaymentWebhookService, WebhookAck } from '../payment-webhook.service';
 
@@ -42,7 +43,13 @@ export class PaymentWebhookController {
     @Optional() private readonly integrationLogs?: IntegrationLogService,
   ) {}
 
-  private record(body: Record<string, unknown>, httpStatus: number, durationMs: number, errorMessage?: string): void {
+  private record(
+    body: Record<string, unknown>,
+    httpStatus: number,
+    durationMs: number,
+    errorMessage?: string,
+    exchange: { requestBody?: string | null; responseBody?: string | null } = {},
+  ): void {
     safeRecord(this.integrationLogs, {
       provider: IntegrationProvider.MIDTRANS,
       operation: 'WEBHOOK',
@@ -56,6 +63,11 @@ export class PaymentWebhookController {
       applicationOutcome: httpStatus < 400 ? IntegrationOutcome.OK : IntegrationOutcome.REJECTED,
       errorMessage: errorMessage ?? null,
       requestPayload: body,
+      // Exact exchange for the SUPER_ADMIN detail view (the sanitized column still
+      // comes from requestPayload). A rejection's body is produced later by the
+      // exception filter, so it is not available here and stays null.
+      requestBody: exchange.requestBody ?? null,
+      responseBody: exchange.responseBody ?? null,
     }, (err) =>
       this.logger?.warn({ event: 'integration_log.record_failed', reason: err instanceof Error ? err.message : String(err) }),
     );
@@ -76,7 +88,7 @@ export class PaymentWebhookController {
   @Post('webhook/midtrans')
   @HttpCode(200)
   @SkipThrottle()
-  async midtrans(@Body() body: Record<string, unknown>): Promise<WebhookAck> {
+  async midtrans(@Body() body: Record<string, unknown>, @Req() req?: { rawBody?: unknown }): Promise<WebhookAck> {
     // Validated EXPLICITLY, not by a route pipe (Phase 5H.3). Nest applies global
     // pipes IN ADDITION to route-scoped ones, so main.ts's
     // `forbidNonWhitelisted: true` ran first and rejected every real notification
@@ -93,13 +105,14 @@ export class PaymentWebhookController {
     try {
       const dto = await WEBHOOK_VALIDATION.transform(body, { type: 'body', metatype: MidtransWebhookDto });
       await this.webhooks.handleMidtransNotification(dto);
-      this.record(body, 200, Date.now() - startedAt);
-      return { received: true, handled: false };
+      const ack: WebhookAck = { received: true, handled: false };
+      this.record(body, 200, Date.now() - startedAt, undefined, { requestBody: rawBodyText(req), responseBody: sentJsonBody(ack) });
+      return ack;
     } catch (err) {
       // Recorded, then rethrown UNCHANGED: the rejection (401 bad signature, 400
       // malformed, 503 disabled) reaches Midtrans exactly as before.
       const status = typeof (err as { getStatus?: () => number })?.getStatus === 'function' ? (err as { getStatus: () => number }).getStatus() : 500;
-      this.record(body, status, Date.now() - startedAt, err instanceof Error ? err.message : String(err));
+      this.record(body, status, Date.now() - startedAt, err instanceof Error ? err.message : String(err), { requestBody: rawBodyText(req) });
       throw err;
     }
   }

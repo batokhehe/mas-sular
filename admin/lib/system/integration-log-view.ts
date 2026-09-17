@@ -1,4 +1,4 @@
-import type { IntegrationLog, IntegrationOutcome, IntegrationProvider } from '@/lib/admin';
+import type { IntegrationLog, IntegrationLogDetail, IntegrationOutcome, IntegrationProvider } from '@/lib/admin';
 
 /**
  * PURE view helpers for Admin → System → Integration Logs, so the table's
@@ -59,14 +59,22 @@ export function contextLabel(log: Pick<IntegrationLog, 'orderId' | 'paymentId' |
   return log.correlationId ?? log.orderId ?? log.paymentId ?? log.shipmentId ?? '—';
 }
 
-/** True when the record has a payload worth expanding (payloads are collapsed by default). */
-export function hasPayload(value: unknown): boolean {
-  if (value === null || value === undefined) return false;
-  if (typeof value === 'object') return Object.keys(value as object).length > 0;
-  return String(value).length > 0;
+/**
+ * The request URL EXACTLY as called. Records written before exact capture existed
+ * have no rawEndpoint; their stored endpoint is the only URL there is.
+ */
+export function exactEndpoint(log: Pick<IntegrationLogDetail, 'rawEndpoint' | 'endpoint'>): string | null {
+  return log.rawEndpoint ?? log.endpoint;
 }
 
-export function prettyPayload(value: unknown): string {
-  if (value === null || value === undefined) return '(empty)';
-  return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+export type ExactBody = { captured: false } | { captured: true; empty: boolean; text: string };
+
+/**
+ * A request/response body for the detail view, EXACTLY as captured: the text is
+ * returned unchanged - no JSON pretty-printing, trimming, masking or truncation.
+ * `null` means the body was not captured for this record; "" is a real empty body.
+ */
+export function exactBody(value: string | null | undefined): ExactBody {
+  if (value === null || value === undefined) return { captured: false };
+  return { captured: true, empty: value.length === 0, text: value };
 }

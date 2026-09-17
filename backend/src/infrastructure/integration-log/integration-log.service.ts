@@ -79,6 +79,11 @@ export class IntegrationLogService implements IntegrationRecorder {
       errorMessage: sanitizeErrorText(entry.errorMessage, ERROR_MESSAGE_MAX),
       sanitizedRequest: (request ?? undefined) as Prisma.InputJsonValue | undefined,
       sanitizedResponse: (response ?? undefined) as Prisma.InputJsonValue | undefined,
+      // The exchange EXACTLY as captured, for the SUPER_ADMIN detail view only: no
+      // redaction, masking, truncation or reformatting. Contains credentials and PII.
+      rawEndpoint: entry.endpoint ?? null,
+      rawRequestBody: entry.requestBody ?? null,
+      rawResponseBody: entry.responseBody ?? null,
     };
   }
 

@@ -23,9 +23,15 @@ export interface IntegrationLogQuery {
 }
 
 /**
+ * The exact-exchange columns (credentials + PII). Only `get(id)` - the SUPER_ADMIN
+ * detail view - returns them; list and operation queries leave them out.
+ */
+export const RAW_EXCHANGE_OMIT = { rawEndpoint: true, rawRequestBody: true, rawResponseBody: true } as const;
+
+/**
  * Read-only search + detail over IntegrationApiLog. Always paginated, newest first
- * by default. Rows are stored sanitized, so there is nothing to redact at read time
- * - and nothing here can widen what was persisted.
+ * by default. List and operation queries return the sanitized columns only; the
+ * detail query also returns the exchange exactly as captured.
  */
 @Injectable()
 export class IntegrationLogQueryService {
@@ -73,12 +79,13 @@ export class IntegrationLogQueryService {
     const where = this.buildWhere(query);
     const orderBy: Prisma.IntegrationApiLogOrderByWithRelationInput = { createdAt: query.sort === 'asc' ? 'asc' : 'desc' };
     const [items, total] = await Promise.all([
-      this.prisma.integrationApiLog.findMany({ where, orderBy, skip, take }),
+      this.prisma.integrationApiLog.findMany({ where, orderBy, skip, take, omit: RAW_EXCHANGE_OMIT }),
       this.prisma.integrationApiLog.count({ where }),
     ]);
     return paginate(items, total, page, limit);
   }
 
+  /** The detail view: every column, including the exact request/response as captured. */
   async get(id: string) {
     const log = await this.prisma.integrationApiLog.findUnique({ where: { id } });
     if (!log) throw new NotFoundException('Integration log not found');
@@ -87,6 +94,6 @@ export class IntegrationLogQueryService {
 
   /** Every record of ONE logical call (all attempts + the application outcome). */
   async byOperation(operationId: string) {
-    return this.prisma.integrationApiLog.findMany({ where: { operationId }, orderBy: { createdAt: 'asc' } });
+    return this.prisma.integrationApiLog.findMany({ where: { operationId }, orderBy: { createdAt: 'asc' }, omit: RAW_EXCHANGE_OMIT });
   }
 }

@@ -1,8 +1,9 @@
-import { Body, Controller, Headers, HttpCode, Logger, Optional, Post, Res } from '@nestjs/common';
+import { Body, Controller, Headers, HttpCode, Logger, Optional, Post, Req, Res } from '@nestjs/common';
 import { IntegrationDirection, IntegrationOutcome, IntegrationProvider } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { safeRecord } from '../../../infrastructure/integration-log/safe-record';
 import { IntegrationLogService } from '../../../infrastructure/integration-log/integration-log.service';
+import { rawBodyText, sentJsonBody } from '../../../infrastructure/integration-log/raw-body';
 import { ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import type { Response } from 'express';
@@ -47,7 +48,13 @@ export class JneWebhookController {
   ) {}
 
   /** One record per received webhook. The signature header is never passed in. */
-  private record(body: Record<string, unknown>, httpStatus: number, durationMs: number, reason?: string): void {
+  private record(
+    body: Record<string, unknown>,
+    httpStatus: number,
+    durationMs: number,
+    reason?: string,
+    exchange: { requestBody?: string | null; responseBody?: string | null } = {},
+  ): void {
     safeRecord(this.integrationLogs, {
       provider: IntegrationProvider.JNE,
       operation: 'WEBHOOK',
@@ -61,6 +68,10 @@ export class JneWebhookController {
       applicationOutcome: httpStatus < 400 ? IntegrationOutcome.OK : IntegrationOutcome.REJECTED,
       errorMessage: reason ?? null,
       requestPayload: body,
+      // Exact exchange for the SUPER_ADMIN detail view; the sanitized column still
+      // comes from requestPayload.
+      requestBody: exchange.requestBody ?? null,
+      responseBody: exchange.responseBody ?? null,
     }, (err) =>
       this.logger?.warn({ event: 'integration_log.record_failed', reason: err instanceof Error ? err.message : String(err) }),
     );
@@ -76,16 +87,21 @@ export class JneWebhookController {
     @Body() body: Record<string, unknown>,
     @Headers('content-type') contentType: string | undefined,
     @Res({ passthrough: true }) res: Response,
+    @Req() req?: { rawBody?: unknown },
   ): Promise<JneWebhookBody> {
     const startedAt = Date.now();
     if (!/^application\/json\b/i.test(contentType ?? '')) {
       res.status(415);
-      this.record(body, 415, Date.now() - startedAt, 'Content-Type must be application/json');
-      return { status: false, reason: 'Content-Type must be application/json' };
+      const rejection: JneWebhookBody = { status: false, reason: 'Content-Type must be application/json' };
+      this.record(body, 415, Date.now() - startedAt, rejection.reason, { requestBody: rawBodyText(req), responseBody: sentJsonBody(rejection) });
+      return rejection;
     }
     const result = await this.webhooks.handle(body);
     res.status(result.httpStatus);
-    this.record(body, result.httpStatus, Date.now() - startedAt, 'reason' in result.body ? result.body.reason : undefined);
+    this.record(body, result.httpStatus, Date.now() - startedAt, 'reason' in result.body ? result.body.reason : undefined, {
+      requestBody: rawBodyText(req),
+      responseBody: sentJsonBody(result.body),
+    });
     return result.body;
   }
 }

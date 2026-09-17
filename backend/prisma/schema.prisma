@@ -1529,6 +1529,15 @@ model IntegrationApiLog {
   errorMessage       String?              @db.VarChar(512)
   sanitizedRequest   Json?
   sanitizedResponse  Json?
+  /// EXACT exchange as captured - no redaction, masking, truncation or reformatting.
+  /// Holds provider credentials and personal data. Returned ONLY by the SUPER_ADMIN
+  /// detail endpoint (GET /admin/integration-logs/:id); omitted from list/operation
+  /// queries and never exposed through any customer/storefront/public API.
+  /// Null on rows written before capture existed and on records with no raw text
+  /// (e.g. an application outcome built from an already-parsed payload).
+  rawEndpoint        String?              @db.Text
+  rawRequestBody     String?              @db.Text
+  rawResponseBody    String?              @db.Text
 
   @@index([createdAt])
   @@index([provider, createdAt])
