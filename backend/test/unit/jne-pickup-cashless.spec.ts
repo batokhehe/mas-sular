@@ -446,8 +446,44 @@ describe('response — the CONFIRMED contract only', () => {
     expect(result).not.toHaveProperty('cnote');
   });
 
+  /** Exactly the top-level rejection JNE returned for /pickupcashless on staging. */
+  const OBSERVED_TOP_LEVEL_ERROR = '{"error":"Please do not let paramaters empty.","status":false}';
+
+  it('TOP-LEVEL REJECTION: {error, status:false} is a provider error carrying JNE\'s exact message', () => {
+    expect(parseJnePickupCashlessResponse(OBSERVED_TOP_LEVEL_ERROR)).toEqual({
+      kind: 'provider_error',
+      reason: 'Please do not let paramaters empty.',
+      payload: { error: 'Please do not let paramaters empty.', status: false },
+    });
+  });
+
+  it('the top-level error message is trimmed only, never rewritten', () => {
+    expect(parseJnePickupCashlessResponse('{"error":"  Invalid Branch  ","status":false}')).toMatchObject({
+      kind: 'provider_error',
+      reason: 'Invalid Branch',
+    });
+  });
+
+  it('a top-level rejection never yields an AWB, even when a cnote_no is present', () => {
+    const result = parseJnePickupCashlessResponse('{"error":"duplicate","status":false,"cnote_no":"0109401600067399"}');
+    expect(result.kind).toBe('provider_error');
+    expect(result).not.toHaveProperty('cnote');
+  });
+
+  it('detail[] still decides when both shapes are present', () => {
+    const body = '{"error":"ignored","status":false,"detail":[{"status":"success","cnote_no":"X1"}]}';
+    expect(parseJnePickupCashlessResponse(body)).toMatchObject({ kind: 'success', cnote: 'X1' });
+  });
+
   it.each([
     ['malformed JSON', '{"detail":[{"status":', /not valid JSON/],
+    ['truncated top-level rejection', '{"error":"Please do not let paramaters empty.","status":fal', /not valid JSON/],
+    ['status false without error', '{"status":false}', /no detail array/],
+    ['status false with blank error', '{"error":"   ","status":false}', /no detail array/],
+    ['status false with a non-string error', '{"error":{"code":1},"status":false}', /no detail array/],
+    ['error with status true', '{"error":"x","status":true}', /no detail array/],
+    ['error with status "false" as a string', '{"error":"x","status":"false"}', /no detail array/],
+    ['error without status', '{"error":"x"}', /no detail array/],
     ['HTML error page', '<html>502 Bad Gateway</html>', /not valid JSON/],
     ['empty body', '', /not valid JSON/],
     ['a JSON array', '[{"status":"success","cnote_no":"1"}]', /not a JSON object/],

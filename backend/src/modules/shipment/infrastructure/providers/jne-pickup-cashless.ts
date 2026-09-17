@@ -362,7 +362,10 @@ export function serializeJnePickupCashless(
 export type JnePickupCashlessResult =
   /** `detail[0].status` is success AND `detail[0].cnote_no` is a non-empty string. */
   | { kind: 'success'; cnote: string; payload: unknown }
-  /** A well-formed `detail[0]` whose status is not success: JNE refused the pickup. */
+  /**
+   * JNE refused the pickup: a well-formed `detail[0]` whose status is not success, or
+   * JNE's top-level rejection `{ "error": "<message>", "status": false }`.
+   */
   | { kind: 'provider_error'; reason: string; payload: unknown }
   /** Anything else - not the confirmed contract, so nothing is concluded from it. */
   | { kind: 'malformed'; problem: string; payload: unknown };
@@ -380,6 +383,10 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
  *   accept, so the answer must not be reported as a refusal.
  * - Any other status on a well-formed `detail[0]` is JNE refusing the pickup; its
  *   `reason` is kept when present.
+ * - With no `detail` array, the OBSERVED top-level rejection
+ *   `{ "error": "<message>", "status": false }` is also JNE refusing the pickup, with
+ *   `error` as the reason. It needs the boolean `false` and a non-blank `error`
+ *   string; anything short of that stays malformed.
  */
 export function parseJnePickupCashlessResponse(text: string): JnePickupCashlessResult {
   let payload: unknown;
@@ -391,7 +398,12 @@ export function parseJnePickupCashlessResponse(text: string): JnePickupCashlessR
   if (!isObject(payload)) return { kind: 'malformed', problem: 'the response is not a JSON object', payload };
 
   const detail = payload.detail;
-  if (!Array.isArray(detail)) return { kind: 'malformed', problem: 'the response has no detail array', payload };
+  if (!Array.isArray(detail)) {
+    if (payload.status === false && typeof payload.error === 'string' && payload.error.trim() !== '') {
+      return { kind: 'provider_error', reason: payload.error.trim(), payload };
+    }
+    return { kind: 'malformed', problem: 'the response has no detail array', payload };
+  }
   if (detail.length === 0) return { kind: 'malformed', problem: 'the response detail array is empty', payload };
 
   const first = detail[0];

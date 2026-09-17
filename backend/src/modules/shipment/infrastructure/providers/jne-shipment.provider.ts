@@ -142,7 +142,8 @@ export class JneShipmentProvider implements ShipmentProvider {
    * 2. Send ONCE (`maxRetry: 0`): a timeout can land after JNE accepted the pickup.
    * 3. Interpret the body against the CONFIRMED contract only:
    *      success         -> cnote_no is the trackingNumber AND providerShipmentId
-   *      provider error  -> PermanentError carrying JNE's reason (HTTP 200 included)
+   *      provider error  -> PermanentError carrying JNE's reason (HTTP 200 included):
+   *                         detail[0] with a non-success status, or {error, status:false}
    *      malformed       -> PermanentError; nothing is concluded from the body
    *
    * The application outcome is recorded next to the HTTP attempt under the same

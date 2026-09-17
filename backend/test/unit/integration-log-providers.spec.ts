@@ -19,6 +19,8 @@ import { loadIntegrationLogConfig } from '../../src/infrastructure/integration-l
 
 const JNE_SUCCESS = '{"detail":[{"status":"success","cnote_no":"0109401600067399"}]}';
 const JNE_REJECTION = '{"detail":[{"reason":"Please do not let field OLSHOP_GOODSVALUE empty","status":"Error"}]}';
+/** The top-level rejection JNE actually returned for /pickupcashless on staging. */
+const JNE_TOP_LEVEL_REJECTION = '{"error":"Please do not let paramaters empty.","status":false}';
 
 function recorder() {
   const entries: IntegrationLogEntry[] = [];
@@ -165,6 +167,77 @@ describe('JNE PICKUP_CASHLESS — booking against the confirmed response', () =>
       errorMessage: 'Please do not let field OLSHOP_GOODSVALUE empty',
       correlationId: INPUT.orderNumber, // no cnote to correlate by
     });
+  });
+
+  it('TOP-LEVEL REJECTION: HTTP 200 + {error, status:false} is REJECTED with JNE\'s exact message', async () => {
+    const { provider, http, rec } = buildJne();
+    http.mockResolvedValue(res(200, JNE_TOP_LEVEL_REJECTION));
+
+    const error = await provider.createShipment(INPUT).catch((err: Error) => err);
+    expect(error).toBeInstanceOf(PermanentError);
+    expect((error as Error).message).toBe('JNE rejected the pickup: Please do not let paramaters empty.');
+    expect(http).toHaveBeenCalledTimes(1); // still sent once, never retried
+
+    expect(rec.entries).toHaveLength(2);
+    const [attempt, outcome] = rec.entries;
+    expect(attempt).toMatchObject({ attempt: 1, httpStatus: 200, applicationOutcome: IntegrationOutcome.OK });
+    expect(outcome).toMatchObject({
+      operation: 'PICKUP_CASHLESS',
+      httpStatus: 200,
+      applicationOutcome: IntegrationOutcome.REJECTED,
+      errorClass: 'rejected',
+      errorMessage: 'Please do not let paramaters empty.',
+      correlationId: INPUT.orderNumber,
+      responseBody: JNE_TOP_LEVEL_REJECTION,
+    });
+    expect(outcome.operationId).toBe(attempt.operationId);
+  });
+
+  it('what is PERSISTED for a top-level rejection: REJECTED, the exact message, credentials still redacted', async () => {
+    const create = jest.fn().mockResolvedValue({});
+    const service = new IntegrationLogService({ integrationApiLog: { create } } as never, loadIntegrationLogConfig({} as NodeJS.ProcessEnv));
+    const { provider, http } = buildJne(service as never);
+    http.mockResolvedValue(res(200, JNE_TOP_LEVEL_REJECTION));
+
+    await provider.createShipment(INPUT).catch(() => undefined);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const rows = create.mock.calls.map((call) => call[0].data);
+    expect(rows).toHaveLength(2);
+    const stored = JSON.stringify(rows);
+    for (const secret of ['jne-secret', '"store"', 'Budi Santoso', '6285861470308']) {
+      expect([secret, stored.includes(secret)]).toEqual([secret, false]);
+    }
+    const outcomeRow = rows.find((row) => row.attempt == null);
+    expect(outcomeRow).toMatchObject({
+      applicationOutcome: 'REJECTED',
+      errorClass: 'rejected',
+      errorMessage: 'Please do not let paramaters empty.',
+      sanitizedResponse: { error: 'Please do not let paramaters empty.', status: false },
+    });
+  });
+
+  it('a top-level rejection that echoes credentials or PII is redacted in the thrown error', async () => {
+    const { provider, http } = buildJne();
+    http.mockResolvedValue(res(200, JSON.stringify({ error: 'invalid api_key=jne-secret for RECEIVER_PHONE=6285861470308', status: false })));
+    const error = await provider.createShipment(INPUT).catch((err: Error) => err);
+    expect((error as Error).message).toContain('JNE rejected the pickup');
+    expect((error as Error).message).not.toContain('jne-secret');
+    expect((error as Error).message).not.toContain('6285861470308');
+  });
+
+  it('a malformed top-level rejection (invalid JSON) is still PARSE_FAILED', async () => {
+    const { provider, http, rec } = buildJne();
+    http.mockResolvedValue(res(200, '{"error":"Please do not let paramaters empty.","status":fal'));
+    await expect(provider.createShipment(INPUT)).rejects.toThrow(/unexpected response: the response is not valid JSON/);
+    expect(rec.entries.find((e) => e.attempt === undefined)).toMatchObject({ applicationOutcome: IntegrationOutcome.PARSE_FAILED, errorClass: 'parse_failed' });
+  });
+
+  it('status false WITHOUT an error message is not guessed into a rejection: PARSE_FAILED', async () => {
+    const { provider, http, rec } = buildJne();
+    http.mockResolvedValue(res(200, '{"status":false}'));
+    await expect(provider.createShipment(INPUT)).rejects.toThrow(/unexpected response: the response has no detail array/);
+    expect(rec.entries.find((e) => e.attempt === undefined)).toMatchObject({ applicationOutcome: IntegrationOutcome.PARSE_FAILED });
   });
 
   it('MALFORMED: an unexpected 200 body is PARSE_FAILED, never a misleading rejection', async () => {
