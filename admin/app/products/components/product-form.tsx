@@ -4,7 +4,6 @@ import { useMemo, useState } from 'react';
 import { AdminCategory, AdminProduct } from '@/lib/admin';
 import { Button } from '@/components/ui/button';
 import { Card, CardTitle } from '@/components/ui/card';
-import Image from 'next/image';
 import { uploadImage } from '@/lib/upload';
 import { showError } from '@/lib/admin-alert';
 import {
@@ -15,6 +14,18 @@ import {
   toPhysicalPayload,
   validatePhysicalState,
 } from '@/lib/products/physical-attributes';
+import {
+  addImages,
+  imageCounter,
+  imagesPayload,
+  initialImages,
+  isCover,
+  MAX_PRODUCT_IMAGES,
+  moveImage,
+  remainingSlots,
+  removeImage,
+  uploadSequentially,
+} from '@/lib/products/product-images';
 
 interface ProductFormProps {
   categories: AdminCategory[];
@@ -34,7 +45,10 @@ export type ProductFormValues = {
   description: string;
   price: number;
   originalPrice?: number;
+  /** Cover, always images[0] when saved (P2). */
   imageUrl?: string;
+  /** P2 gallery in display order; images[0] is the cover. Sent on every save. */
+  images?: string[];
   spicyLevel?: number;
   isBestSeller: boolean;
   isNew: boolean;
@@ -70,9 +84,9 @@ export function ProductForm({
   submitLabel,
 }: ProductFormProps) {
   const [isUploading, setIsUploading] = useState(false);
-  const [imagePreview, setImagePreview] = useState(
-    initialValues?.imageUrl ?? '',
-  );
+  // P2 gallery, ordered, index 0 = cover. Starts from the stored images, or from the
+  // existing imageUrl for a product without gallery rows (legacy covers stay usable).
+  const [images, setImages] = useState<string[]>(() => initialImages(initialValues));
 
   const [values, setValues] = useState<ProductFormValues>({
     slug: initialValues?.slug ?? '',
@@ -112,30 +126,39 @@ export function ProductForm({
     }));
   };
 
+  // Uploads through the EXISTING endpoint, one file at a time. Each success lands in
+  // the gallery immediately, so a failure keeps every earlier upload and the rest of
+  // the form; removing an image later never deletes the uploaded file.
   const handleImageUpload = async (
     event: React.ChangeEvent<HTMLInputElement>,
   ) => {
-    const file = event.target.files?.[0];
-
-    if (!file) return;
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = '';
+    if (files.length === 0) return;
 
     setIsUploading(true);
-
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const response = await uploadImage(formData);
-
-      setValues((prev) => ({
-        ...prev,
-        imageUrl: response.url,
-      }));
-
-      setImagePreview(response.url);
-    } catch (error) {
-      console.error(error);
-      void showError(error);
+      const outcome = await uploadSequentially(
+        files,
+        remainingSlots(images),
+        async (file) => {
+          const formData = new FormData();
+          formData.append('file', file);
+          const response = await uploadImage(formData);
+          return response.url as string;
+        },
+        (url) => setImages((current) => addImages(current, [url])),
+      );
+      if (outcome.error) {
+        console.error(outcome.error);
+        void showError(
+          new Error(
+            `Image upload failed after ${outcome.uploaded.length} of ${files.length - outcome.skipped} file(s). The images already uploaded are kept; please try the rest again.`,
+          ),
+        );
+      } else if (outcome.skipped > 0) {
+        void showError(new Error(`A product can have at most ${MAX_PRODUCT_IMAGES} images; ${outcome.skipped} file(s) were not added.`));
+      }
     } finally {
       setIsUploading(false);
     }
@@ -146,7 +169,8 @@ export function ProductForm({
   ) => {
     event.preventDefault();
 
-    if (!values.imageUrl) {
+    const gallery = imagesPayload(images);
+    if (!gallery) {
       void showError(new Error('Please upload an image first'));
       return;
     }
@@ -161,7 +185,8 @@ export function ProductForm({
     }
 
     // Empty measurements are omitted here, so an untouched NULL stays NULL.
-    await onSubmit({ ...values, ...toPhysicalPayload(physical) });
+    // images[] in display order; imageUrl is its first image (the cover).
+    await onSubmit({ ...values, ...gallery, ...toPhysicalPayload(physical) });
   };
 
   const handlePhysicalChange = (field: PhysicalNumericField, value: string) => {
@@ -258,12 +283,23 @@ export function ProductForm({
               ))}
             </select>
           </label>
-          <label className="space-y-2 text-sm text-gray-700">
-            <span>Product Image</span>
+          <div className="space-y-2 text-sm text-gray-700 col-span-full">
+            <div className="flex items-center justify-between">
+              <span>Product Images</span>
+              <span className="text-xs text-gray-500" aria-live="polite">
+                {imageCounter(images)}
+              </span>
+            </div>
+            <p className="text-xs text-gray-500">
+              The first image is the cover. Up to {MAX_PRODUCT_IMAGES} images.
+            </p>
 
             <input
+              id="product-images-input"
               type="file"
               accept="image/*"
+              multiple
+              disabled={isUploading || remainingSlots(images) === 0}
               onChange={handleImageUpload}
             />
 
@@ -273,14 +309,55 @@ export function ProductForm({
               </p>
             )}
 
-            {imagePreview && (
-              <img
-                src={imagePreview}
-                alt="Preview"
-                className="mt-2 h-40 w-40 rounded-lg border object-cover"
-              />
+            {images.length > 0 && (
+              <ul className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                {images.map((url, index) => (
+                  <li key={url} className="space-y-2 rounded-xl border border-gray-200 p-2">
+                    <div className="relative">
+                      <img
+                        src={url}
+                        alt={`Product image ${index + 1}`}
+                        className="h-32 w-full rounded-lg border object-cover"
+                      />
+                      {isCover(index) && (
+                        <span className="absolute left-2 top-2 rounded-md bg-[#465fff] px-2 py-0.5 text-xs font-semibold text-white">
+                          Cover
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setImages((current) => moveImage(current, index, -1))}
+                        disabled={index === 0}
+                        aria-label={`Move image ${index + 1} up`}
+                        className="flex-1 rounded-lg border border-gray-200 px-2 py-1 text-xs disabled:opacity-40"
+                      >
+                        ↑ Up
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setImages((current) => moveImage(current, index, 1))}
+                        disabled={index === images.length - 1}
+                        aria-label={`Move image ${index + 1} down`}
+                        className="flex-1 rounded-lg border border-gray-200 px-2 py-1 text-xs disabled:opacity-40"
+                      >
+                        ↓ Down
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setImages((current) => removeImage(current, index))}
+                        aria-label={`Remove image ${index + 1}`}
+                        className="flex-1 rounded-lg border border-red-200 px-2 py-1 text-xs text-red-600"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
             )}
-          </label>
+          </div>
           <label className="space-y-2 text-sm text-gray-700">
             <span>Status</span>
             <select

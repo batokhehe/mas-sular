@@ -1,5 +1,6 @@
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsEnum, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsEnum, IsInt, IsOptional, IsString, Max, Min, ValidateIf } from 'class-validator';
+import { MAX_PRODUCT_IMAGES } from '../../../upload/product-image-url';
 import { ProductStatus } from '@prisma/client';
 import { rawBoolean } from '../../../../common/validation/strict-boolean';
 
@@ -31,8 +32,25 @@ export class CreateProductDto {
   @Min(0)
   originalPrice?: number;
 
+  /**
+   * The cover. Required unless `images` is sent; with `images` it may be omitted
+   * (images[0] becomes the cover) and, if present, must equal images[0]. Validation
+   * of this field itself is unchanged (P2 D3).
+   */
+  @ValidateIf((dto: CreateProductDto) => dto.images === undefined || dto.imageUrl !== undefined)
   @IsString()
-  imageUrl!: string;
+  imageUrl?: string;
+
+  /**
+   * P2 gallery: the complete ordered list, images[0] = cover. 1..8 unique urls, each
+   * an image uploaded through this application (AdminService / product-images.ts
+   * enforce the url rule, the empty list and duplicates with clear messages).
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_PRODUCT_IMAGES)
+  @IsString({ each: true })
+  images?: string[];
 
   @IsOptional()
   @IsInt()

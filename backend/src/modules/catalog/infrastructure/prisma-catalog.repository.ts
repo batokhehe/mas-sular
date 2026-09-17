@@ -47,7 +47,9 @@ export class PrismaCatalogRepository implements CatalogRepository {
         deletedAt: null,
         OR: [{ id: idOrSlug }, { slug: idOrSlug }],
       },
-      include: { category: true },
+      // P2 gallery, ordered, detail ONLY (listProducts never loads images). One
+      // batched query alongside the product - no N+1.
+      include: { category: true, images: { orderBy: { sortOrder: 'asc' }, select: { id: true, url: true, sortOrder: true } } },
       omit: { sku: true }, // P2 #5: internal only - see listProducts
     });
     if (!product) throw new NotFoundException('Product not found');

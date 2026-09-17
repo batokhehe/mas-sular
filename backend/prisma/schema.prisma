@@ -407,6 +407,8 @@ model Product {
   reservations  InventoryReservation[]
   inventories   ProductInventory[]
   transfers     StockTransfer[]
+  /// P2 gallery. images[0] (sortOrder 0) is the cover and always equals imageUrl.
+  images        ProductImage[]
   createdAt     DateTime               @default(now())
   updatedAt     DateTime               @updatedAt
   deletedAt     DateTime?
@@ -416,6 +418,22 @@ model Product {
   @@index([isPromoSpecial])
   @@index([isTrialPack])
   @@index([deletedAt])
+}
+
+/// P2 product image gallery. sortOrder is server-generated 0..N-1 (max 8); sortOrder 0
+/// is the cover and is kept equal to Product.imageUrl in the same transaction. Removing
+/// an image removes only this row - the uploaded file is never deleted.
+model ProductImage {
+  id        String   @id @default(uuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  /// New values are app-owned upload URLs (product-image-url.ts); backfilled legacy
+  /// values (e.g. /products/*.jpg) are kept verbatim.
+  url       String
+  sortOrder Int
+  createdAt DateTime @default(now())
+
+  @@unique([productId, sortOrder])
 }
 
 model Topping {

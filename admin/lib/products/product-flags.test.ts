@@ -54,7 +54,8 @@ test('both checkboxes live in the existing Flags group, next to Best seller and 
 test('create and edit submit the whole form values (so both flags reach the API)', () => {
   const create = read('app/products/new/page.tsx');
   const edit = read('app/products/[id]/page.tsx');
-  assert.match(FORM, /await onSubmit\(\{ \.\.\.values, \.\.\.toPhysicalPayload\(physical\) \}\)/);
+  // P2: the ordered gallery (images[] + its cover as imageUrl) is spread in too.
+  assert.match(FORM, /await onSubmit\(\{ \.\.\.values, \.\.\.gallery, \.\.\.toPhysicalPayload\(physical\) \}\)/);
   assert.match(create, /mutationFn: \(input: ProductFormValues\) => createAdminProduct\(input\)/);
   assert.match(edit, /updateAdminProduct\(id, input\)/);
   assert.match(edit, /initialValues=\{productQuery\.data\}/);

@@ -100,7 +100,8 @@ describe('AdminService.createProduct', () => {
   it('honours an explicit SKU exactly as before', async () => {
     const create = jest.fn().mockResolvedValue({});
     await adminWith(create).createProduct({ ...DTO, sku: 'HAND-SET-1' } as CreateProductDto);
-    expect(create).toHaveBeenCalledWith({ data: { ...DTO, sku: 'HAND-SET-1' } });
+    // P2: the cover also becomes the product's first gallery image, in the same create.
+    expect(create).toHaveBeenCalledWith({ data: { ...DTO, sku: 'HAND-SET-1', images: { create: [{ url: DTO.imageUrl, sortOrder: 0 }] } } });
   });
 
   it('moves to BASE_2 when the derived SKU is already taken by another product', async () => {

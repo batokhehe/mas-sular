@@ -77,6 +77,8 @@ export interface Product {
   price: number
   originalPrice?: number | null
   imageUrl: string
+  /** P2 gallery, sortOrder ASC; returned by the product DETAIL endpoint only (not the list). */
+  images?: ProductImage[]
   rating: string
   reviewCount: number
   spicyLevel?: number | null
@@ -88,6 +90,13 @@ export interface Product {
   stock: number
   categoryId: string
   category?: Category // included by the catalog list/detail endpoints
+}
+
+/** P2: one gallery image. sortOrder 0 is the cover and equals Product.imageUrl. */
+export interface ProductImage {
+  id: string
+  url: string
+  sortOrder: number
 }
 
 export interface Category {

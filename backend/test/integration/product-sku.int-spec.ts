@@ -26,7 +26,7 @@ describe('P2 #5 product SKU (real DB)', () => {
   })
 
   const dto = (slug: string, extra: Partial<CreateProductDto> = {}) =>
-    ({ slug, name: `Product ${slug}`, description: 'x', price: 30000, imageUrl: '/x.png', categoryId, status: 'ACTIVE', stock: 5, ...extra }) as CreateProductDto
+    ({ slug, name: `Product ${slug}`, description: 'x', price: 30000, imageUrl: '/x.png', categoryId, status: 'ACTIVE', stock: 5, ...extra }) as Omit<CreateProductDto, 'images'> & { imageUrl: string }
   const slug = (base: string) => `${base}-${randomUUID().slice(0, 6)}`
 
   it('creates a product with NO SKU sent: SKU is assigned from the slug', async () => {

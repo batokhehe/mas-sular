@@ -1,5 +1,5 @@
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
-import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import type { Cache } from 'cache-manager';
 import { OrderStatus, PaymentStatus, Prisma, ShipmentStatus } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
@@ -21,6 +21,7 @@ import {
 import { OrderCancellationService } from '../orders/order-cancellation.service';
 import { orderStatusSourcesFor } from '../orders/domain/order-status-transitions';
 import { isSkuUniqueViolation, skuCandidates, skuFromSlug } from './product-sku';
+import { assertCoverMatches, assertProductImageList, galleryRows, ORDERED_PRODUCT_IMAGES, sameGallery } from './product-images';
 import { CreateCategoryDto } from './application/dto/create-category.dto';
 import { CreateProductDto } from './application/dto/create-product.dto';
 import { CreatePromoDto } from './application/dto/create-promo.dto';
@@ -174,15 +175,26 @@ export class AdminService {
   }
 
   async createProduct(dto: CreateProductDto) {
+    // P2 gallery. `images` is never spread into Product data: it becomes a nested
+    // create, atomic with the product row. With images[] the cover is images[0];
+    // without it the legacy imageUrl is the cover (its validation is unchanged) and
+    // becomes the single gallery image, so Product.imageUrl = images[0] from day one.
+    const { images, ...fields } = dto;
+    const gallery = images !== undefined ? assertProductImageList(images) : undefined;
+    if (gallery) assertCoverMatches(fields.imageUrl, gallery);
+    const imageUrl = gallery ? gallery[0] : fields.imageUrl;
+    if (imageUrl === undefined) throw new BadRequestException('imageUrl or images is required');
+    const data = { ...fields, imageUrl, images: { create: galleryRows(gallery ?? [imageUrl]) } };
+
     // An explicit SKU is honoured exactly as before (P2 #5).
-    if (dto.sku?.trim()) return this.prisma.product.create({ data: { ...dto } });
+    if (data.sku?.trim()) return this.prisma.product.create({ data });
 
     // Otherwise assign one from the unique slug. SKU stays load-bearing (it is the
     // Paxel item code), so a product must never be created without one; and a
     // blank '' is never written because it would collide on @unique. Only a SKU
     // collision moves to the next candidate - any other error (a duplicate slug,
     // say) surfaces exactly as it did before.
-    const { sku: _blank, ...rest } = dto;
+    const { sku: _blank, ...rest } = data;
     for (const sku of skuCandidates(skuFromSlug(dto.slug))) {
       try {
         return await this.prisma.product.create({ data: { ...rest, sku } });
@@ -197,20 +209,52 @@ export class AdminService {
     return this.prisma.product.findMany({ where: { deletedAt: null }, orderBy: { createdAt: 'desc' } });
   }
 
+  /** Admin detail (edit form): the product plus its ordered gallery. The list never loads images. */
   async getProduct(id: string) {
-    const product = await this.prisma.product.findUnique({ where: { id } });
+    const product = await this.prisma.product.findUnique({ where: { id }, include: { images: ORDERED_PRODUCT_IMAGES } });
     if (!product || product.deletedAt) throw new NotFoundException('Product not found');
     return product;
   }
 
   async updateProduct(id: string, dto: UpdateProductDto) {
-    await this.getProduct(id);
+    const current = await this.getProduct(id);
     // The Admin form no longer sends a SKU (P2 #5), so an edit leaves the stored SKU
     // untouched. A blank SKU is treated as "not provided" rather than written: ''
     // would erase the Paxel item code and collide on @unique. A non-blank SKU from
     // an API client is still applied as before.
-    const { sku, ...rest } = dto;
-    return this.prisma.product.update({ where: { id }, data: sku?.trim() ? dto : rest });
+    const { sku, images, ...rest } = dto;
+    const data = sku?.trim() ? { ...rest, sku } : rest;
+
+    // No gallery change and no new cover: exactly the previous single update.
+    const coverChanged = rest.imageUrl !== undefined && rest.imageUrl !== current.imageUrl;
+    if (images === undefined && !coverChanged) {
+      return this.prisma.product.update({ where: { id }, data });
+    }
+
+    // Validate before opening the transaction. A url the product already has
+    // (legacy /products/*.jpg included) stays valid; a new one must be an upload.
+    const existing = new Set([current.imageUrl, ...(current.images ?? []).map((image) => image.url)]);
+    const gallery = images !== undefined ? assertProductImageList(images, existing) : undefined;
+    if (gallery) assertCoverMatches(rest.imageUrl, gallery);
+
+    // One transaction: the product row, the gallery and the cover never diverge.
+    return this.prisma.$transaction(async (tx) => {
+      if (gallery) {
+        if (!sameGallery(current.images ?? [], gallery)) {
+          await tx.productImage.deleteMany({ where: { productId: id } });
+          await tx.productImage.createMany({ data: galleryRows(gallery).map((row) => ({ ...row, productId: id })) });
+        }
+        return tx.product.update({ where: { id }, data: { ...data, imageUrl: gallery[0] }, include: { images: ORDERED_PRODUCT_IMAGES } });
+      }
+      // imageUrl-only change (API clients): the cover row follows; other images stay.
+      const imageUrl = rest.imageUrl as string;
+      await tx.productImage.upsert({
+        where: { productId_sortOrder: { productId: id, sortOrder: 0 } },
+        update: { url: imageUrl },
+        create: { productId: id, url: imageUrl, sortOrder: 0 },
+      });
+      return tx.product.update({ where: { id }, data, include: { images: ORDERED_PRODUCT_IMAGES } });
+    });
   }
 
   async deleteProduct(id: string) {

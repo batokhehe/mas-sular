@@ -57,8 +57,13 @@ export type AdminProduct = {
   widthCm?: number | null;
   heightCm?: number | null;
   isFragile?: boolean | null;
+  /** P2 gallery (admin detail only; the list does not load it). sortOrder 0 = cover = imageUrl. */
+  images?: { id: string; url: string; sortOrder: number }[];
   createdAt: string;
 };
+
+/** Create/update body: the product fields plus the ordered gallery as urls (images[0] = cover). */
+export type AdminProductInput = Omit<Partial<AdminProduct>, 'images'> & { images?: string[] };
 
 export type AdminPromo = {
   id: string;
@@ -664,14 +669,14 @@ export function fetchAdminProduct(id: string) {
   return api<AdminProduct>(`/admin/catalog/products/${id}`);
 }
 
-export function createAdminProduct(input: Partial<AdminProduct>) {
+export function createAdminProduct(input: AdminProductInput) {
   return api<AdminProduct>('/admin/catalog/products', {
     method: 'POST',
     body: JSON.stringify(input),
   });
 }
 
-export function updateAdminProduct(id: string, input: Partial<AdminProduct>) {
+export function updateAdminProduct(id: string, input: AdminProductInput) {
   return api<AdminProduct>(`/admin/catalog/products/${id}`, {
     method: 'PATCH',
     body: JSON.stringify(input),

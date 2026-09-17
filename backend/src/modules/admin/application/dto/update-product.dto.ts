@@ -1,5 +1,6 @@
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsEnum, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsEnum, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { MAX_PRODUCT_IMAGES } from '../../../upload/product-image-url';
 import { ProductStatus } from '@prisma/client';
 import { rawBoolean } from '../../../../common/validation/strict-boolean';
 
@@ -30,9 +31,20 @@ export class UpdateProductDto {
   @Min(0)
   originalPrice?: number;
 
+  /** Cover. Changing it alone also updates the gallery's first image (P2 D2). */
   @IsOptional()
   @IsString()
   imageUrl?: string;
+
+  /**
+   * P2 gallery. Omitted = unchanged. Sent = the COMPLETE ordered list (images[0] =
+   * cover); [] is rejected, at most 8, no duplicates, new urls must be app uploads.
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_PRODUCT_IMAGES)
+  @IsString({ each: true })
+  images?: string[];
 
   @IsOptional()
   @IsInt()

@@ -13,6 +13,7 @@ import { StorefrontShell } from '@/components/storefront/shell'
 import { StorefrontSkeleton } from '@/components/layout/storefront/storefront-skeleton'
 import { ErrorState } from '@/components/common/error-state'
 import { ProductCard } from '@/components/storefront/product-card'
+import { ProductGallery } from '@/components/storefront/product-gallery'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { formatIDR } from '@/lib/utils/format'
@@ -72,16 +73,17 @@ export default function ProductDetailPage() {
         ) : (
           <>
             <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
-              {/* Image + real badges */}
-              <div className="relative overflow-hidden rounded-2xl border bg-muted">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={product.imageUrl} alt={product.name} className="aspect-square w-full object-cover" />
-                <div className="absolute left-4 top-4 flex flex-col gap-2">
-                  {product.isBestSeller ? <Badge>Best seller</Badge> : null}
-                  {product.isNew ? <Badge variant="secondary">New</Badge> : null}
-                  {discount > 0 ? <Badge variant="destructive">-{discount}%</Badge> : null}
-                </div>
-              </div>
+              {/* Image gallery (P2) + real badges over the main image */}
+              <ProductGallery
+                product={product}
+                overlay={
+                  <div className="pointer-events-none absolute left-4 top-4 flex flex-col gap-2">
+                    {product.isBestSeller ? <Badge>Best seller</Badge> : null}
+                    {product.isNew ? <Badge variant="secondary">New</Badge> : null}
+                    {discount > 0 ? <Badge variant="destructive">-{discount}%</Badge> : null}
+                  </div>
+                }
+              />
 
               {/* Details */}
               <div className="space-y-4">
