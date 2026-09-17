@@ -77,6 +77,11 @@ export const PAYMENT_SERVICE_FEE_RULES: Readonly<Partial<Record<PaymentChannelCo
 /** Recorded with the order and with every payment attempt. JSON-safe. */
 export interface PaymentServiceFeeRuleSnapshot {
   version: string;
+  /**
+   * The pass-through switch that applied (PAYMENT_FEE_<channel>_ENABLED or the inherited
+   * PAYMENT_SERVICE_FEE_ENABLED). Absent on snapshots recorded before per-channel flags.
+   */
+  setting?: { enabled: boolean; variable: string; source: 'CHANNEL' | 'GLOBAL' };
   channel: string;
   type: PaymentServiceFeeType;
   rateBps: number;
@@ -89,7 +94,7 @@ export interface PaymentServiceFeeRuleSnapshot {
 export interface PaymentServiceFeeBreakdown {
   /** Channel the fee was calculated for; null when none was chosen. */
   channel: string | null;
-  /** PAYMENT_SERVICE_FEE_ENABLED at calculation time. */
+  /** The effective pass-through switch for this channel at calculation time. */
   feeEnabled: boolean;
   /** Fee-exclusive payable amount: subtotal + shipping - discount. */
   transactionBase: number;
@@ -142,6 +147,8 @@ export function calculatePaymentServiceFee(input: {
   paymentChannel?: string | null;
   transactionBase: number;
   feeEnabled: boolean;
+  /** Which variable produced `feeEnabled`; recorded in the rule snapshot when given. */
+  setting?: { variable: string; source: 'CHANNEL' | 'GLOBAL' };
 }): PaymentServiceFeeBreakdown {
   const channel = input.paymentChannel ? input.paymentChannel.toUpperCase() : null;
   const validBase = Number.isFinite(input.transactionBase) && input.transactionBase > 0;
@@ -160,7 +167,7 @@ export function calculatePaymentServiceFee(input: {
       merchantAbsorbedFee: 0,
       customerTotal: base,
       passThroughBlockedReason: null,
-      rule: rule ? snapshotOf(rule) : null,
+      rule: rule ? snapshotOf(rule, input) : null,
     };
   }
 
@@ -176,13 +183,17 @@ export function calculatePaymentServiceFee(input: {
     merchantAbsorbedFee: calculatedFee - customerFee,
     customerTotal: base + customerFee,
     passThroughBlockedReason: input.feeEnabled && prohibited ? `PASS_THROUGH_PROHIBITED:${rule.channel}` : null,
-    rule: snapshotOf(rule),
+    rule: snapshotOf(rule, input),
   };
 }
 
-function snapshotOf(rule: PaymentServiceFeeRule): PaymentServiceFeeRuleSnapshot {
+function snapshotOf(
+  rule: PaymentServiceFeeRule,
+  input: { feeEnabled: boolean; setting?: { variable: string; source: 'CHANNEL' | 'GLOBAL' } },
+): PaymentServiceFeeRuleSnapshot {
   return {
     version: PAYMENT_SERVICE_FEE_RULES_VERSION,
+    ...(input.setting ? { setting: { enabled: input.feeEnabled, variable: input.setting.variable, source: input.setting.source } } : {}),
     channel: rule.channel,
     type: rule.type,
     rateBps: rule.rateBps,

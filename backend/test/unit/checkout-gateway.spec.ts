@@ -175,6 +175,7 @@ import { OrdersService } from '../../src/modules/orders/orders.service';
 import { MERCHANT_FEE_FIELDS } from '../../src/modules/orders/domain/customer-order-view';
 import { CheckoutCourier, CreateOrderDto } from '../../src/modules/orders/application/dto/create-order.dto';
 import { PaymentChannelRegistry } from '../../src/modules/payments/gateway/payment-channel.registry';
+import { midtransSupportedChannels } from '../../src/modules/payments/gateway/domain/midtrans-channel.map';
 import { PaymentProviderFactory } from '../../src/modules/payments/gateway/payment-provider.factory';
 
 const USER = 'user-1';
@@ -216,7 +217,9 @@ function checkoutService(initiate?: jest.Mock, feeEnabled = true) {
   const shipping = { calculateRateForCourier: jest.fn().mockResolvedValue({ cost: 10000, etd: '2 days' }) };
   const idempotency = { isCheckoutEnabled: jest.fn().mockReturnValue(false) };
   const uploadTokens = { issue: jest.fn().mockResolvedValue({ uploadUrl: 'https://app/u/raw' }) };
-  const midtransStub = { name: 'midtrans', supportedChannels: () => ['QRIS' as const] };
+  // Every Midtrans channel, like the real provider: checkout now refuses a channel the
+  // registry would not offer (assertGatewayChannelReady), BNI_VA included.
+  const midtransStub = { name: 'midtrans', supportedChannels: () => midtransSupportedChannels() };
   // Manual transfer is always registered in the app; P0-3 makes a BANK_TRANSFER
   // checkout require it to be READY (an active bank account) - here it is.
   const manualStub = { name: 'manual', supportedChannels: () => ['MANUAL_TRANSFER' as const], isReady: async () => true };

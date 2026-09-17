@@ -29,6 +29,20 @@ test('fee mode says who bore the fee, including the compliance override', () => 
   assert.equal(feeModeLabel(null, null), '—'); // orders recorded before the breakdown
 });
 
+test('fee mode names the per-channel variable that decided it, when the snapshot records one', () => {
+  const channel = { enabled: false, variable: 'PAYMENT_FEE_VA_BRI_ENABLED', source: 'CHANNEL' as const };
+  assert.equal(feeModeLabel(false, rule({ channel: 'BRI_VA', setting: channel })), 'Merchant absorbs (PAYMENT_FEE_VA_BRI_ENABLED=false)');
+  assert.equal(
+    feeModeLabel(true, rule({ channel: 'GOPAY', setting: { enabled: true, variable: 'PAYMENT_FEE_EWALLET_GOPAY_ENABLED', source: 'CHANNEL' } })),
+    'Customer pays (PAYMENT_FEE_EWALLET_GOPAY_ENABLED=true)',
+  );
+  // Inherited from the global switch.
+  assert.equal(
+    feeModeLabel(true, rule({ setting: { enabled: true, variable: 'PAYMENT_SERVICE_FEE_ENABLED', source: 'GLOBAL' } })),
+    'Customer pays (PAYMENT_SERVICE_FEE_ENABLED=true)',
+  );
+});
+
 const strip = (src: string) => src.replace(/\{\s*\/\*[\s\S]*?\*\/\s*\}/g, '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
 const PAGE = strip(readFileSync(join(process.cwd(), 'app/orders/[id]/page.tsx'), 'utf8'));
 

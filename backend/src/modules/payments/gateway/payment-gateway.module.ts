@@ -7,7 +7,8 @@ import { PaymentAccountsModule } from '../../payment-accounts/payment-accounts.m
 import { ManualTransferProvider } from './infrastructure/providers/manual-transfer.provider';
 import { MidtransPaymentProvider } from './infrastructure/providers/midtrans-payment.provider';
 import { MIDTRANS_CONFIG, MidtransConfig, assertMidtransConfigured, loadMidtransConfig } from './midtrans.config';
-import { PaymentChannelRegistry } from './payment-channel.registry';
+import { PAYMENT_CHANNEL_AVAILABILITY_CONFIG, PaymentChannelRegistry } from './payment-channel.registry';
+import { loadPaymentChannelAvailability } from './domain/payment-channel-settings';
 import { PaymentGatewayPersistenceService } from './payment-gateway-persistence.service';
 import { PaymentAttemptPricingService } from './payment-attempt-pricing.service';
 import { PaymentInitiationService } from './payment-initiation.service';
@@ -67,6 +68,8 @@ import { loadPaymentServiceFeeConfig, PAYMENT_SERVICE_FEE_CONFIG } from './payme
     MidtransReconciliationWorker,
     // Who bears the payment service fee. Independent of MIDTRANS_CONFIG on purpose.
     { provide: PAYMENT_SERVICE_FEE_CONFIG, useFactory: () => loadPaymentServiceFeeConfig() },
+    // Which channels a customer may choose for a NEW payment (PAYMENT_<channel>_ENABLED).
+    { provide: PAYMENT_CHANNEL_AVAILABILITY_CONFIG, useFactory: () => loadPaymentChannelAvailability() },
   ],
   exports: [
     PaymentInitiationService,

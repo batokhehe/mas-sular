@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import {
   PAYMENT_CHANNELS,
   PaymentChannelCode,
@@ -6,14 +6,23 @@ import {
   PublicPaymentChannel,
   toPublicChannel,
 } from './domain/payment-channel';
+import {
+  isChannelEnabledByEnv,
+  loadPaymentChannelAvailability,
+  PaymentChannelAvailabilityConfig,
+} from './domain/payment-channel-settings';
 import { PaymentProvider } from './domain/payment-provider.interface';
+
+/** DI token: PAYMENT_<channel>_ENABLED, resolved once at boot. */
+export const PAYMENT_CHANNEL_AVAILABILITY_CONFIG = 'PAYMENT_CHANNEL_AVAILABILITY_CONFIG';
 import { PaymentProviderFactory } from './payment-provider.factory';
 
 /**
  * The channel catalog and the channel → provider binding.
  *
- * A channel is AVAILABLE only when it is statically enabled AND its provider is
- * registered in this build AND that provider declares support for it. That triple
+ * A channel is AVAILABLE only when it is statically enabled AND switched on by its
+ * PAYMENT_<channel>_ENABLED variable (absent = on) AND its provider is registered in
+ * this build AND that provider declares support for it. That triple
  * gate is why Phase 1 is inert: no gateway provider exists yet, so only manual
  * transfer can ever be returned — exactly today's customer-visible behavior.
  *
@@ -25,7 +34,11 @@ import { PaymentProviderFactory } from './payment-provider.factory';
 export class PaymentChannelRegistry {
   private readonly logger = new Logger(PaymentChannelRegistry.name);
 
-  constructor(private readonly providers: PaymentProviderFactory) {}
+  constructor(
+    private readonly providers: PaymentProviderFactory,
+    // Optional for positional test construction; absent -> read from process.env.
+    @Optional() @Inject(PAYMENT_CHANNEL_AVAILABILITY_CONFIG) private readonly availability?: PaymentChannelAvailabilityConfig,
+  ) {}
 
   /** Every catalog entry, including unavailable ones (diagnostics / admin). */
   list(): PaymentChannelDescriptor[] {
@@ -69,8 +82,14 @@ export class PaymentChannelRegistry {
     return PAYMENT_CHANNELS.find((channel) => channel.code === code);
   }
 
+  /**
+   * Gates NEW payments only (listing, checkout, initiate). Status checks, webhooks,
+   * expiry, reconciliation and the resume page never consult it, so an attempt that
+   * is already open on a channel switched off later keeps working.
+   */
   isAvailable(channel: PaymentChannelDescriptor): boolean {
     if (!channel.enabled) return false;
+    if (!isChannelEnabledByEnv(this.availability ?? loadPaymentChannelAvailability(), channel.code)) return false;
     const provider = this.providers.get(channel.provider);
     return Boolean(provider?.supportedChannels().includes(channel.code));
   }

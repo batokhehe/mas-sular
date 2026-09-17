@@ -18,6 +18,8 @@ export type ServiceFeeRuleSnapshot = {
   vatIncluded: boolean;
   passThrough: 'ALLOWED' | 'PROHIBITED';
   basis: string;
+  /** The switch that decided pass-through; absent on fees recorded before per-channel flags. */
+  setting?: { enabled: boolean; variable: string; source: 'CHANNEL' | 'GLOBAL' };
 };
 
 const rupiah = (n: number) => `Rp ${n.toLocaleString('id-ID')}`;
@@ -35,10 +37,15 @@ export function feeRuleLabel(rule: ServiceFeeRuleSnapshot | null | undefined): s
   return `${amount} (${rule.vatIncluded ? 'incl. VAT' : 'excl. VAT'})`;
 }
 
-/** Who bore the fee on this order, from the recorded toggle and rule. */
+/**
+ * Who bore the fee on this order, from the recorded toggle and rule. Names the
+ * variable that actually decided it (PAYMENT_FEE_<channel>_ENABLED, or the inherited
+ * PAYMENT_SERVICE_FEE_ENABLED); older snapshots only ever had the global one.
+ */
 export function feeModeLabel(enabled: boolean | null | undefined, rule: ServiceFeeRuleSnapshot | null | undefined): string {
   if (enabled == null) return '—'; // recorded before the fee breakdown existed
-  if (!enabled) return 'Merchant absorbs (PAYMENT_SERVICE_FEE_ENABLED=false)';
+  const variable = rule?.setting?.variable ?? 'PAYMENT_SERVICE_FEE_ENABLED';
+  if (!enabled) return `Merchant absorbs (${variable}=false)`;
   if (rule?.passThrough === 'PROHIBITED') return 'Merchant absorbs (pass-through prohibited for this channel)';
-  return 'Customer pays (PAYMENT_SERVICE_FEE_ENABLED=true)';
+  return `Customer pays (${variable}=true)`;
 }

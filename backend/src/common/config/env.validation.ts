@@ -1,3 +1,4 @@
+import { PAYMENT_CHANNEL_ENV_KEYS, paymentChannelSettingIssues } from '../../modules/payments/gateway/domain/payment-channel-settings';
 import { z } from 'zod';
 import {
   isJneSandboxUrl,
@@ -105,6 +106,9 @@ const baseSchema = z
     // "false" (default) = absorbed by the merchant. Independent of MIDTRANS_ENABLED;
     // QRIS and cards never pass the fee on (payment-service-fee.ts).
     PAYMENT_SERVICE_FEE_ENABLED: boolFlag,
+    // Per-channel availability (absent = enabled) and fee pass-through (absent = inherit
+    // PAYMENT_SERVICE_FEE_ENABLED): only "true" / "false". See payment-channel-settings.ts.
+    ...Object.fromEntries(PAYMENT_CHANNEL_ENV_KEYS.map((key) => [key, z.enum(['true', 'false']).optional()])),
 
     // Phase 13A — httpOnly auth cookies. All optional; cookie behavior is env-driven.
     COOKIE_DOMAIN: z.string().optional(),
@@ -379,6 +383,13 @@ export const envSchema = baseSchema.superRefine((env, ctx) => {
         });
       }
     }
+  }
+
+  // Payment channels / per-channel service fee: explicit settings that cannot be
+  // honoured (SeaBank, a prohibited or rule-less fee pass-through, nothing to pay
+  // with) stop boot instead of being silently ignored.
+  for (const [key, message] of paymentChannelSettingIssues(env as Record<string, string | undefined>)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: [key], message });
   }
 
   // Geocoding needs a key the moment it is switched on; discovering that at the

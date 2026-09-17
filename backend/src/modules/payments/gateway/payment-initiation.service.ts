@@ -10,7 +10,7 @@ import { PaymentAttemptPricingService } from './payment-attempt-pricing.service'
 import { PaymentChannelRegistry } from './payment-channel.registry';
 import { PaymentProviderFactory } from './payment-provider.factory';
 import { calculatePaymentServiceFee } from './domain/payment-service-fee';
-import { loadPaymentServiceFeeConfig, PAYMENT_SERVICE_FEE_CONFIG, PaymentServiceFeeConfig } from './payment-service-fee.config';
+import { feeSettingFor, loadPaymentServiceFeeConfig, PAYMENT_SERVICE_FEE_CONFIG, PaymentServiceFeeConfig } from './payment-service-fee.config';
 
 /** Provider name assumed for rows created before gateways existed (Payment.provider is null). */
 const DEFAULT_PROVIDER = 'manual';
@@ -105,12 +105,16 @@ export class PaymentInitiationService {
       // Never open (or charge) a gateway attempt for a zero/invalid amount.
       throw new ConflictException('Payment has no valid amount to charge');
     }
+    // Pass-through follows the channel's own PAYMENT_FEE_<channel>_ENABLED, else the
+    // global PAYMENT_SERVICE_FEE_ENABLED; the deciding variable goes into the snapshot.
+    const feeSetting = feeSettingFor(this.feeConfig ?? loadPaymentServiceFeeConfig(), channel.code);
     const fee =
       payment.method === PaymentMethod.GATEWAY
         ? calculatePaymentServiceFee({
             paymentChannel: channel.code,
             transactionBase,
-            feeEnabled: (this.feeConfig ?? loadPaymentServiceFeeConfig()).enabled,
+            feeEnabled: feeSetting.enabled,
+            setting: feeSetting,
           })
         : null;
 

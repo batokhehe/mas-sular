@@ -28,6 +28,7 @@ import { calculatePaymentServiceFee, PaymentServiceFeeBreakdown } from '../payme
 import { toCustomerOrder } from './domain/customer-order-view';
 import { withoutCourierInternals } from '../shipment/shipment-metadata';
 import {
+  feeSettingFor,
   loadPaymentServiceFeeConfig,
   PAYMENT_SERVICE_FEE_CONFIG,
   PaymentServiceFeeConfig,
@@ -112,8 +113,9 @@ export class OrdersService {
     @Optional() @Inject(PAYMENT_SERVICE_FEE_CONFIG) private readonly feeConfig?: PaymentServiceFeeConfig,
   ) {}
 
-  private paymentServiceFeeEnabled(): boolean {
-    return (this.feeConfig ?? loadPaymentServiceFeeConfig()).enabled;
+  /** The channel's pass-through switch: PAYMENT_FEE_<channel>_ENABLED, else PAYMENT_SERVICE_FEE_ENABLED. */
+  private paymentServiceFeeSetting(channel: string | null | undefined) {
+    return feeSettingFor(this.feeConfig ?? loadPaymentServiceFeeConfig(), channel);
   }
 
   /**
@@ -632,11 +634,13 @@ export class OrdersService {
     // Gateway orders only. At checkout this is a PREVIEW for the chosen channel; the
     // authoritative figure is recalculated per payment attempt at initiation.
     const feeApplies = dto.payment_method === PaymentMethod.GATEWAY;
+    const feeSetting = this.paymentServiceFeeSetting(dto.payment_channel);
     const fee: PaymentServiceFeeBreakdown | null = feeApplies
       ? calculatePaymentServiceFee({
           paymentChannel: dto.payment_channel,
           transactionBase,
-          feeEnabled: this.paymentServiceFeeEnabled(),
+          feeEnabled: feeSetting.enabled,
+          setting: feeSetting,
         })
       : null;
 
@@ -764,6 +768,7 @@ export class OrdersService {
   ) {
     this.assertSelectablePaymentMethod(dto.payment_method);
     await this.assertManualTransferReady(dto.payment_method);
+    await this.assertGatewayChannelReady(dto.payment_method, dto.payment_channel);
     const items = this.normalizeItems(dto.items);
     const { products, toppings } = await this.getCartPricing(items);
     this.assertStock(items, products);
@@ -801,6 +806,21 @@ export class OrdersService {
     const manual = this.paymentChannels.find('MANUAL_TRANSFER');
     if (manual && (await this.paymentChannels.isReady(manual))) return;
     throw new BadRequestException('Transfer Bank is not available right now. Please choose another payment method.');
+  }
+
+  /**
+   * A NEW gateway order naming a channel must name one a customer can use right now:
+   * in the catalog, switched on (PAYMENT_<channel>_ENABLED), its provider registered
+   * and ready - exactly what GET /payments/channels offers. Checked BEFORE the order
+   * exists: the charge opens only after commit and its failure is swallowed, so a
+   * disabled channel would otherwise leave a PENDING order with nothing to pay.
+   * Existing orders and payments are untouched.
+   */
+  private async assertGatewayChannelReady(method?: PaymentMethod, channelCode?: string): Promise<void> {
+    if (method !== PaymentMethod.GATEWAY || !channelCode || !this.paymentChannels) return;
+    const channel = this.paymentChannels.find(channelCode);
+    if (channel && (await this.paymentChannels.isReady(channel))) return;
+    throw new BadRequestException('This payment method is not available right now. Please choose another payment method.');
   }
 
   /**
