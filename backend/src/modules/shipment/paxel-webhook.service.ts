@@ -247,7 +247,7 @@ export class PaxelWebhookService {
       }
 
       const stored = readPaxelWebhook(shipment.metadata);
-      // The shared Paxel vocabulary. Undocumented codes (HAPH, FAILED3PL, ...) are
+      // The shared Paxel vocabulary. Unconfirmed codes (FAILED3PL, ONHOLD3PL, any other) are
       // undefined here and the rule answers 'unmapped_status': recorded, never applied.
       const target = lookupProviderStatus(PAXEL_PROVIDER, payload.latestStatus);
       const { next, changed, addedLogs } = mergePaxelWebhook(stored, payload, target ?? null, receivedAt);

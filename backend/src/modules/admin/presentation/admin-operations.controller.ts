@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Header, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { PaymentStatus } from '@prisma/client';
 import { ApiTags } from '@nestjs/swagger';
 import { AdminUser, CurrentAdmin } from '../../../common/decorators/current-admin.decorator';
@@ -10,6 +10,7 @@ import { AdminService } from '../admin.service';
 import { ExecutiveDashboardService } from '../executive-dashboard.service';
 import { AdminOrderNotesService } from '../admin-order-notes.service';
 import { AdminInvoiceLinkService } from '../admin-invoice-link.service';
+import { PackingSlipService } from '../packing-slip.service';
 import { ShipmentService } from '../../shipment/shipment.service';
 import {
   CreateShipmentDto,
@@ -37,6 +38,7 @@ export class AdminOperationsController {
     // same collaborator the retry and prepare actions already go through.
     private readonly shipments: ShipmentService,
     private readonly invoiceLinks: AdminInvoiceLinkService,
+    private readonly packingSlips: PackingSlipService,
   ) {}
 
   @Permissions('Dashboard.read')
@@ -69,6 +71,16 @@ export class AdminOperationsController {
   @Get('orders/:id/operations')
   orderOperations(@Param('id') id: string) {
     return this.adminService.getOrderOperations(id);
+  }
+
+  // ---- Packing slip (P3) ----
+  // Read-only print view: recipient, items (no prices) and the shipment AWB. Same
+  // access as the order detail; carries customer PII, so it is never cached.
+  @Permissions('Order.read')
+  @Get('orders/:id/packing-slip')
+  @Header('Cache-Control', 'no-store')
+  packingSlip(@Param('id') id: string) {
+    return this.packingSlips.get(id);
   }
 
   // ---- Customer invoice link (P2 #14) ----

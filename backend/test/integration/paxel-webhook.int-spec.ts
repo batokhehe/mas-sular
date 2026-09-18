@@ -226,17 +226,55 @@ describe('Paxel webhook: idempotency, staleness and terminal states on real Post
     expect(statuses(s.outbox)).toEqual(['CANCELLED'])
   })
 
-  it('an undocumented status (ODL) is recorded without any transition; the lifecycle then continues', async () => {
+  it.each(['FAILED3PL', 'ONHOLD3PL'])('an unconfirmed status (%s) stays AS-IS: recorded without any transition; the lifecycle then continues', async (code) => {
     const { shipment, scenario, awb, orderNumber } = await paxelShipment()
-    expect((await post(push(awb, orderNumber, 'ODL', '2026-09-13 13:00:00'))).body).toEqual({ received: true })
+    expect((await post(push(awb, orderNumber, code, '2026-09-13 13:00:00'))).body).toEqual({ received: true })
     let s = await state(shipment.id, scenario.order.id)
     expect(s.shipment.status).toBe(ShipmentStatus.CREATED)
     expect([s.history.length, s.outbox.length]).toEqual([0, 0])
-    expect(s.record!.observations).toEqual([expect.objectContaining({ latestStatus: 'ODL', mappedStatus: null })])
+    expect(s.record!.observations).toEqual([expect.objectContaining({ latestStatus: code, mappedStatus: null })])
 
     await post(pdo(awb, orderNumber))
     s = await state(shipment.id, scenario.order.id)
     expect(s.shipment.status).toBe(ShipmentStatus.DELIVERED)
+  })
+
+  it('the documented Paxel lifecycle (RTP, COL, PAPV, POLXL, HAPH, ODLXL, COD, ODL, PDO) moves forward once per internal state; replaying it changes nothing', async () => {
+    const { shipment, scenario, awb, orderNumber } = await paxelShipment()
+    const sequence: Array<[string, string, ShipmentStatus]> = [
+      ['RTP', '2026-09-13 08:00:00', ShipmentStatus.CREATED], // Shipment successfully created (already CREATED)
+      ['COL', '2026-09-13 08:30:00', ShipmentStatus.WAITING_PICKUP], // Courier has arrived at pickup location
+      ['PAPV', '2026-09-13 09:00:00', ShipmentStatus.PICKED_UP], // Courier has picked up your shipment
+      ['POLXL', '2026-09-13 10:00:00', ShipmentStatus.IN_TRANSIT], // Package on Origin Locker
+      ['HAPH', '2026-09-13 11:00:00', ShipmentStatus.IN_TRANSIT], // Hold at Paxel Home
+      ['ODLXL', '2026-09-13 12:00:00', ShipmentStatus.IN_TRANSIT], // Package on Destination Locker
+      ['COD', '2026-09-13 13:00:00', ShipmentStatus.OUT_FOR_DELIVERY], // Courier has arrived at destination
+      ['ODL', '2026-09-13 14:00:00', ShipmentStatus.OUT_FOR_DELIVERY], // On Delivery
+      ['PDO', '2026-09-13 15:00:00', ShipmentStatus.DELIVERED], // Delivery is Completed
+    ]
+    for (const [code, time, expected] of sequence) {
+      expect((await post(push(awb, orderNumber, code, time))).body).toEqual({ received: true })
+      expect([code, (await state(shipment.id, scenario.order.id)).shipment.status]).toEqual([code, expected])
+    }
+    let s = await state(shipment.id, scenario.order.id)
+    expect(s.history.map((h) => h.mappedStatus)).toEqual(['WAITING_PICKUP', 'PICKED_UP', 'IN_TRANSIT', 'OUT_FOR_DELIVERY', 'DELIVERED'])
+    expect(statuses(s.outbox)).toEqual(['PICKED_UP', 'IN_TRANSIT', 'OUT_FOR_DELIVERY', 'DELIVERED'])
+    expect(s.order.status).toBe('DELIVERED')
+
+    // Paxel retries: the whole sequence again adds nothing.
+    for (const [code, time] of sequence) expect((await post(push(awb, orderNumber, code, time))).body).toEqual({ received: true })
+    s = await state(shipment.id, scenario.order.id)
+    expect(s.history).toHaveLength(5)
+    expect(s.outbox).toHaveLength(4)
+  })
+
+  it('PRJL ("Pickup cancelled by courier") fails the shipment but never cancels the order', async () => {
+    const { shipment, scenario, awb, orderNumber } = await paxelShipment()
+    expect((await post(push(awb, orderNumber, 'PRJL', '2026-09-13 09:00:00'))).body).toEqual({ received: true })
+    const s = await state(shipment.id, scenario.order.id)
+    expect(s.shipment.status).toBe(ShipmentStatus.FAILED)
+    expect(s.order.status).not.toBe('CANCELLED')
+    expect(statuses(s.outbox)).toEqual(['FAILED'])
   })
 
   it('unknown AWB → 404 and invoice_number mismatch → 409: nothing is created or modified', async () => {

@@ -25,6 +25,7 @@ import { useAdminProfile } from '@/lib/auth';
 import { formatRupiah } from '@/lib/utils/number';
 import { feeModeLabel, feeRuleLabel } from '@/lib/orders/service-fee-view';
 import { orderItemPricing } from '@/lib/orders/order-item-view';
+import { packingSlipPath } from '@/lib/orders/packing-slip-view';
 import {
   ADMIN_LOADING_MESSAGES, ADMIN_SUCCESS_MESSAGES, confirmApprove, confirmReject, runWithFeedback,
 } from '@/lib/admin-alert';
@@ -147,7 +148,6 @@ export default function OrderDetailPage() {
           {actions?.openTracking && order.shipment?.trackingUrl ? (
             <a href={order.shipment.trackingUrl} target="_blank" rel="noreferrer"><ActionButton icon={ExternalLink}>Open Tracking</ActionButton></a>
           ) : null}
-          <ActionButton icon={Printer} onClick={() => window.print()}>Print Packing Slip</ActionButton>
         </div>
       </Card>
 
@@ -158,6 +158,10 @@ export default function OrderDetailPage() {
         <div className="space-y-5">
           {/* SECTION 1 — Order Summary */}
           <Section title="Order Summary" icon={ClipboardList}>
+            {/* P3: the printable packing slip, in its own tab (read-only). */}
+            <div className="mb-4 flex justify-end">
+              <ActionButton icon={Printer} onClick={() => window.open(packingSlipPath(order.id), '_blank', 'noopener,noreferrer')}>Packing Slip</ActionButton>
+            </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Order Number" value={order.orderNumber} />
               <Field label="Order Status" value={order.status} />

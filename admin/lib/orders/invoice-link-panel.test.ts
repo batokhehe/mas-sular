@@ -20,8 +20,9 @@ const API = read('lib/admin.ts');
 test('17. Order Detail shows the invoice panel instead of printing the Admin page', () => {
   assert.equal(/Print Invoice/.test(PAGE), false, 'the window.print() "Print Invoice" button is gone');
   assert.match(PAGE, /<InvoiceLinkPanel orderId=\{order\.id\} recipientPhone=\{order\.address\?\.phone \?\? order\.user\?\.phone \?\? null\} \/>/);
-  // 21. the rest of the Quick Actions are untouched.
-  for (const kept of ['Verify Payment', 'Reject Payment', 'Retry Shipment', 'Cancel Order', 'Download Receipt', 'Open Tracking', 'Print Packing Slip']) {
+  // 21. the rest of the Quick Actions are untouched. (P3 replaced the whole-page
+  // "Print Packing Slip" action with the Packing Slip document - see packing-slip-view.test.ts.)
+  for (const kept of ['Verify Payment', 'Reject Payment', 'Retry Shipment', 'Cancel Order', 'Download Receipt', 'Open Tracking']) {
     assert.ok(PAGE.includes(kept), `kept: ${kept}`);
   }
 });

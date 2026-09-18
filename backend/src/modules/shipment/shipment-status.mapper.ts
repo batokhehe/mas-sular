@@ -13,36 +13,58 @@ function norm(raw: string): string {
 
 // Provider-specific status dictionaries (keyed by normalized provider status).
 /**
- * Paxel's real status vocabulary, from the webhook examples in the Paxel
- * eCommerce API Postman collection. Each mapping below is backed by the note
- * text Paxel ships with that status; codes whose meaning the collection does
- * NOT establish are deliberately absent so they fall through to UNKNOWN rather
- * than being guessed from the acronym:
+ * Paxel's status vocabulary. Every code below is mapped from Paxel's OWN definition,
+ * onto the EXISTING internal lifecycle (no new ShipmentStatus values):
  *
- *   HAPH, FAILED3PL, ONHOLD3PL, ODL, ODLXL, POLXL
+ *   Paxel documentation (Webhook > Shipment Status Mapping):
+ *     RTP    Shipment successfully created          -> CREATED
+ *     COL    Courier has arrived at pickup location -> WAITING_PICKUP
+ *     PAPV   Courier has picked up your shipment    -> PICKED_UP
+ *     POLXL  Package on Origin Locker               -> IN_TRANSIT
+ *     ODLXL  Package on Destination Locker          -> IN_TRANSIT
+ *     HAPH   Hold at Paxel Home                     -> IN_TRANSIT
+ *     COD    Courier has arrived at destination     -> OUT_FOR_DELIVERY
+ *     ODL    On Delivery                            -> OUT_FOR_DELIVERY
+ *     PDO    Delivery is Completed                  -> DELIVERED
+ *     PRJL   Pickup cancelled by courier            -> FAILED
  *
- * The locker states (ODL/ODLXL/POLXL) are the tempting ones — "shipment on
- * destination locker" could plausibly be OUT_FOR_DELIVERY or DELIVERED, and
- * guessing wrong would either notify a customer early or mark an undelivered
- * parcel as done. UNKNOWN is the honest answer until Paxel documents them.
+ *   Why these internal states:
+ *     - The locker and Paxel Home states hold the parcel INSIDE Paxel's network after
+ *       pickup and before the last mile: IN_TRANSIT. None of them is DELIVERED (only PDO
+ *       completes a delivery) and none is OUT_FOR_DELIVERY (the courier is not yet on
+ *       the way to the recipient), so no customer is told too early.
+ *     - PRJL is FAILED, not CANCELLED: a courier cancelling the PICKUP does not cancel
+ *       the customer's order (CANCELLED cascades to the order); FAILED keeps the order
+ *       and leaves the shipment re-bookable by an admin.
  *
- * The generic keys are kept alongside: they cost nothing and cover a provider
- * that starts returning plain words.
+ *   Deliberately ABSENT, kept AS-IS until Paxel confirms their meaning:
+ *     FAILED3PL, ONHOLD3PL
+ *   They are not mapped from their literal words; they fall through to UNKNOWN (the
+ *   poller) / 'unmapped_status' (the webhook): recorded, never applied.
+ *
+ * POL, POD and the failure codes below come from the note text Paxel ships with each
+ * status in its eCommerce API Postman collection. The generic keys are kept
+ * alongside: they cost nothing and cover a provider that starts returning plain words.
  */
 const PAXEL: Record<string, ShipmentStatus> = {
   // --- documented Paxel codes ---
   CONFIRMED: ShipmentStatus.CREATED,
-  RTP: ShipmentStatus.WAITING_PICKUP, // driver on the way to pickup
-  COL: ShipmentStatus.WAITING_PICKUP, // driver arrived at pickup location
-  PAPV: ShipmentStatus.PICKED_UP, // "your shipment received by <driver>"
+  RTP: ShipmentStatus.CREATED, // Paxel doc: "Shipment successfully created"
+  COL: ShipmentStatus.WAITING_PICKUP, // Paxel doc: "Courier has arrived at pickup location"
+  PAPV: ShipmentStatus.PICKED_UP, // Paxel doc: "Courier has picked up your shipment"
+  POLXL: ShipmentStatus.IN_TRANSIT, // Paxel doc: "Package on Origin Locker"
+  ODLXL: ShipmentStatus.IN_TRANSIT, // Paxel doc: "Package on Destination Locker"
+  HAPH: ShipmentStatus.IN_TRANSIT, // Paxel doc: "Hold at Paxel Home"
   POL: ShipmentStatus.IN_TRANSIT, // "shipment in transit"
   POD: ShipmentStatus.OUT_FOR_DELIVERY, // "on the way to destination"
-  COD: ShipmentStatus.OUT_FOR_DELIVERY, // "<driver> on destination"
-  PDO: ShipmentStatus.DELIVERED, // "has been delivered by <driver>"
-  PRJL: ShipmentStatus.FAILED, // rejected, shipment not ready
+  COD: ShipmentStatus.OUT_FOR_DELIVERY, // Paxel doc: "Courier has arrived at destination"
+  ODL: ShipmentStatus.OUT_FOR_DELIVERY, // Paxel doc: "On Delivery"
+  PDO: ShipmentStatus.DELIVERED, // Paxel doc: "Delivery is Completed"
+  PRJL: ShipmentStatus.FAILED, // Paxel doc: "Pickup cancelled by courier"
   RAP: ShipmentStatus.FAILED, // failed pickup, sender uncontactable
   UNDLM: ShipmentStatus.FAILED, // undelivered, address not found
   RTN: ShipmentStatus.FAILED, // returning to sender (no RETURNED in the enum)
+  // FAILED3PL, ONHOLD3PL: intentionally absent (meaning not confirmed by Paxel).
   // Confirmed against Paxel staging, not inferred from the acronym: POST
   // /shipments/:awb/cancel returned 200 echoing our cancellation_reason, after
   // which GET /shipments/:awb reported latest_status "CCS" carrying that same

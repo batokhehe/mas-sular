@@ -1,3 +1,4 @@
+import { PackingSlipService } from './packing-slip.service';
 import { Module } from '@nestjs/common';
 import { PermissionGuard } from '../../common/guards/permission.guard';
 import { LifecycleModule } from '../../infrastructure/lifecycle/lifecycle.module';
@@ -25,7 +26,7 @@ import { AdminInvoiceLinkService } from './admin-invoice-link.service';
 @Module({
   imports: [ShipmentModule, LifecycleModule, PaymentSettlementModule, InvoicesModule],
   controllers: [AdminCatalogController, AdminCmsController, AdminOperationsController, AdminSystemLogController, AdminIntegrationLogController, AdminQueueController, AdminIncidentController, AdminNotificationCenterController, AdminCommunicationController, AdminAuditController, AdminBellController, AdminPushController],
-  providers: [AdminService, ExecutiveDashboardService, AdminOrderNotesService, OrderCancellationService, CustomerCommunicationService, AdminInvoiceLinkService, PermissionGuard],
+  providers: [AdminService, ExecutiveDashboardService, AdminOrderNotesService, OrderCancellationService, CustomerCommunicationService, AdminInvoiceLinkService, PackingSlipService, PermissionGuard],
   exports: [AdminService],
 })
 export class AdminModule {}

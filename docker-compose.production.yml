@@ -192,6 +192,9 @@ services:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?set NEXT_PUBLIC_API_URL}
         NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${NEXT_PUBLIC_GOOGLE_CLIENT_ID:-}
         NEXT_PUBLIC_SUPPORT_URL: ${NEXT_PUBLIC_SUPPORT_URL:-}
+        # Floating WhatsApp support button. Empty/invalid number = no button.
+        NEXT_PUBLIC_WHATSAPP_NUMBER: ${NEXT_PUBLIC_WHATSAPP_NUMBER:-}
+        NEXT_PUBLIC_WHATSAPP_MESSAGE: ${NEXT_PUBLIC_WHATSAPP_MESSAGE:-}
     restart: unless-stopped
     <<: *hardening
     cap_drop: [ALL]

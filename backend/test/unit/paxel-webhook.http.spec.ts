@@ -357,7 +357,7 @@ describe('Paxel webhook - POST /api/v1/shipments/webhook/paxel', () => {
     expect(loggerLines).toContainEqual(expect.objectContaining({ event: 'paxel.webhook.processed', transition: 'stale', paxelStatus: 'RAP' }));
   }, HTTP_TEST_TIMEOUT_MS);
 
-  it.each(['HAPH', 'FAILED3PL', 'ONHOLD3PL', 'ODL', 'ODLXL', 'POLXL'])('undocumented %s → 200, recorded, NO transition/notification, operator warning', async (code) => {
+  it.each(['FAILED3PL', 'ONHOLD3PL'])('unconfirmed %s stays AS-IS → 200, recorded, NO transition/notification, operator warning', async (code) => {
     expect(await post(push(code))).toEqual({ status: 200, body: { received: true } });
     expect(shipment().status).toBe(ShipmentStatus.CREATED);
     expect(order().status).toBe(OrderStatus.SHIPPED);
@@ -366,10 +366,52 @@ describe('Paxel webhook - POST /api/v1/shipments/webhook/paxel', () => {
     expect(loggerLines).toContainEqual(expect.objectContaining({ event: 'paxel.webhook.unmapped_status', transition: 'unmapped_status', paxelStatus: code }));
   }, HTTP_TEST_TIMEOUT_MS);
 
-  it('after an undocumented code the lifecycle continues normally', async () => {
-    await post(push('ODL', '2026-09-13 11:00:00'));
+  it('after an unconfirmed code the lifecycle continues normally', async () => {
+    await post(push('FAILED3PL', '2026-09-13 11:00:00'));
     expect((await post(delivered())).body).toEqual({ received: true });
     expect(shipment().status).toBe(ShipmentStatus.DELIVERED);
+  }, HTTP_TEST_TIMEOUT_MS);
+
+  it.each([
+    // Paxel documentation (Webhook > Shipment Status Mapping), from a CREATED shipment.
+    ['COL', ShipmentStatus.WAITING_PICKUP, OrderStatus.SHIPPED, false], // Courier has arrived at pickup location
+    ['PAPV', ShipmentStatus.PICKED_UP, OrderStatus.DELIVERING, true], // Courier has picked up your shipment
+    ['POLXL', ShipmentStatus.IN_TRANSIT, OrderStatus.DELIVERING, true], // Package on Origin Locker
+    ['ODLXL', ShipmentStatus.IN_TRANSIT, OrderStatus.DELIVERING, true], // Package on Destination Locker
+    ['HAPH', ShipmentStatus.IN_TRANSIT, OrderStatus.DELIVERING, true], // Hold at Paxel Home
+    ['COD', ShipmentStatus.OUT_FOR_DELIVERY, OrderStatus.DELIVERING, true], // Courier has arrived at destination
+    ['ODL', ShipmentStatus.OUT_FOR_DELIVERY, OrderStatus.DELIVERING, true], // On Delivery
+    ['PDO', ShipmentStatus.DELIVERED, OrderStatus.DELIVERED, true], // Delivery is Completed
+    ['PRJL', ShipmentStatus.FAILED, OrderStatus.SHIPPED, true], // Pickup cancelled by courier
+  ] as const)('documented %s → shipment %s, order %s; one transition; a replay changes nothing', async (code, shipmentStatus, orderStatus, notifies) => {
+    const body = push(code, '2026-09-13 11:00:00');
+    expect(await post(body)).toEqual({ status: 200, body: { received: true } });
+    expect(shipment().status).toBe(shipmentStatus);
+    expect(order().status).toBe(orderStatus);
+    expect(db.state.history).toHaveLength(1);
+    expect(db.state.outbox.map((o) => o.payload.shipmentStatus)).toEqual(notifies ? [shipmentStatus] : []);
+    // Duplicate delivery (Paxel retries): 200, no second history row or notification.
+    expect(await post(body)).toEqual({ status: 200, body: { received: true } });
+    expect(db.state.history).toHaveLength(1);
+    expect(db.state.outbox).toHaveLength(notifies ? 1 : 0);
+    expect(loggerLines).toContainEqual(expect.objectContaining({ event: 'paxel.webhook.duplicate', paxelStatus: code }));
+  }, HTTP_TEST_TIMEOUT_MS);
+
+  it('documented RTP ("Shipment successfully created") on a CREATED shipment → 200, already there: no transition', async () => {
+    expect(await post(push('RTP'))).toEqual({ status: 200, body: { received: true } });
+    expect(shipment().status).toBe(ShipmentStatus.CREATED);
+    expect([db.state.history.length, db.state.outbox.length]).toEqual([0, 0]);
+    expect(record().observations).toEqual([expect.objectContaining({ latestStatus: 'RTP', mappedStatus: ShipmentStatus.CREATED })]);
+  }, HTTP_TEST_TIMEOUT_MS);
+
+  it('ODL ("On Delivery") after pickup moves to OUT_FOR_DELIVERY, and only PDO then delivers', async () => {
+    await post(push('PAPV', '2026-09-13 09:00:00'));
+    await post(push('ODL', '2026-09-13 11:00:00'));
+    expect(shipment().status).toBe(ShipmentStatus.OUT_FOR_DELIVERY);
+    expect(order().status).toBe(OrderStatus.DELIVERING);
+    await post(delivered());
+    expect(shipment().status).toBe(ShipmentStatus.DELIVERED);
+    expect(db.state.outbox.map((o) => o.payload.shipmentStatus)).toEqual([ShipmentStatus.PICKED_UP, ShipmentStatus.OUT_FOR_DELIVERY, ShipmentStatus.DELIVERED]);
   }, HTTP_TEST_TIMEOUT_MS);
 
   it('missing X-Paxel-Signature → 401; nothing looked up, locked or written', async () => {

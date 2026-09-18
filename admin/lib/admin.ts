@@ -576,6 +576,20 @@ export function fetchAdminOrder(id: string) {
   return api<AdminOrderDetail>(`/admin/orders/${id}`);
 }
 
+/** P3 packing slip: read-only print view (no prices, no payment data). Order.read. */
+export type PackingSlipView = {
+  orderNumber: string;
+  orderDate: string;
+  outlet: string;
+  recipient: { name: string; address: string; regionLines: string[]; postalCode: string; phone: string };
+  items: Array<{ no: number; productName: string; quantity: number; toppings: string[] }>;
+  shipment: { trackingNumber: string | null; awbLabel: string; status: string | null; statusLabel: string };
+};
+
+export function fetchPackingSlip(orderId: string) {
+  return api<PackingSlipView>(`/admin/orders/${encodeURIComponent(orderId)}/packing-slip`);
+}
+
 // ---------------- Customer invoice link (P2 #14) ----------------
 
 /** Only metadata: the link itself is shown once, in the response that created it. */

@@ -170,8 +170,9 @@ describe('PaxelShipmentProvider tracking', () => {
     const { provider } = build(config(), () =>
       res(200, JSON.stringify({ data: { status: 'DELIVERED', latest_status: 'RTP' } })),
     );
-    // `status` is the field the old guessed contract used; latest_status wins.
-    expect((await provider.trackShipment(AWB)).status).toBe(ShipmentStatus.WAITING_PICKUP);
+    // `status` is the field the old guessed contract used; latest_status wins
+    // (RTP = "Shipment successfully created" -> CREATED, not the DELIVERED of `status`).
+    expect((await provider.trackShipment(AWB)).status).toBe(ShipmentStatus.CREATED);
   });
 
   it('exposes the raw provider status unmapped for the status mapper', async () => {
@@ -183,12 +184,16 @@ describe('PaxelShipmentProvider tracking', () => {
 
   it.each([
     ['CONFIRMED', ShipmentStatus.CREATED],
-    ['RTP', ShipmentStatus.WAITING_PICKUP],
+    ['RTP', ShipmentStatus.CREATED],
     ['COL', ShipmentStatus.WAITING_PICKUP],
     ['PAPV', ShipmentStatus.PICKED_UP],
+    ['POLXL', ShipmentStatus.IN_TRANSIT],
+    ['ODLXL', ShipmentStatus.IN_TRANSIT],
+    ['HAPH', ShipmentStatus.IN_TRANSIT],
     ['POL', ShipmentStatus.IN_TRANSIT],
     ['POD', ShipmentStatus.OUT_FOR_DELIVERY],
     ['COD', ShipmentStatus.OUT_FOR_DELIVERY],
+    ['ODL', ShipmentStatus.OUT_FOR_DELIVERY],
     ['PDO', ShipmentStatus.DELIVERED],
     ['PRJL', ShipmentStatus.FAILED],
     ['RAP', ShipmentStatus.FAILED],
@@ -207,12 +212,12 @@ describe('PaxelShipmentProvider tracking', () => {
    * "CCS" carrying the cancellation_reason we had sent - direct evidence of its
    * meaning rather than an inference from the acronym.
    *
-   * The rest stay UNKNOWN deliberately. The locker states are the tempting
-   * ones, and guessing wrong would either notify a customer early or mark an
-   * undelivered parcel as done.
+   * HAPH, ODL, ODLXL and POLXL moved to the documented list once Paxel defined them.
+   * FAILED3PL and ONHOLD3PL stay UNKNOWN deliberately (AS-IS): Paxel has not confirmed
+   * their meaning, and their literal words are not evidence.
    */
-  it.each(['HAPH', 'FAILED3PL', 'ONHOLD3PL', 'ODL', 'ODLXL', 'POLXL'])(
-    'maps the undocumented status %s to UNKNOWN rather than guessing',
+  it.each(['FAILED3PL', 'ONHOLD3PL'])(
+    'keeps the unconfirmed status %s AS-IS: UNKNOWN rather than guessing',
     async (paxelStatus) => {
       const { provider } = build(config(), () => res(200, detail(paxelStatus)));
       expect((await provider.trackShipment(AWB)).status).toBe(ShipmentStatus.UNKNOWN);

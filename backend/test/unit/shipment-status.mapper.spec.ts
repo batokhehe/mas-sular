@@ -26,20 +26,50 @@ describe('ShipmentStatusMapper', () => {
     expect(mapper.toOrderStatus(mapper.map('paxel', 'CCS').mapped)).toBe(OrderStatus.CANCELLED);
   });
 
-  it('leaves the other undocumented Paxel codes at UNKNOWN', () => {
+  it('FAILED3PL and ONHOLD3PL stay AS-IS: unmapped, UNKNOWN, never read from their literal words', () => {
     const warn = jest.spyOn(mapper['logger'], 'warn').mockImplementation(() => undefined);
-    // Still undocumented: guessing a locker state could mark an undelivered
-    // parcel as done, or notify a customer early.
-    for (const code of ['HAPH', 'FAILED3PL', 'ONHOLD3PL', 'ODL', 'ODLXL', 'POLXL']) {
+    // Paxel has not confirmed their meaning; they must not become FAILED / on-hold / anything.
+    for (const code of ['FAILED3PL', 'ONHOLD3PL', 'failed3pl', ' onhold3pl ']) {
       expect(mapper.map('paxel', code)).toEqual({ mapped: ShipmentStatus.UNKNOWN, known: false });
     }
+    expect(warn).toHaveBeenCalledTimes(4);
     warn.mockRestore();
+  });
+
+  it.each([
+    // Paxel documentation (Webhook > Shipment Status Mapping) -> the existing lifecycle.
+    ['RTP', ShipmentStatus.CREATED], // Shipment successfully created
+    ['COL', ShipmentStatus.WAITING_PICKUP], // Courier has arrived at pickup location
+    ['PAPV', ShipmentStatus.PICKED_UP], // Courier has picked up your shipment
+    ['POLXL', ShipmentStatus.IN_TRANSIT], // Package on Origin Locker
+    ['ODLXL', ShipmentStatus.IN_TRANSIT], // Package on Destination Locker
+    ['HAPH', ShipmentStatus.IN_TRANSIT], // Hold at Paxel Home
+    ['COD', ShipmentStatus.OUT_FOR_DELIVERY], // Courier has arrived at destination
+    ['ODL', ShipmentStatus.OUT_FOR_DELIVERY], // On Delivery
+    ['PDO', ShipmentStatus.DELIVERED], // Delivery is Completed
+    ['PRJL', ShipmentStatus.FAILED], // Pickup cancelled by courier
+  ])('documented Paxel status %s -> %s', (code, status) => {
+    expect(mapper.map('paxel', code)).toEqual({ mapped: status, known: true });
+  });
+
+  it('ODL is "On Delivery": OUT_FOR_DELIVERY, never DELIVERED; only PDO completes a delivery', () => {
+    expect(mapper.map('paxel', 'ODL').mapped).toBe(ShipmentStatus.OUT_FOR_DELIVERY);
+    const delivered = ['RTP', 'COL', 'PAPV', 'POLXL', 'ODLXL', 'COD', 'PDO', 'PRJL', 'HAPH', 'ODL'].filter(
+      (code) => mapper.map('paxel', code).mapped === ShipmentStatus.DELIVERED,
+    );
+    expect(delivered).toEqual(['PDO']);
+  });
+
+  it('PRJL (pickup cancelled by courier) is FAILED, not CANCELLED: the customer order is never cancelled by it', () => {
+    expect(mapper.map('paxel', 'PRJL').mapped).toBe(ShipmentStatus.FAILED);
+    expect(mapper.toOrderStatus(ShipmentStatus.FAILED)).not.toBe(OrderStatus.CANCELLED);
   });
 
   it('keeps the previously established Paxel mappings unchanged', () => {
     const expected: Array<[string, ShipmentStatus]> = [
       ['CONFIRMED', ShipmentStatus.CREATED],
-      ['RTP', ShipmentStatus.WAITING_PICKUP],
+      // RTP: CREATED since Paxel documented it as "Shipment successfully created".
+      ['RTP', ShipmentStatus.CREATED],
       ['COL', ShipmentStatus.WAITING_PICKUP],
       ['PAPV', ShipmentStatus.PICKED_UP],
       ['POL', ShipmentStatus.IN_TRANSIT],

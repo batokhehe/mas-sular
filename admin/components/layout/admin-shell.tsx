@@ -12,9 +12,15 @@ import { Topbar } from './topbar';
 export function AdminShell({
   children,
   requiredPermissions = [],
+  variant = 'default',
 }: {
   children: ReactNode;
   requiredPermissions?: readonly string[];
+  /**
+   * 'document': the same session and permission checks, without the sidebar/topbar
+   * chrome - for printable pages (P3 packing slip).
+   */
+  variant?: 'default' | 'document';
 }) {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -56,6 +62,20 @@ export function AdminShell({
         </div>
       </div>
     );
+  }
+
+  if (variant === 'document') {
+    if (!hasAllPermissions(permissions, requiredPermissions)) {
+      return (
+        <div className="flex min-h-screen items-center justify-center bg-white p-4">
+          <div className="max-w-md rounded-2xl border border-red-100 bg-red-50 p-6 text-sm text-red-700">
+            <h1 className="text-base font-semibold text-red-900">Permission required</h1>
+            <p className="mt-1">Your role does not have access to this admin page.</p>
+          </div>
+        </div>
+      );
+    }
+    return <>{children}</>;
   }
 
   if (!hasAllPermissions(permissions, requiredPermissions)) {
