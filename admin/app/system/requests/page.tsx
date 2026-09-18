@@ -45,26 +45,26 @@ export default function RequestExplorerPage() {
   return (
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.systemLogs}>
       <div className="mb-6">
-        <h2 className="text-xl font-semibold text-gray-900">Request Explorer</h2>
-        <p className="mt-1 text-sm text-gray-500">Inspect the full lifecycle of any HTTP request via its request ID.</p>
+        <h2 className="text-xl font-semibold text-gray-900">Penjelajah Request</h2>
+        <p className="mt-1 text-sm text-gray-500">Periksa siklus lengkap request HTTP melalui request ID-nya.</p>
       </div>
 
       <Card>
         {/* Filters */}
         <div className="flex flex-wrap items-end gap-3">
           <label className="space-y-1 text-sm">
-            <span className="block text-xs uppercase text-gray-400">Search</span>
+            <span className="block text-xs uppercase text-gray-400">Cari</span>
             <input
               defaultValue={filters.search ?? ''}
               onChange={(e) => patch({ search: e.target.value })}
-              placeholder="Request / Order / Payment / Shipment ID, customer…"
+              placeholder="ID Request / Pesanan / Pembayaran / Pengiriman, pelanggan…"
               className="h-10 w-80 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm outline-none focus:border-[#465fff] focus:bg-white"
             />
           </label>
           <label className="space-y-1 text-sm">
-            <span className="block text-xs uppercase text-gray-400">Method</span>
+            <span className="block text-xs uppercase text-gray-400">Metode</span>
             <select value={filters.method ?? ''} onChange={(e) => patch({ method: e.target.value || undefined })} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]">
-              <option value="">All</option>
+              <option value="">Semua</option>
               {METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
             </select>
           </label>
@@ -73,16 +73,16 @@ export default function RequestExplorerPage() {
             <input defaultValue={filters.statusCode ?? ''} onChange={(e) => patch({ statusCode: e.target.value.replace(/\D/g, '') || undefined })} placeholder="500" className="h-10 w-24 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" />
           </label>
           <label className="space-y-1 text-sm">
-            <span className="block text-xs uppercase text-gray-400">From</span>
+            <span className="block text-xs uppercase text-gray-400">Dari</span>
             <input type="datetime-local" onChange={(e) => patch({ dateFrom: e.target.value ? new Date(e.target.value).toISOString() : undefined })} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" />
           </label>
           <label className="space-y-1 text-sm">
-            <span className="block text-xs uppercase text-gray-400">To</span>
+            <span className="block text-xs uppercase text-gray-400">Sampai</span>
             <input type="datetime-local" onChange={(e) => patch({ dateTo: e.target.value ? new Date(e.target.value).toISOString() : undefined })} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" />
           </label>
         </div>
 
-        <CardTitle className="mt-5">Requests</CardTitle>
+        <CardTitle className="mt-5">Request</CardTitle>
         <div className="mt-4 overflow-x-auto">
           {query.isLoading ? (
             <div className="space-y-2">
@@ -93,25 +93,25 @@ export default function RequestExplorerPage() {
           ) : query.isError ? (
             <div className="flex flex-col items-center gap-3 p-10 text-center">
               <AlertTriangle className="h-6 w-6 text-red-500" />
-              <p className="text-sm text-red-600">Unable to load requests.</p>
-              <Button onClick={() => void query.refetch()}>Retry</Button>
+              <p className="text-sm text-red-600">Gagal memuat request.</p>
+              <Button onClick={() => void query.refetch()}>Coba ulang</Button>
             </div>
           ) : (data?.items.length ?? 0) === 0 ? (
-            <p className="p-10 text-center text-sm text-gray-500">No requests found.</p>
+            <p className="p-10 text-center text-sm text-gray-500">Tidak ada request ditemukan.</p>
           ) : (
             <table className="w-full min-w-[1050px] text-left text-sm">
               <thead>
                 <tr className="border-b border-gray-100 text-xs uppercase text-gray-400">
-                  <th className="py-2 font-medium">Time</th>
-                  <th className="py-2 font-medium">Method</th>
+                  <th className="py-2 font-medium">Waktu</th>
+                  <th className="py-2 font-medium">Metode</th>
                   <th className="py-2 font-medium">Path</th>
                   <th className="py-2 font-medium">Status</th>
-                  <th className="py-2 font-medium">Duration</th>
-                  <th className="py-2 font-medium">User</th>
+                  <th className="py-2 font-medium">Durasi</th>
+                  <th className="py-2 font-medium">Pengguna</th>
                   <th className="py-2 font-medium">Request ID</th>
-                  <th className="py-2 text-right font-medium">Errors</th>
-                  <th className="py-2 text-right font-medium">Warnings</th>
-                  <th className="py-2 font-medium">Actions</th>
+                  <th className="py-2 text-right font-medium">Error</th>
+                  <th className="py-2 text-right font-medium">Peringatan</th>
+                  <th className="py-2 font-medium">Aksi</th>
                 </tr>
               </thead>
               <tbody>
@@ -129,7 +129,7 @@ export default function RequestExplorerPage() {
                       <span className="flex items-center gap-1.5 font-mono text-xs text-gray-400">
                         {r.requestId ? `${r.requestId.slice(0, 8)}…` : '—'}
                         {r.requestId ? (
-                          <button onClick={() => copy(r.requestId!)} title="Copy Request ID" className="text-gray-300 hover:text-gray-600"><Copy className="h-3.5 w-3.5" /></button>
+                          <button onClick={() => copy(r.requestId!)} title="Salin Request ID" className="text-gray-300 hover:text-gray-600"><Copy className="h-3.5 w-3.5" /></button>
                         ) : null}
                       </span>
                     </td>
@@ -138,7 +138,7 @@ export default function RequestExplorerPage() {
                     <td className="py-2.5">
                       {r.requestId ? (
                         <Link href={`/system/requests/${encodeURIComponent(r.requestId)}`} className="inline-flex items-center gap-1.5 text-xs font-medium text-[#465fff] hover:underline">
-                          <SearchCode className="h-3.5 w-3.5" /> Inspect
+                          <SearchCode className="h-3.5 w-3.5" /> Periksa
                         </Link>
                       ) : null}
                     </td>

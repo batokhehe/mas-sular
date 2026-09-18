@@ -13,9 +13,9 @@ export interface StorefrontLink {
 
 // Canonical production routes (catalog is the real listing — not the retired /menu).
 export const STOREFRONT_LINKS: StorefrontLink[] = [
-  { label: 'Home', href: '/', icon: Home },
-  { label: 'Catalog', href: '/catalog', icon: UtensilsCrossed },
-  { label: 'Orders', href: '/orders', icon: ClipboardList },
+  { label: 'Beranda', href: '/', icon: Home },
+  { label: 'Katalog', href: '/catalog', icon: UtensilsCrossed },
+  { label: 'Pesanan', href: '/orders', icon: ClipboardList },
 ]
 
 export function isActivePath(pathname: string | null, href: string): boolean {

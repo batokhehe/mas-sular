@@ -63,13 +63,13 @@ export default function ProductDetailPage() {
           href="/catalog"
           className="mb-6 inline-flex items-center text-sm text-muted-foreground transition-colors hover:text-foreground"
         >
-          <ChevronLeft className="mr-1 size-4" /> Back to catalog
+          <ChevronLeft className="mr-1 size-4" /> Kembali ke katalog
         </Link>
 
         {isLoading ? (
           <StorefrontSkeleton />
         ) : isError || !product ? (
-          <ErrorState description="Product not found." onRetry={() => void refetch()} />
+          <ErrorState description="Produk tidak ditemukan." onRetry={() => void refetch()} />
         ) : (
           <>
             <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
@@ -78,8 +78,8 @@ export default function ProductDetailPage() {
                 product={product}
                 overlay={
                   <div className="pointer-events-none absolute left-4 top-4 flex flex-col gap-2">
-                    {product.isBestSeller ? <Badge>Best seller</Badge> : null}
-                    {product.isNew ? <Badge variant="secondary">New</Badge> : null}
+                    {product.isBestSeller ? <Badge>Terlaris</Badge> : null}
+                    {product.isNew ? <Badge variant="secondary">Baru</Badge> : null}
                     {discount > 0 ? <Badge variant="destructive">-{discount}%</Badge> : null}
                   </div>
                 }
@@ -96,7 +96,7 @@ export default function ProductDetailPage() {
                       <span className="flex items-center gap-1">
                         <Star className="size-4 fill-yellow-400 text-yellow-400" />
                         <span className="font-medium">{Number(product.rating).toFixed(1)}</span>
-                        <span className="text-muted-foreground">({product.reviewCount} reviews)</span>
+                        <span className="text-muted-foreground">({product.reviewCount} ulasan)</span>
                       </span>
                     ) : null}
                     {spicy > 0 ? (
@@ -117,12 +117,12 @@ export default function ProductDetailPage() {
                 </div>
 
                 <dl className="grid grid-cols-2 gap-2 text-sm">
-                  <dt className="text-muted-foreground">Stock</dt>
-                  <dd>{product.stock > 0 ? `${product.stock} available` : 'Out of stock'}</dd>
+                  <dt className="text-muted-foreground">Stok</dt>
+                  <dd>{product.stock > 0 ? `${product.stock} tersedia` : 'Stok Habis'}</dd>
                 </dl>
 
                 <div>
-                  <h3 className="mb-1 font-semibold">Description</h3>
+                  <h3 className="mb-1 font-semibold">Deskripsi</h3>
                   <p className="whitespace-pre-line text-sm leading-relaxed text-muted-foreground">
                     {product.description}
                   </p>
@@ -131,7 +131,7 @@ export default function ProductDetailPage() {
                 {!outOfStock && availableToppings.length > 0 ? (
                   <fieldset>
                     <legend className="mb-2 font-semibold">
-                      Toppings <span className="text-sm font-normal text-muted-foreground">(optional)</span>
+                      Topping <span className="text-sm font-normal text-muted-foreground">(opsional)</span>
                     </legend>
                     <div className="grid gap-2 sm:grid-cols-2">
                       {availableToppings.map((topping) => (
@@ -162,7 +162,7 @@ export default function ProductDetailPage() {
                       className="size-9 rounded-full"
                       disabled={outOfStock}
                       onClick={() => setQty((q) => Math.max(1, q - 1))}
-                      aria-label="Decrease quantity"
+                      aria-label="Kurangi jumlah"
                     >
                       <Minus className="size-4" />
                     </Button>
@@ -173,7 +173,7 @@ export default function ProductDetailPage() {
                       className="size-9 rounded-full"
                       disabled={outOfStock}
                       onClick={() => setQty((q) => q + 1)}
-                      aria-label="Increase quantity"
+                      aria-label="Tambah jumlah"
                     >
                       <Plus className="size-4" />
                     </Button>
@@ -183,11 +183,11 @@ export default function ProductDetailPage() {
                     disabled={outOfStock}
                     onClick={() => {
                       add(product, qty, chosenToppings)
-                      toast.success('Added to cart')
+                      toast.success('Ditambahkan ke keranjang')
                     }}
                   >
                     <ShoppingCart className="mr-2 size-4" />
-                    {outOfStock ? 'Out of stock' : `Add to cart · ${formatIDR(unitPrice * qty)}`}
+                    {outOfStock ? 'Stok Habis' : `Tambah ke Keranjang · ${formatIDR(unitPrice * qty)}`}
                   </Button>
                 </div>
               </div>

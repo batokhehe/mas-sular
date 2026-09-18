@@ -54,31 +54,31 @@ export default function SystemLogsPage() {
   return (
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.systemLogs}>
       <div className="mb-6">
-        <h2 className="text-xl font-semibold text-gray-900">System Logs</h2>
-        <p className="mt-1 text-sm text-gray-500">Structured request, exception, and worker events — newest first.</p>
+        <h2 className="text-xl font-semibold text-gray-900">Log Sistem</h2>
+        <p className="mt-1 text-sm text-gray-500">Event request, exception, dan worker terstruktur — terbaru di atas.</p>
       </div>
 
       <Card>
         {/* Filters */}
         <div className="flex flex-wrap items-end gap-3">
           <label className="space-y-1 text-sm">
-            <span className="block text-xs uppercase text-gray-400">Search</span>
+            <span className="block text-xs uppercase text-gray-400">Cari</span>
             <input
               defaultValue={filters.search ?? ''}
               onChange={(e) => patch({ search: e.target.value })}
-              placeholder="Message, Request ID, Order/Payment/User ID…"
+              placeholder="Pesan, Request ID, ID Pesanan/Pembayaran/Pengguna…"
               className="h-10 w-72 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm outline-none focus:border-[#465fff] focus:bg-white"
             />
           </label>
           <label className="space-y-1 text-sm">
             <span className="block text-xs uppercase text-gray-400">Level</span>
             <select value={filters.level ?? ''} onChange={(e) => patch({ level: e.target.value as LogLevel | '' })} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]">
-              <option value="">All</option>
+              <option value="">Semua</option>
               {LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
             </select>
           </label>
           <label className="space-y-1 text-sm">
-            <span className="block text-xs uppercase text-gray-400">Module</span>
+            <span className="block text-xs uppercase text-gray-400">Modul</span>
             <input defaultValue={filters.module ?? ''} onChange={(e) => patch({ module: e.target.value })} placeholder="http, exception…" className="h-10 w-40 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" />
           </label>
           <label className="space-y-1 text-sm">
@@ -86,16 +86,16 @@ export default function SystemLogsPage() {
             <input defaultValue={filters.statusCode ?? ''} onChange={(e) => patch({ statusCode: e.target.value.replace(/\D/g, '') })} placeholder="500" className="h-10 w-24 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" />
           </label>
           <label className="space-y-1 text-sm">
-            <span className="block text-xs uppercase text-gray-400">From</span>
+            <span className="block text-xs uppercase text-gray-400">Dari</span>
             <input type="datetime-local" onChange={(e) => patch({ dateFrom: e.target.value ? new Date(e.target.value).toISOString() : undefined })} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" />
           </label>
           <label className="space-y-1 text-sm">
-            <span className="block text-xs uppercase text-gray-400">To</span>
+            <span className="block text-xs uppercase text-gray-400">Sampai</span>
             <input type="datetime-local" onChange={(e) => patch({ dateTo: e.target.value ? new Date(e.target.value).toISOString() : undefined })} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" />
           </label>
         </div>
 
-        <CardTitle className="mt-5">Logs</CardTitle>
+        <CardTitle className="mt-5">Log</CardTitle>
         <div className="mt-4 overflow-x-auto">
           {query.isLoading ? (
             <div className="space-y-2">
@@ -106,24 +106,24 @@ export default function SystemLogsPage() {
           ) : query.isError ? (
             <div className="flex flex-col items-center gap-3 p-10 text-center">
               <AlertTriangle className="h-6 w-6 text-red-500" />
-              <p className="text-sm text-red-600">Unable to load logs.</p>
-              <Button onClick={() => void query.refetch()}>Retry</Button>
+              <p className="text-sm text-red-600">Gagal memuat log.</p>
+              <Button onClick={() => void query.refetch()}>Coba ulang</Button>
             </div>
           ) : (data?.items.length ?? 0) === 0 ? (
-            <p className="p-10 text-center text-sm text-gray-500">No logs found.</p>
+            <p className="p-10 text-center text-sm text-gray-500">Tidak ada log ditemukan.</p>
           ) : (
             <table className="w-full min-w-[1000px] text-left text-sm">
               <thead>
                 <tr className="border-b border-gray-100 text-xs uppercase text-gray-400">
-                  <th className="py-2 font-medium">Time</th>
+                  <th className="py-2 font-medium">Waktu</th>
                   <th className="py-2 font-medium">Level</th>
-                  <th className="py-2 font-medium">Module</th>
-                  <th className="py-2 font-medium">Action</th>
-                  <th className="py-2 font-medium">Message</th>
+                  <th className="py-2 font-medium">Modul</th>
+                  <th className="py-2 font-medium">Aksi</th>
+                  <th className="py-2 font-medium">Pesan</th>
                   <th className="py-2 font-medium">Status</th>
-                  <th className="py-2 font-medium">Duration</th>
+                  <th className="py-2 font-medium">Durasi</th>
                   <th className="py-2 font-medium">Request ID</th>
-                  <th className="py-2 font-medium">User</th>
+                  <th className="py-2 font-medium">Pengguna</th>
                 </tr>
               </thead>
               <tbody>
@@ -173,20 +173,20 @@ function LogDrawer({ log, loading, onClose }: { log?: SystemLog; loading: boolea
           ) : (
             <>
               <section>
-                <p className="mb-2 text-xs font-semibold uppercase text-gray-400">General</p>
+                <p className="mb-2 text-xs font-semibold uppercase text-gray-400">Umum</p>
                 <dl className="space-y-1.5">
                   <Field label="Level" value={<LevelBadge level={log.level} />} />
-                  <Field label="Time" value={dt(log.createdAt)} />
-                  <Field label="Module" value={log.module} />
-                  <Field label="Action" value={log.action} />
-                  <Field label="Message" value={<span className="whitespace-pre-wrap break-words">{log.message}</span>} />
+                  <Field label="Waktu" value={dt(log.createdAt)} />
+                  <Field label="Modul" value={log.module} />
+                  <Field label="Aksi" value={log.action} />
+                  <Field label="Pesan" value={<span className="whitespace-pre-wrap break-words">{log.message}</span>} />
                   <Field label="Status" value={log.statusCode ?? '—'} />
-                  <Field label="Duration" value={log.durationMs != null ? `${log.durationMs}ms` : '—'} />
+                  <Field label="Durasi" value={log.durationMs != null ? `${log.durationMs}ms` : '—'} />
                   <Field label="Method / Path" value={`${log.method ?? '—'} ${log.path ?? ''}`} />
                   <Field label="Request ID" value={<span className="font-mono text-xs">{log.requestId ?? '—'}</span>} />
                   <Field label="IP" value={log.ip ?? '—'} />
-                  <Field label="Admin / User" value={log.adminId ?? log.userId ?? '—'} />
-                  <Field label="Order / Payment / Shipment" value={[log.orderId, log.paymentId, log.shipmentId].filter(Boolean).join(' · ') || '—'} />
+                  <Field label="Admin / Pengguna" value={log.adminId ?? log.userId ?? '—'} />
+                  <Field label="Pesanan / Pembayaran / Pengiriman" value={[log.orderId, log.paymentId, log.shipmentId].filter(Boolean).join(' · ') || '—'} />
                 </dl>
               </section>
 

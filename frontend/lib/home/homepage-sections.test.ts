@@ -31,7 +31,7 @@ test('the homepage performs no category fetch of its own', () => {
 test('every other homepage section is still rendered, in order', () => {
   // P2 #10 adds "Promo Spesial Produk" right after the voucher carousel; P2 #11 adds
   // "Trial Pack" right after that.
-  const order = ['<HomeHero', '<BannerCarousel', '<PromoCarousel', 'title="Promo Spesial Produk"', 'title="Trial Pack"', 'title="Best Sellers"', 'title="New Arrivals"', 'title="All Products"']
+  const order = ['<HomeHero', '<BannerCarousel', '<PromoCarousel', 'title="Promo Spesial Produk"', 'title="Trial Pack"', 'title="Terlaris"', 'title="Produk Terbaru"', 'title="Semua Produk"']
   const positions = order.map((marker) => HOME.indexOf(marker))
   for (const [i, pos] of positions.entries()) assert.ok(pos >= 0, `homepage lost ${order[i]}`)
   assert.deepEqual([...positions].sort((a, b) => a - b), positions, 'homepage section order changed')

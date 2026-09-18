@@ -33,9 +33,9 @@ export function incidentDuration(firstSeen: string, lastSeen: string): string {
 export function incidentLinks(i: Incident): Array<{ label: string; href: string; id: string }> {
   const links: Array<{ label: string; href: string; id: string }> = [];
   if (i.requestId) links.push({ label: 'Request', href: `/system/requests/${encodeURIComponent(i.requestId)}`, id: i.requestId });
-  if (i.orderId) links.push({ label: 'Order', href: `/orders/${i.orderId}`, id: i.orderId });
-  if (i.paymentId) links.push({ label: 'Payment', href: '/payments', id: i.paymentId });
-  if (i.shipmentId) links.push({ label: 'Shipment', href: `/shipping/${i.shipmentId}`, id: i.shipmentId });
+  if (i.orderId) links.push({ label: 'Pesanan', href: `/orders/${i.orderId}`, id: i.orderId });
+  if (i.paymentId) links.push({ label: 'Pembayaran', href: '/payments', id: i.paymentId });
+  if (i.shipmentId) links.push({ label: 'Pengiriman', href: `/shipping/${i.shipmentId}`, id: i.shipmentId });
   return links;
 }
 

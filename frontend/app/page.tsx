@@ -37,15 +37,15 @@ export default function HomePage() {
           </div>
         ) : isError ? (
           <div className="mx-auto max-w-6xl px-4">
-            <ErrorState description="Could not load products." onRetry={() => void refetch()} />
+            <ErrorState description="Gagal memuat produk." onRetry={() => void refetch()} />
           </div>
         ) : (
           <>
             <ProductSection title="Promo Spesial Produk" products={promoSpecial} />
             <ProductSection title="Trial Pack" products={trialPack} />
-            <ProductSection title="Best Sellers" products={bestSellers} viewAllHref="/catalog" />
-            <ProductSection title="New Arrivals" products={latest} viewAllHref="/catalog" />
-            <ProductSection title="All Products" products={featured} viewAllHref="/catalog" />
+            <ProductSection title="Terlaris" products={bestSellers} viewAllHref="/catalog" />
+            <ProductSection title="Produk Terbaru" products={latest} viewAllHref="/catalog" />
+            <ProductSection title="Semua Produk" products={featured} viewAllHref="/catalog" />
           </>
         )}
       </div>

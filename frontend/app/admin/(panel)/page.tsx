@@ -13,6 +13,7 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Empty } from '@/components/common/empty'
 import { formatIDR } from '@/lib/utils/format'
+import { orderStatusLabel } from '@/lib/invoice/labels'
 
 function StatCard({
   label,
@@ -62,35 +63,35 @@ export default function AdminDashboardPage() {
   ).length
 
   if (!canPayments && !canOrders) {
-    return <Empty title="No dashboard access" description="Your account has no dashboard permissions." />
+    return <Empty title="Tidak ada akses dasbor" description="Akun Anda tidak memiliki izin dasbor." />
   }
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Dashboard</h1>
+      <h1 className="text-2xl font-bold">Dasbor</h1>
 
       {canPayments ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard
-            label="Awaiting verification"
+            label="Menunggu verifikasi"
             value={verification.data?.length ?? 0}
             loading={verification.isLoading}
             icon={<Clock className="size-5" />}
           />
           <StatCard
-            label="Pending payment"
+            label="Belum dibayar"
             value={pending.data?.length ?? 0}
             loading={pending.isLoading}
             icon={<CreditCard className="size-5" />}
           />
           <StatCard
-            label="Expiring soon"
+            label="Segera kedaluwarsa"
             value={expiringSoon}
             loading={verification.isLoading || pending.isLoading}
             icon={<AlarmClock className="size-5" />}
           />
           <StatCard
-            label="Expired"
+            label="Kedaluwarsa"
             value={expired.data?.length ?? 0}
             loading={expired.isLoading}
             icon={<TimerOff className="size-5" />}
@@ -100,9 +101,9 @@ export default function AdminDashboardPage() {
 
       {canOrders ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <StatCard label="Processing" value={orderCount('PROCESSING')} loading={ordersQuery.isLoading} icon={<Package className="size-5" />} />
-          <StatCard label="Shipped" value={orderCount('SHIPPED')} loading={ordersQuery.isLoading} icon={<Truck className="size-5" />} />
-          <StatCard label="Delivered" value={orderCount('DELIVERED')} loading={ordersQuery.isLoading} icon={<PackageCheck className="size-5" />} />
+          <StatCard label="Diproses" value={orderCount('PROCESSING')} loading={ordersQuery.isLoading} icon={<Package className="size-5" />} />
+          <StatCard label="Dikirim" value={orderCount('SHIPPED')} loading={ordersQuery.isLoading} icon={<Truck className="size-5" />} />
+          <StatCard label="Diterima" value={orderCount('DELIVERED')} loading={ordersQuery.isLoading} icon={<PackageCheck className="size-5" />} />
         </div>
       ) : null}
 
@@ -110,7 +111,7 @@ export default function AdminDashboardPage() {
         <Card className="p-5">
           <div className="mb-4 flex items-center gap-2">
             <ClipboardList className="size-5 text-muted-foreground" />
-            <h2 className="font-semibold">Recent orders</h2>
+            <h2 className="font-semibold">Pesanan terbaru</h2>
           </div>
           {ordersQuery.isLoading ? (
             <div className="space-y-2">
@@ -119,7 +120,7 @@ export default function AdminDashboardPage() {
               ))}
             </div>
           ) : recentOrders.length === 0 ? (
-            <Empty title="No orders yet" />
+            <Empty title="Belum ada pesanan" />
           ) : (
             <ul className="divide-y">
               {recentOrders.map((order) => (
@@ -130,7 +131,7 @@ export default function AdminDashboardPage() {
                   </div>
                   <div className="flex items-center gap-3">
                     <span>{formatIDR(order.totalPrice)}</span>
-                    <Badge variant="outline">{order.status}</Badge>
+                    <Badge variant="outline">{orderStatusLabel(order.status)}</Badge>
                   </div>
                 </li>
               ))}
@@ -138,7 +139,7 @@ export default function AdminDashboardPage() {
           )}
           {canPayments ? (
             <Link href="/admin/payments" className="mt-4 inline-block text-sm text-primary underline">
-              Go to payment verification →
+              Ke verifikasi pembayaran →
             </Link>
           ) : null}
         </Card>

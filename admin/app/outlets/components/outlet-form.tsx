@@ -38,12 +38,12 @@ export function OutletForm({ initialValues, onSubmit, submitLabel, isSubmitting 
     event.preventDefault();
     setError(null);
 
-    if (!name.trim()) return setError('Outlet name is required.');
-    if (!/^\d{5}$/.test(postalCode)) return setError('Postal code must be exactly 5 digits.');
+    if (!name.trim()) return setError('Nama outlet wajib diisi.');
+    if (!/^\d{5}$/.test(postalCode)) return setError('Kode pos harus tepat 5 digit.');
     const lat = Number(latitude);
     const lng = Number(longitude);
-    if (!Number.isFinite(lat) || lat < -90 || lat > 90) return setError('Latitude must be between -90 and 90.');
-    if (!Number.isFinite(lng) || lng < -180 || lng > 180) return setError('Longitude must be between -180 and 180.');
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90) return setError('Latitude harus di antara -90 dan 90.');
+    if (!Number.isFinite(lng) || lng < -180 || lng > 180) return setError('Longitude harus di antara -180 dan 180.');
 
     await onSubmit({
       name: name.trim(),
@@ -64,23 +64,23 @@ export function OutletForm({ initialValues, onSubmit, submitLabel, isSubmitting 
       <form onSubmit={handleSubmit} className="mt-4 space-y-6">
         <div className="grid gap-4 lg:grid-cols-2">
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Outlet Name *</span>
+            <span>Nama Outlet *</span>
             <input value={name} onChange={(e) => setName(e.target.value)} className={inputClass} required />
           </label>
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Address (street, no.)</span>
+            <span>Alamat (jalan, no.)</span>
             <input value={addressDetail} onChange={(e) => setAddressDetail(e.target.value)} className={inputClass} />
           </label>
         </div>
 
         <div>
-          <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">Region</p>
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">Wilayah</p>
           <RegionChainSelect value={region} onChange={setRegion} />
         </div>
 
         <div className="grid gap-4 lg:grid-cols-3">
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Postal Code *</span>
+            <span>Kode Pos *</span>
             <input
               value={postalCode}
               onChange={(e) => setPostalCode(e.target.value.replace(/\D/g, '').slice(0, 5))}

@@ -2,11 +2,11 @@
 
 // Canonical forward lifecycle shown as a timeline.
 const STEPS: { status: string; label: string }[] = [
-  { status: 'CREATED', label: 'Created' },
-  { status: 'PICKED_UP', label: 'Picked Up' },
-  { status: 'IN_TRANSIT', label: 'In Transit' },
-  { status: 'OUT_FOR_DELIVERY', label: 'Out For Delivery' },
-  { status: 'DELIVERED', label: 'Delivered' },
+  { status: 'CREATED', label: 'Pengiriman dibuat' },
+  { status: 'PICKED_UP', label: 'Dijemput kurir' },
+  { status: 'IN_TRANSIT', label: 'Dalam perjalanan' },
+  { status: 'OUT_FOR_DELIVERY', label: 'Sedang diantar' },
+  { status: 'DELIVERED', label: 'Terkirim' },
 ];
 
 const ORDER = STEPS.map((s) => s.status);
@@ -38,7 +38,7 @@ export function ShipmentTimeline({ currentStatus, history = [] }: Props) {
 
   return (
     <div className="mt-3">
-      <p className="text-xs uppercase text-gray-400">Shipment Timeline</p>
+      <p className="text-xs uppercase text-gray-400">Riwayat Pengiriman</p>
       <ol className="mt-3 space-y-0">
         {STEPS.map((step, index) => {
           const reached = isReached(step.status, index);
@@ -67,7 +67,7 @@ export function ShipmentTimeline({ currentStatus, history = [] }: Props) {
       </ol>
       {terminal ? (
         <p className={`text-sm font-medium ${currentStatus === 'FAILED' ? 'text-red-600' : 'text-gray-600'}`}>
-          Shipment {currentStatus === 'FAILED' ? 'failed' : 'cancelled'}.
+          Pengiriman {currentStatus === 'FAILED' ? 'gagal' : 'dibatalkan'}.
         </p>
       ) : null}
     </div>

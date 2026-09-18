@@ -36,7 +36,7 @@ export default function OutletsPage() {
 
   const handleActivate = (id: string) =>
     runWithFeedback({
-      confirm: () => confirmStatusChange('Inactive', 'Active', { title: 'Activate this outlet?' }),
+      confirm: () => confirmStatusChange('Nonaktif', 'Aktif', { title: 'Aktifkan outlet ini?' }),
       loading: ADMIN_LOADING_MESSAGES.update,
       success: ADMIN_SUCCESS_MESSAGES.updated,
       action: () => activateMutation.mutateAsync(id),
@@ -56,34 +56,34 @@ export default function OutletsPage() {
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.outlets}>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold text-gray-900">Outlet Configuration</h2>
+          <h2 className="text-xl font-semibold text-gray-900">Konfigurasi Outlet</h2>
           <p className="mt-1 text-sm text-gray-500">
-            Shipping providers always use the active outlet as the origin. Exactly one outlet is active.
+            Penyedia pengiriman selalu memakai outlet aktif sebagai asal. Tepat satu outlet yang aktif.
           </p>
         </div>
         <PermissionGate permissions={ROUTE_PERMISSIONS.outletCreate}>
           <Link href="/outlets/new">
-            <Button>Add Outlet</Button>
+            <Button>Tambah Outlet</Button>
           </Link>
         </PermissionGate>
       </div>
 
       {!isLoading && !isError && !hasActive ? (
         <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-          No active outlet. Shipping providers cannot compute rates and the app will fail to boot if a provider is
-          enabled. Activate an outlet below.
+          Belum ada outlet aktif. Penyedia pengiriman tidak dapat menghitung tarif dan aplikasi akan gagal berjalan jika ada penyedia
+          yang diaktifkan. Aktifkan salah satu outlet di bawah.
         </div>
       ) : null}
 
       <Card>
-        <CardTitle>Outlets</CardTitle>
+        <CardTitle>Outlet</CardTitle>
         <div className="mt-4 space-y-3">
           {isLoading ? (
-            <p className="p-6 text-sm text-gray-500">Loading outlets…</p>
+            <p className="p-6 text-sm text-gray-500">Memuat outlet…</p>
           ) : isError ? (
-            <p className="p-6 text-sm text-red-600">Unable to load outlets. Please reauthenticate.</p>
+            <p className="p-6 text-sm text-red-600">Gagal memuat outlet. Silakan masuk ulang.</p>
           ) : data?.length === 0 ? (
-            <p className="p-6 text-sm text-gray-500">No outlets configured yet.</p>
+            <p className="p-6 text-sm text-gray-500">Belum ada outlet yang dikonfigurasi.</p>
           ) : (
             data?.map((outlet) => (
               <div
@@ -93,7 +93,7 @@ export default function OutletsPage() {
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <p className="font-medium text-gray-800">{outlet.name}</p>
-                    {outlet.isActive ? <Badge tone="success">Active</Badge> : <Badge tone="brand">Inactive</Badge>}
+                    {outlet.isActive ? <Badge tone="success">Aktif</Badge> : <Badge tone="brand">Nonaktif</Badge>}
                   </div>
                   <p className="text-sm text-gray-500">
                     {[outlet.addressDetail, regionLine(outlet)].filter(Boolean).join(' · ')}
@@ -106,12 +106,12 @@ export default function OutletsPage() {
                 <div className="flex items-center gap-2">
                   {!outlet.isActive ? (
                     <PermissionGate permissions={ROUTE_PERMISSIONS.outletActivate}>
-                      <Button onClick={() => handleActivate(outlet.id)}>Activate</Button>
+                      <Button onClick={() => handleActivate(outlet.id)}>Aktifkan</Button>
                     </PermissionGate>
                   ) : null}
                   <PermissionGate permissions={ROUTE_PERMISSIONS.outletUpdate}>
                     <Link href={`/outlets/${outlet.id}`}>
-                      <Button className="bg-white text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50">Edit</Button>
+                      <Button className="bg-white text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50">Ubah</Button>
                     </Link>
                   </PermissionGate>
                   {!outlet.isActive ? (
@@ -120,7 +120,7 @@ export default function OutletsPage() {
                         className="bg-white text-red-600 ring-1 ring-gray-200 hover:bg-gray-50"
                         onClick={() => handleDelete(outlet.id)}
                       >
-                        Delete
+                        Hapus
                       </Button>
                     </PermissionGate>
                   ) : null}

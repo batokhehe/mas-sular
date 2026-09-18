@@ -41,7 +41,7 @@ export default function EditPaymentAccountPage() {
   if (query.isLoading) {
     return (
       <AdminShell requiredPermissions={ROUTE_PERMISSIONS.paymentAccountUpdate}>
-        <p className="p-6 text-sm text-gray-500">Loading payment account...</p>
+        <p className="p-6 text-sm text-gray-500">Memuat rekening pembayaran...</p>
       </AdminShell>
     );
   }
@@ -50,9 +50,9 @@ export default function EditPaymentAccountPage() {
     return (
       <AdminShell requiredPermissions={ROUTE_PERMISSIONS.paymentAccountUpdate}>
         <div className="space-y-3 rounded-2xl border border-red-100 bg-red-50 p-6 text-sm text-red-700">
-          <p>Unable to load payment account.</p>
+          <p>Gagal memuat rekening pembayaran.</p>
           <Link href="/payment-accounts" className="font-medium text-[#465fff] underline">
-            Back to payment accounts
+            Kembali ke rekening pembayaran
           </Link>
         </div>
       </AdminShell>
@@ -62,9 +62,9 @@ export default function EditPaymentAccountPage() {
   return (
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.paymentAccountUpdate}>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-xl font-semibold text-gray-900">Edit Payment Account</h2>
+        <h2 className="text-xl font-semibold text-gray-900">Ubah Rekening Pembayaran</h2>
         <Link href="/payment-accounts" className="text-sm font-medium text-[#465fff] hover:text-indigo-700">
-          Back to payment accounts
+          Kembali ke rekening pembayaran
         </Link>
       </div>
       <PaymentAccountForm
@@ -82,14 +82,14 @@ export default function EditPaymentAccountPage() {
             ? undefined
             : async () => {
                 await runWithFeedback({
-                  confirm: () => confirmDelete('Payment Account'),
+                  confirm: () => confirmDelete('Rekening Pembayaran'),
                   loading: ADMIN_LOADING_MESSAGES.delete,
-                  success: ADMIN_SUCCESS_MESSAGES.deleted('Payment Account'),
+                  success: ADMIN_SUCCESS_MESSAGES.deleted('Rekening Pembayaran'),
                   action: () => remove.mutateAsync(),
                 });
               }
         }
-        submitLabel={update.isPending ? 'Saving...' : 'Save Account'}
+        submitLabel={update.isPending ? 'Menyimpan...' : 'Simpan Rekening'}
         isSubmitting={update.isPending}
         isDeleting={remove.isPending}
       />

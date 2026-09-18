@@ -37,24 +37,24 @@ export default function EditOutletPage() {
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.outletUpdate}>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold text-gray-900">Edit Outlet</h2>
-          <p className="mt-1 text-sm text-gray-500">Update the outlet used as the shipping origin.</p>
+          <h2 className="text-xl font-semibold text-gray-900">Ubah Outlet</h2>
+          <p className="mt-1 text-sm text-gray-500">Perbarui outlet yang dipakai sebagai asal pengiriman.</p>
         </div>
         <Link href="/outlets" className="text-sm font-medium text-[#465fff] hover:text-indigo-700">
-          Back to outlets
+          Kembali ke outlet
         </Link>
       </div>
 
       {isLoading ? (
-        <p className="text-sm text-gray-500">Loading outlet…</p>
+        <p className="text-sm text-gray-500">Memuat outlet…</p>
       ) : isError || !data ? (
         <div className="rounded-2xl border border-red-100 bg-red-50 p-6 text-sm text-red-700">
-          Unable to load this outlet.
+          Gagal memuat outlet ini.
         </div>
       ) : (
         <OutletForm
           initialValues={data}
-          submitLabel="Save Changes"
+          submitLabel="Simpan Perubahan"
           isSubmitting={updateMutation.isPending}
           onSubmit={async (values) => {
             await runWithFeedback({

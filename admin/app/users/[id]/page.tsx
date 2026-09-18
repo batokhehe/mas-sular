@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AdminShell } from '@/components/layout/admin-shell';
 import { Badge } from '@/components/ui/badge';
+import { orderStatusLabel } from '@/lib/status-labels';
 import { Button } from '@/components/ui/button';
 import { Card, CardTitle } from '@/components/ui/card';
 import { ROUTE_PERMISSIONS } from '@/lib/access';
@@ -19,7 +20,7 @@ export default function UserDetailPage() {
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['admin-user', userId],
-    queryFn: () => (userId ? fetchAdminUser(userId) : Promise.reject(new Error('Missing user id'))),
+    queryFn: () => (userId ? fetchAdminUser(userId) : Promise.reject(new Error('ID pengguna tidak ada'))),
     enabled: Boolean(userId),
     retry: false,
   });
@@ -64,10 +65,10 @@ export default function UserDetailPage() {
     await runWithFeedback({
       confirm: () =>
         activeChanged
-          ? confirmStatusChange(wasActive ? 'Active' : 'Disabled', isActive ? 'Active' : 'Disabled', {
-              title: isActive ? 'Activate User?' : 'Deactivate User?',
+          ? confirmStatusChange(wasActive ? 'Aktif' : 'Nonaktif', isActive ? 'Aktif' : 'Nonaktif', {
+              title: isActive ? 'Aktifkan pengguna?' : 'Nonaktifkan pengguna?',
             })
-          : confirmUpdate({ title: 'Save changes?' }),
+          : confirmUpdate({ title: 'Simpan perubahan?' }),
       loading: ADMIN_LOADING_MESSAGES.update,
       success: ADMIN_SUCCESS_MESSAGES.updated,
       action: () => updateUser.mutateAsync({ id: userId, input: { isActive, roleIds: selectedRoleIds } }),
@@ -77,7 +78,7 @@ export default function UserDetailPage() {
   if (isLoading || rolesQuery.isLoading) {
     return (
       <AdminShell requiredPermissions={ROUTE_PERMISSIONS.userUpdate}>
-        <p className="text-sm text-gray-500">Loading user details…</p>
+        <p className="text-sm text-gray-500">Memuat detail pengguna…</p>
       </AdminShell>
     );
   }
@@ -86,7 +87,7 @@ export default function UserDetailPage() {
     return (
       <AdminShell requiredPermissions={ROUTE_PERMISSIONS.userUpdate}>
         <div className="space-y-3 rounded-2xl border border-red-100 bg-red-50 p-6 text-sm text-red-700">
-          <p>Unable to load user details. Please try again later.</p>
+          <p>Gagal memuat detail pengguna. Silakan coba lagi nanti.</p>
         </div>
       </AdminShell>
     );
@@ -95,17 +96,17 @@ export default function UserDetailPage() {
   return (
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.userUpdate}>
       <div className="mb-6">
-        <h2 className="text-xl font-semibold text-gray-900">User Details</h2>
-        <p className="mt-1 text-sm text-gray-500">Inspect customer profile, order history, and role membership.</p>
+        <h2 className="text-xl font-semibold text-gray-900">Detail Pengguna</h2>
+        <p className="mt-1 text-sm text-gray-500">Lihat profil pelanggan, riwayat pesanan, dan keanggotaan peran.</p>
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[1.3fr_0.7fr]">
         <Card>
-          <CardTitle>Profile</CardTitle>
+          <CardTitle>Profil</CardTitle>
           <div className="mt-4 space-y-4 text-sm text-gray-700">
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
-                <p className="text-xs uppercase text-gray-400">Name</p>
+                <p className="text-xs uppercase text-gray-400">Nama</p>
                 <p className="mt-2 font-medium text-gray-900">{data.name}</p>
               </div>
               <div>
@@ -113,20 +114,20 @@ export default function UserDetailPage() {
                 <p className="mt-2 font-medium text-gray-900">{data.email}</p>
               </div>
               <div>
-                <p className="text-xs uppercase text-gray-400">Phone</p>
+                <p className="text-xs uppercase text-gray-400">Telepon</p>
                 <p className="mt-2 font-medium text-gray-900">{data.phone ?? '-'}</p>
               </div>
               <div>
                 <p className="text-xs uppercase text-gray-400">Status</p>
                 <Badge tone={isActive ? 'success' : 'danger'} className="mt-2">
-                  {isActive ? 'Active' : 'Disabled'}
+                  {isActive ? 'Aktif' : 'Nonaktif'}
                 </Badge>
               </div>
             </div>
           </div>
 
           <div className="mt-8">
-            <p className="text-xs uppercase tracking-wide text-gray-500">Roles</p>
+            <p className="text-xs uppercase tracking-wide text-gray-500">Peran</p>
             <div className="mt-3 rounded-2xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-700">
               {selectedRoleIds.length > 0 ? (
                 <ul className="space-y-2">
@@ -140,14 +141,14 @@ export default function UserDetailPage() {
                   })}
                 </ul>
               ) : (
-                <p className="text-sm text-gray-500">No roles assigned.</p>
+                <p className="text-sm text-gray-500">Belum ada peran yang ditetapkan.</p>
               )}
             </div>
           </div>
         </Card>
 
         <Card>
-          <CardTitle>Admin Actions</CardTitle>
+          <CardTitle>Aksi Admin</CardTitle>
           <div className="mt-4 space-y-4 text-sm text-gray-700">
             <div>
               <label className="flex items-center gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-3">
@@ -157,12 +158,12 @@ export default function UserDetailPage() {
                   onChange={(event) => setIsActive(event.target.checked)}
                   className="h-4 w-4 rounded border-gray-300 text-[#465fff] focus:ring-[#465fff]"
                 />
-                <span className="text-sm text-gray-700">Active user account</span>
+                <span className="text-sm text-gray-700">Akun pengguna aktif</span>
               </label>
             </div>
 
             <div>
-              <p className="text-xs uppercase text-gray-400">Assign Roles</p>
+              <p className="text-xs uppercase text-gray-400">Tetapkan Peran</p>
               <div className="mt-3 grid gap-2">
                 {rolesQuery.data.map((role: AdminRole) => (
                   <label key={role.id} className="inline-flex items-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-700">
@@ -179,17 +180,17 @@ export default function UserDetailPage() {
             </div>
 
             <Button onClick={handleSave} disabled={updateUser.isPending} className="w-full">
-              {updateUser.isPending ? 'Saving...' : 'Save Changes'}
+              {updateUser.isPending ? 'Menyimpan...' : 'Simpan Perubahan'}
             </Button>
           </div>
         </Card>
       </div>
 
       <Card className="mt-6">
-        <CardTitle>Saved Addresses</CardTitle>
+        <CardTitle>Alamat Tersimpan</CardTitle>
         <div className="mt-4 space-y-3">
           {data.addresses.length === 0 ? (
-            <p className="p-6 text-sm text-gray-500">This user has no saved addresses.</p>
+            <p className="p-6 text-sm text-gray-500">Pengguna ini belum memiliki alamat tersimpan.</p>
           ) : (
             data.addresses.map((address) => (
               <div key={address.id} className="rounded-2xl border border-gray-200 p-4">
@@ -200,7 +201,7 @@ export default function UserDetailPage() {
                   </span>
                 </div>
                 <p className="mt-1 text-sm text-gray-500">{formatAdminAddressLine(address)}</p>
-                {address.notes ? <p className="mt-1 text-xs text-gray-400">Notes: {address.notes}</p> : null}
+                {address.notes ? <p className="mt-1 text-xs text-gray-400">Catatan: {address.notes}</p> : null}
               </div>
             ))
           )}
@@ -208,25 +209,25 @@ export default function UserDetailPage() {
       </Card>
 
       <Card className="mt-6">
-        <CardTitle>Order History</CardTitle>
+        <CardTitle>Riwayat Pesanan</CardTitle>
         <div className="mt-4 overflow-x-auto">
           {data.orders.length === 0 ? (
-            <p className="p-6 text-sm text-gray-500">This user has no orders yet.</p>
+            <p className="p-6 text-sm text-gray-500">Pengguna ini belum memiliki pesanan.</p>
           ) : (
             <table className="w-full min-w-[720px] text-left text-sm">
               <thead>
                 <tr className="border-b border-gray-100 text-xs uppercase text-gray-400">
-                  <th className="py-3 font-medium">Order</th>
+                  <th className="py-3 font-medium">Pesanan</th>
                   <th className="py-3 font-medium">Status</th>
                   <th className="py-3 font-medium">Total</th>
-                  <th className="py-3 font-medium">Placed</th>
+                  <th className="py-3 font-medium">Tanggal</th>
                 </tr>
               </thead>
               <tbody>
                 {data.orders.map((order) => (
                   <tr key={order.id} className="border-b border-gray-50 last:border-0">
                     <td className="py-4 font-medium text-gray-800">{order.orderNumber}</td>
-                    <td className="py-4 text-gray-500">{order.status}</td>
+                    <td className="py-4 text-gray-500">{orderStatusLabel(order.status)}</td>
                     <td className="py-4 text-gray-500">Rp {order.totalPrice.toLocaleString('id-ID')}</td>
                     <td className="py-4 text-gray-500">{new Date(order.createdAt).toLocaleDateString('id-ID')}</td>
                   </tr>

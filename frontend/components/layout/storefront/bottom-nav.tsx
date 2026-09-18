@@ -9,11 +9,11 @@ import { cn } from '@/lib/utils'
 // Mobile-only bottom navigation. Routes are the canonical production routes;
 // auth-gated targets (/orders, /account) are handled by their existing route guards.
 const ITEMS = [
-  { href: '/', icon: Home, label: 'Home' },
-  { href: '/catalog', icon: UtensilsCrossed, label: 'Catalog' },
-  { href: '/cart', icon: ShoppingCart, label: 'Cart' },
-  { href: '/orders', icon: ClipboardList, label: 'Orders' },
-  { href: '/account/addresses', icon: User, label: 'Account' },
+  { href: '/', icon: Home, label: 'Beranda' },
+  { href: '/catalog', icon: UtensilsCrossed, label: 'Katalog' },
+  { href: '/cart', icon: ShoppingCart, label: 'Keranjang' },
+  { href: '/orders', icon: ClipboardList, label: 'Pesanan' },
+  { href: '/account/addresses', icon: User, label: 'Akun' },
 ]
 
 export function StorefrontBottomNav() {

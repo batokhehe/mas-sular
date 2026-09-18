@@ -75,11 +75,11 @@ export function validatePhysicalField(field: PhysicalNumericField, raw: string):
   const { min, max, unit } = PHYSICAL_LIMITS[field];
   const parsed = Number(trimmed);
 
-  if (!Number.isFinite(parsed)) return `${label(field)} must be a number.`;
+  if (!Number.isFinite(parsed)) return `${label(field)} harus berupa angka.`;
   // Rejected rather than rounded: a silently rounded measurement is a wrong
   // parcel, and the backend rejects non-integers anyway.
-  if (!Number.isInteger(parsed)) return `${label(field)} must be a whole number of ${unit}.`;
-  if (parsed < min || parsed > max) return `${label(field)} must be between ${min} and ${max} ${unit}.`;
+  if (!Number.isInteger(parsed)) return `${label(field)} harus berupa bilangan bulat (${unit}).`;
+  if (parsed < min || parsed > max) return `${label(field)} harus di antara ${min} dan ${max} ${unit}.`;
   return null;
 }
 
@@ -113,12 +113,12 @@ export function toPhysicalPayload(state: PhysicalFormState): PhysicalPayload {
 function label(field: PhysicalNumericField): string {
   switch (field) {
     case 'weightGram':
-      return 'Weight';
+      return 'Berat';
     case 'lengthCm':
-      return 'Length';
+      return 'Panjang';
     case 'widthCm':
-      return 'Width';
+      return 'Lebar';
     case 'heightCm':
-      return 'Height';
+      return 'Tinggi';
   }
 }

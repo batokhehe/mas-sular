@@ -4,6 +4,14 @@ import type { QueueHealth, QueueRelated } from '@/lib/admin';
 
 export const QUEUE_TABS = ['Outbox', 'Notifications', 'RabbitMQ', 'Workers', 'Failed'] as const;
 export type QueueTab = (typeof QUEUE_TABS)[number];
+/** Display label per tab (the tab keys above stay as-is). */
+export const QUEUE_TAB_LABEL: Record<QueueTab, string> = {
+  Outbox: 'Outbox',
+  Notifications: 'Notifikasi',
+  RabbitMQ: 'RabbitMQ',
+  Workers: 'Worker',
+  Failed: 'Gagal',
+};
 
 export const HEALTH_BADGE: Record<QueueHealth, string> = {
   green: 'bg-emerald-100 text-emerald-700',
@@ -11,9 +19,9 @@ export const HEALTH_BADGE: Record<QueueHealth, string> = {
   red: 'bg-red-100 text-red-700',
 };
 export const HEALTH_LABEL: Record<QueueHealth, string> = {
-  green: 'Healthy',
-  yellow: 'Degraded',
-  red: 'Critical',
+  green: 'Sehat',
+  yellow: 'Menurun',
+  red: 'Kritis',
 };
 
 /** Status badge tone for outbox/notification rows. */
@@ -38,10 +46,10 @@ export function formatAge(ageMs: number): string {
 export function relatedLinks(related: QueueRelated): Array<{ label: string; href: string; id: string }> {
   const links: Array<{ label: string; href: string; id: string }> = [];
   if (related.requestId) links.push({ label: 'Request', href: `/system/requests/${encodeURIComponent(related.requestId)}`, id: related.requestId });
-  if (related.orderId) links.push({ label: 'Order', href: `/orders/${related.orderId}`, id: related.orderNumber ?? related.orderId });
-  if (related.paymentId) links.push({ label: 'Payment', href: '/payments', id: related.paymentId });
-  if (related.shipmentId) links.push({ label: 'Shipment', href: `/shipping/${related.shipmentId}`, id: related.shipmentId });
-  if (related.customerId) links.push({ label: 'Customer', href: `/users/${related.customerId}`, id: related.customerId });
+  if (related.orderId) links.push({ label: 'Pesanan', href: `/orders/${related.orderId}`, id: related.orderNumber ?? related.orderId });
+  if (related.paymentId) links.push({ label: 'Pembayaran', href: '/payments', id: related.paymentId });
+  if (related.shipmentId) links.push({ label: 'Pengiriman', href: `/shipping/${related.shipmentId}`, id: related.shipmentId });
+  if (related.customerId) links.push({ label: 'Pelanggan', href: `/users/${related.customerId}`, id: related.customerId });
   return links;
 }
 

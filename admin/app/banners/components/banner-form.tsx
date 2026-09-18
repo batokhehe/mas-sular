@@ -81,7 +81,7 @@ export function BannerForm({
       <form onSubmit={handleSubmit} className="mt-4 space-y-6">
         <div className="grid gap-4 lg:grid-cols-2">
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Title</span>
+            <span>Judul</span>
             <input
               value={values.title}
               onChange={(event) => handleChange('title', event.target.value)}
@@ -91,7 +91,7 @@ export function BannerForm({
           </label>
 
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Placement</span>
+            <span>Penempatan</span>
             <select
               value={values.placement}
               onChange={(event) => handleChange('placement', event.target.value)}
@@ -107,7 +107,7 @@ export function BannerForm({
           </label>
 
           <label className="space-y-2 text-sm text-gray-700 col-span-full">
-            <span>Description</span>
+            <span>Deskripsi</span>
             <textarea
               value={values.description ?? ''}
               onChange={(event) => handleChange('description', event.target.value)}
@@ -117,7 +117,7 @@ export function BannerForm({
           </label>
 
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Image URL</span>
+            <span>URL gambar</span>
             <input
               value={values.imageUrl}
               onChange={(event) => handleChange('imageUrl', event.target.value)}
@@ -127,7 +127,7 @@ export function BannerForm({
           </label>
 
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Link URL</span>
+            <span>URL tautan</span>
             <input
               value={values.href ?? ''}
               onChange={(event) => handleChange('href', event.target.value)}
@@ -136,7 +136,7 @@ export function BannerForm({
           </label>
 
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Starts at</span>
+            <span>Mulai</span>
             <input
               type="datetime-local"
               value={values.startsAt ?? ''}
@@ -146,7 +146,7 @@ export function BannerForm({
           </label>
 
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Ends at</span>
+            <span>Berakhir</span>
             <input
               type="datetime-local"
               value={values.endsAt ?? ''}
@@ -156,7 +156,7 @@ export function BannerForm({
           </label>
 
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Sort Order</span>
+            <span>Urutan</span>
             <input
               type="number"
               min={0}
@@ -174,7 +174,7 @@ export function BannerForm({
               onChange={(event) => handleChange('isActive', event.target.checked)}
               className="h-4 w-4 rounded border-gray-300 text-[#465fff] focus:ring-[#465fff]"
             />
-            <span>Active</span>
+            <span>Aktif</span>
           </label>
         </div>
 
@@ -189,7 +189,7 @@ export function BannerForm({
               disabled={isDeleting}
               onClick={onDelete}
             >
-              Delete
+              Hapus
             </Button>
           ) : null}
         </div>

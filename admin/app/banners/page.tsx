@@ -37,11 +37,11 @@ export default function BannersPage() {
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-semibold text-gray-900">Banner Management</h2>
-          <p className="mt-1 text-sm text-gray-500">Manage homepage and campaign placements.</p>
+          <p className="mt-1 text-sm text-gray-500">Kelola penempatan banner beranda dan kampanye.</p>
         </div>
         <PermissionGate permissions={ROUTE_PERMISSIONS.bannerCreate}>
           <Link href="/banners/new">
-            <Button type="button">Add Banner</Button>
+            <Button type="button">Tambah Banner</Button>
           </Link>
         </PermissionGate>
       </div>
@@ -51,7 +51,7 @@ export default function BannersPage() {
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search banners by title or placement"
+            placeholder="Cari banner berdasarkan judul atau penempatan"
             className="h-11 w-full rounded-xl border border-gray-200 bg-gray-50 px-4 text-sm outline-none focus:border-[#465fff] focus:bg-white"
           />
           <select
@@ -67,24 +67,24 @@ export default function BannersPage() {
           </select>
         </div>
 
-        <CardTitle>Banners</CardTitle>
+        <CardTitle>Banner</CardTitle>
         <div className="mt-4 overflow-x-auto">
           {isLoading ? (
-            <p className="p-6 text-sm text-gray-500">Loading banners...</p>
+            <p className="p-6 text-sm text-gray-500">Memuat banner...</p>
           ) : isError ? (
-            <p className="p-6 text-sm text-red-600">Unable to load banners. Please reauthenticate.</p>
+            <p className="p-6 text-sm text-red-600">Gagal memuat banner. Silakan masuk ulang.</p>
           ) : banners.length === 0 ? (
-            <p className="p-6 text-sm text-gray-500">No banners match your filters.</p>
+            <p className="p-6 text-sm text-gray-500">Tidak ada banner yang cocok dengan filter.</p>
           ) : (
             <table className="w-full min-w-[820px] text-left text-sm">
               <thead>
                 <tr className="border-b border-gray-100 text-xs uppercase text-gray-400">
-                  <th className="py-3 font-medium">Title</th>
-                  <th className="py-3 font-medium">Placement</th>
-                  <th className="py-3 font-medium">Sort</th>
-                  <th className="py-3 font-medium">Schedule</th>
+                  <th className="py-3 font-medium">Judul</th>
+                  <th className="py-3 font-medium">Penempatan</th>
+                  <th className="py-3 font-medium">Urutan</th>
+                  <th className="py-3 font-medium">Jadwal</th>
                   <th className="py-3 font-medium">Status</th>
-                  <th className="py-3 font-medium">Actions</th>
+                  <th className="py-3 font-medium">Aksi</th>
                 </tr>
               </thead>
               <tbody>
@@ -96,14 +96,14 @@ export default function BannersPage() {
                     <td className="py-4 text-gray-500">
                       {banner.startsAt ? new Date(banner.startsAt).toLocaleDateString('id-ID') : 'Anytime'}
                       {' - '}
-                      {banner.endsAt ? new Date(banner.endsAt).toLocaleDateString('id-ID') : 'No end'}
+                      {banner.endsAt ? new Date(banner.endsAt).toLocaleDateString('id-ID') : 'Tanpa akhir'}
                     </td>
                     <td className="py-4">
-                      <Badge tone={banner.isActive ? 'success' : 'neutral'}>{banner.isActive ? 'Active' : 'Inactive'}</Badge>
+                      <Badge tone={banner.isActive ? 'success' : 'neutral'}>{banner.isActive ? 'Aktif' : 'Nonaktif'}</Badge>
                     </td>
                     <td className="py-4">
                       <Link href={`/banners/${banner.id}`} className="text-sm font-medium text-[#465fff] hover:text-indigo-700">
-                        View
+                        Lihat
                       </Link>
                     </td>
                   </tr>

@@ -49,9 +49,9 @@ export function SearchableSelect({
   options,
   loading,
   disabled,
-  placeholder = 'Select…',
-  searchPlaceholder = 'Search…',
-  emptyText = 'No data found',
+  placeholder = 'Pilih…',
+  searchPlaceholder = 'Cari…',
+  emptyText = 'Data tidak ditemukan',
   onSearchChange,
   className,
   id,
@@ -103,7 +103,7 @@ export function SearchableSelect({
           <CommandList>
             {loading ? (
               <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
-                <Loader2 className="size-4 animate-spin" /> Loading…
+                <Loader2 className="size-4 animate-spin" /> Memuat…
               </div>
             ) : (
               <>

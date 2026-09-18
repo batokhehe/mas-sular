@@ -61,8 +61,8 @@ export default function PerformancePage() {
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.systemLogs}>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold text-gray-900">Performance</h2>
-          <p className="mt-1 text-sm text-gray-500">Latency, throughput, and slow paths across requests, workers, database, and cache.</p>
+          <h2 className="text-xl font-semibold text-gray-900">Performa</h2>
+          <p className="mt-1 text-sm text-gray-500">Latensi, throughput, dan jalur lambat pada request, worker, database, dan cache.</p>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex rounded-lg bg-gray-100 p-1 text-xs">
@@ -70,9 +70,9 @@ export default function PerformancePage() {
               <button key={r.key} onClick={() => setRange(r.key)} className={`rounded-md px-2.5 py-1 ${range === r.key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>{r.label}</button>
             ))}
           </div>
-          {d ? <span className="text-xs text-gray-400">Updated {new Date(d.generatedAt).toLocaleTimeString('id-ID')}</span> : null}
+          {d ? <span className="text-xs text-gray-400">Diperbarui {new Date(d.generatedAt).toLocaleTimeString('id-ID')}</span> : null}
           <Button onClick={() => void query.refetch()} disabled={query.isFetching} className="gap-2">
-            <RefreshCw className={`h-4 w-4 ${query.isFetching ? 'animate-spin' : ''}`} /> Refresh
+            <RefreshCw className={`h-4 w-4 ${query.isFetching ? 'animate-spin' : ''}`} /> Muat ulang
           </Button>
         </div>
       </div>
@@ -83,41 +83,41 @@ export default function PerformancePage() {
         <Card>
           <div className="flex flex-col items-center gap-3 p-10 text-center">
             <AlertTriangle className="h-6 w-6 text-red-500" />
-            <p className="text-sm text-red-600">Unable to load performance data.</p>
-            <Button onClick={() => void query.refetch()}>Retry</Button>
+            <p className="text-sm text-red-600">Gagal memuat data performa.</p>
+            <Button onClick={() => void query.refetch()}>Coba ulang</Button>
           </div>
         </Card>
       ) : (
         <div className="space-y-6">
           {/* Summary cards */}
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-            <Stat label="Average Response Time" value={formatMs(d.summary.avgResponseMs)} toneClass={TONE_TEXT[latencyTone(d.summary.avgResponseMs)]} />
+            <Stat label="Rata-rata Waktu Respons" value={formatMs(d.summary.avgResponseMs)} toneClass={TONE_TEXT[latencyTone(d.summary.avgResponseMs)]} />
             <Stat label="P95" value={formatMs(d.summary.p95)} toneClass={TONE_TEXT[latencyTone(d.summary.p95)]} />
             <Stat label="P99" value={formatMs(d.summary.p99)} toneClass={TONE_TEXT[latencyTone(d.summary.p99)]} />
-            <Stat label="Slow Requests (≥1s)" value={rp(d.summary.slowRequests)} toneClass={d.summary.slowRequests > 0 ? 'text-amber-600' : undefined} />
-            <Stat label="Slow Workers (≥5s)" value={rp(d.summary.slowWorkers)} toneClass={d.summary.slowWorkers > 0 ? 'text-amber-600' : undefined} />
-            <Stat label="Slow DB Calls (≥200ms)" value={rp(d.summary.slowDbCalls)} toneClass={d.summary.slowDbCalls > 0 ? 'text-amber-600' : undefined} />
+            <Stat label="Request Lambat (≥1 dtk)" value={rp(d.summary.slowRequests)} toneClass={d.summary.slowRequests > 0 ? 'text-amber-600' : undefined} />
+            <Stat label="Worker Lambat (≥5 dtk)" value={rp(d.summary.slowWorkers)} toneClass={d.summary.slowWorkers > 0 ? 'text-amber-600' : undefined} />
+            <Stat label="Panggilan DB Lambat (≥200ms)" value={rp(d.summary.slowDbCalls)} toneClass={d.summary.slowDbCalls > 0 ? 'text-amber-600' : undefined} />
             <Stat label="Cache Hit Rate" value={d.summary.cacheHitRate != null ? `${d.summary.cacheHitRate}%` : '—'} />
-            <Stat label="Requests" value={rp(d.requests.count)} />
+            <Stat label="Request" value={rp(d.requests.count)} />
           </div>
 
           {/* Latency trend */}
           <Card>
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div>
-                <CardTitle>Latency Trend</CardTitle>
+                <CardTitle>Tren Latensi</CardTitle>
                 <p className="mt-1 text-sm text-gray-500">p50 {formatMs(d.requests.p50)} · p95 {formatMs(d.requests.p95)} · p99 {formatMs(d.requests.p99)}</p>
               </div>
               <div className="flex rounded-lg bg-gray-100 p-1 text-xs">
                 {(['latency', 'requests', 'slow'] as const).map((m) => (
                   <button key={m} onClick={() => setMetric(m)} className={`rounded-md px-2.5 py-1 capitalize ${metric === m ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>
-                    {m === 'latency' ? 'Avg latency' : m === 'requests' ? 'Requests' : 'Slow'}
+                    {m === 'latency' ? 'Rata-rata latensi' : m === 'requests' ? 'Request' : 'Lambat'}
                   </button>
                 ))}
               </div>
             </div>
             {chartPoints.length === 0 ? (
-              <p className="py-10 text-center text-sm text-gray-500">No request activity in this window.</p>
+              <p className="py-10 text-center text-sm text-gray-500">Tidak ada aktivitas request di rentang ini.</p>
             ) : metric === 'latency' ? (
               <TrendChart points={chartPoints} color="#465fff" />
             ) : (
@@ -129,22 +129,22 @@ export default function PerformancePage() {
           <Card>
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <CardTitle>Endpoint Ranking (top 20 slowest)</CardTitle>
-              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search endpoint…" className="h-10 w-64 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm outline-none focus:border-[#465fff] focus:bg-white" />
+              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Cari endpoint…" className="h-10 w-64 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm outline-none focus:border-[#465fff] focus:bg-white" />
             </div>
             <div className="overflow-x-auto">
               {endpoints.length === 0 ? (
-                <p className="p-8 text-center text-sm text-gray-500">No endpoints match.</p>
+                <p className="p-8 text-center text-sm text-gray-500">Tidak ada endpoint yang cocok.</p>
               ) : (
                 <table className="w-full min-w-[860px] text-left text-sm">
                   <thead>
                     <tr className="border-b border-gray-100 text-xs uppercase text-gray-400">
                       <Th label="Endpoint" k="endpoint" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-                      <Th label="Avg" k="avgMs" right sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                      <Th label="Rata-rata" k="avgMs" right sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                       <Th label="P95" k="p95" right sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                       <Th label="P99" k="p99" right sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-                      <Th label="Max" k="maxMs" right sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-                      <Th label="Requests" k="count" right sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-                      <th className="py-2 font-medium">Copy</th>
+                      <Th label="Maks" k="maxMs" right sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                      <Th label="Request" k="count" right sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                      <th className="py-2 font-medium">Salin</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -157,7 +157,7 @@ export default function PerformancePage() {
                         <td className="py-2.5 text-right text-gray-500">{formatMs(e.maxMs)}</td>
                         <td className="py-2.5 text-right text-gray-500">{rp(e.count)}</td>
                         <td className="py-2.5">
-                          <button onClick={(ev) => { ev.stopPropagation(); copy(e.endpoint); }} title="Copy endpoint" className="text-gray-300 hover:text-gray-600"><Copy className="h-3.5 w-3.5" /></button>
+                          <button onClick={(ev) => { ev.stopPropagation(); copy(e.endpoint); }} title="Salin endpoint" className="text-gray-300 hover:text-gray-600"><Copy className="h-3.5 w-3.5" /></button>
                         </td>
                       </tr>
                     ))}
@@ -170,7 +170,7 @@ export default function PerformancePage() {
           {/* Module ranking + Database */}
           <div className="grid gap-6 xl:grid-cols-2">
             <Card>
-              <CardTitle>Module Ranking</CardTitle>
+              <CardTitle>Peringkat Modul</CardTitle>
               <div className="mt-4 space-y-2">
                 {d.modules.map((m) => {
                   const maxAvg = Math.max(1, ...d.modules.map((x) => x.avgMs));
@@ -189,17 +189,17 @@ export default function PerformancePage() {
             </Card>
 
             <Card>
-              <CardTitle>Database — Top Slow Queries</CardTitle>
-              <p className="mt-1 text-xs text-gray-400">Aggregated in-process since {dt(d.database.since)} — query names only, no SQL.</p>
+              <CardTitle>Database — Query Paling Lambat</CardTitle>
+              <p className="mt-1 text-xs text-gray-400">Diagregasi di dalam proses sejak {dt(d.database.since)} — hanya nama query, tanpa SQL.</p>
               <div className="mt-3 overflow-x-auto">
                 {d.database.queries.length === 0 ? (
-                  <p className="p-6 text-center text-sm text-gray-500">No query timings captured yet.</p>
+                  <p className="p-6 text-center text-sm text-gray-500">Belum ada catatan waktu query.</p>
                 ) : (
                   <table className="w-full min-w-[420px] text-left text-sm">
                     <thead>
                       <tr className="border-b border-gray-100 text-xs uppercase text-gray-400">
-                        <th className="py-2 font-medium">Query</th><th className="py-2 text-right font-medium">Avg</th>
-                        <th className="py-2 text-right font-medium">Max</th><th className="py-2 text-right font-medium">Count</th>
+                        <th className="py-2 font-medium">Query</th><th className="py-2 text-right font-medium">Rata-rata</th>
+                        <th className="py-2 text-right font-medium">Maks</th><th className="py-2 text-right font-medium">Jumlah</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -221,18 +221,18 @@ export default function PerformancePage() {
           {/* Workers + Cache */}
           <div className="grid gap-6 xl:grid-cols-[1.6fr_1fr]">
             <Card>
-              <CardTitle>Workers</CardTitle>
-              <p className="mt-1 text-sm text-gray-500">Avg {formatMs(d.workers.avgMs)} · p95 {formatMs(d.workers.p95)} · p99 {formatMs(d.workers.p99)} · OK {rp(d.workers.success)} · Fail {rp(d.workers.failure)}</p>
+              <CardTitle>Worker</CardTitle>
+              <p className="mt-1 text-sm text-gray-500">Rata-rata {formatMs(d.workers.avgMs)} · p95 {formatMs(d.workers.p95)} · p99 {formatMs(d.workers.p99)} · OK {rp(d.workers.success)} · Gagal {rp(d.workers.failure)}</p>
               <div className="mt-3 overflow-x-auto">
                 {d.workers.workers.length === 0 ? (
-                  <p className="p-6 text-center text-sm text-gray-500">No worker executions in this window.</p>
+                  <p className="p-6 text-center text-sm text-gray-500">Tidak ada eksekusi worker di rentang ini.</p>
                 ) : (
                   <table className="w-full min-w-[560px] text-left text-sm">
                     <thead>
                       <tr className="border-b border-gray-100 text-xs uppercase text-gray-400">
-                        <th className="py-2 font-medium">Worker</th><th className="py-2 text-right font-medium">Avg</th>
+                        <th className="py-2 font-medium">Worker</th><th className="py-2 text-right font-medium">Rata-rata</th>
                         <th className="py-2 text-right font-medium">P95</th><th className="py-2 text-right font-medium">P99</th>
-                        <th className="py-2 text-right font-medium">Max</th><th className="py-2 text-right font-medium">OK</th><th className="py-2 text-right font-medium">Fail</th>
+                        <th className="py-2 text-right font-medium">Maks</th><th className="py-2 text-right font-medium">OK</th><th className="py-2 text-right font-medium">Gagal</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -256,12 +256,12 @@ export default function PerformancePage() {
             <Card>
               <CardTitle>Cache (Redis)</CardTitle>
               <div className="mt-4 space-y-3 text-sm">
-                <CacheRow label="Connected"><span className="flex items-center gap-2"><span className={`h-2.5 w-2.5 rounded-full ${d.cache.connected ? 'bg-emerald-500' : 'bg-red-500'}`} />{d.cache.connected ? 'Yes' : 'No'}</span></CacheRow>
-                <CacheRow label="Latency"><span className="font-semibold text-gray-800">{formatMs(d.cache.latencyMs)}</span></CacheRow>
+                <CacheRow label="Terhubung"><span className="flex items-center gap-2"><span className={`h-2.5 w-2.5 rounded-full ${d.cache.connected ? 'bg-emerald-500' : 'bg-red-500'}`} />{d.cache.connected ? 'Ya' : 'Tidak'}</span></CacheRow>
+                <CacheRow label="Latensi"><span className="font-semibold text-gray-800">{formatMs(d.cache.latencyMs)}</span></CacheRow>
                 <CacheRow label="Hits"><span className="text-gray-700">{d.cache.hits != null ? rp(d.cache.hits) : '—'}</span></CacheRow>
                 <CacheRow label="Misses"><span className="text-gray-700">{d.cache.misses != null ? rp(d.cache.misses) : '—'}</span></CacheRow>
                 <CacheRow label="Hit Rate"><span className="font-semibold text-emerald-600">{d.cache.hitRate != null ? `${d.cache.hitRate}%` : '—'}</span></CacheRow>
-                <CacheRow label="Last Ping"><span className="text-gray-500">{dt(d.cache.lastPing)}</span></CacheRow>
+                <CacheRow label="Ping Terakhir"><span className="text-gray-500">{dt(d.cache.lastPing)}</span></CacheRow>
               </div>
             </Card>
           </div>
@@ -296,22 +296,22 @@ function EndpointDrawer({ endpoint, onClose }: { endpoint: PerfEndpoint; onClose
         <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
           <h3 className="truncate pr-3 font-mono text-sm font-semibold text-gray-900" title={endpoint.endpoint}>{endpoint.endpoint}</h3>
           <span className="flex items-center gap-3">
-            <button onClick={() => copy(endpoint.endpoint)} title="Copy endpoint" className="text-gray-400 hover:text-gray-700"><Copy className="h-4 w-4" /></button>
+            <button onClick={() => copy(endpoint.endpoint)} title="Salin endpoint" className="text-gray-400 hover:text-gray-700"><Copy className="h-4 w-4" /></button>
             <button onClick={onClose} className="text-gray-400 hover:text-gray-700"><X className="h-5 w-5" /></button>
           </span>
         </div>
         <div className="flex-1 space-y-5 overflow-y-auto p-5 text-sm">
           <div className="grid grid-cols-2 gap-3">
-            <Mini label="Average" value={formatMs(endpoint.avgMs)} />
+            <Mini label="Rata-rata" value={formatMs(endpoint.avgMs)} />
             <Mini label="P95" value={formatMs(endpoint.p95)} />
             <Mini label="P99" value={formatMs(endpoint.p99)} />
-            <Mini label="Max" value={formatMs(endpoint.maxMs)} />
-            <Mini label="Request Count" value={endpoint.count.toLocaleString('id-ID')} />
+            <Mini label="Maks" value={formatMs(endpoint.maxMs)} />
+            <Mini label="Jumlah Request" value={endpoint.count.toLocaleString('id-ID')} />
           </div>
           <section>
-            <p className="mb-2 text-xs font-semibold uppercase text-gray-400">Latest Requests</p>
+            <p className="mb-2 text-xs font-semibold uppercase text-gray-400">Request Terbaru</p>
             {endpoint.latest.length === 0 ? (
-              <p className="text-sm text-gray-500">No recent samples.</p>
+              <p className="text-sm text-gray-500">Tidak ada sampel terbaru.</p>
             ) : (
               <ul className="space-y-1.5">
                 {endpoint.latest.map((r, i) => (

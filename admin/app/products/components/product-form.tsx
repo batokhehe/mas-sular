@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardTitle } from '@/components/ui/card';
 import { uploadImage } from '@/lib/upload';
 import { showError } from '@/lib/admin-alert';
+import { productStatusLabel } from '@/lib/status-labels';
 import {
   PHYSICAL_LIMITS,
   PhysicalFormState,
@@ -153,11 +154,11 @@ export function ProductForm({
         console.error(outcome.error);
         void showError(
           new Error(
-            `Image upload failed after ${outcome.uploaded.length} of ${files.length - outcome.skipped} file(s). The images already uploaded are kept; please try the rest again.`,
+            `Unggah gambar gagal setelah ${outcome.uploaded.length} dari ${files.length - outcome.skipped} file. Gambar yang sudah terunggah tetap disimpan; silakan coba unggah sisanya lagi.`,
           ),
         );
       } else if (outcome.skipped > 0) {
-        void showError(new Error(`A product can have at most ${MAX_PRODUCT_IMAGES} images; ${outcome.skipped} file(s) were not added.`));
+        void showError(new Error(`Satu produk maksimal memiliki ${MAX_PRODUCT_IMAGES} gambar; ${outcome.skipped} file tidak ditambahkan.`));
       }
     } finally {
       setIsUploading(false);
@@ -171,7 +172,7 @@ export function ProductForm({
 
     const gallery = imagesPayload(images);
     if (!gallery) {
-      void showError(new Error('Please upload an image first'));
+      void showError(new Error('Unggah gambar terlebih dahulu'));
       return;
     }
 
@@ -208,7 +209,7 @@ export function ProductForm({
             />
           </label>
           <label className="space-y-2 text-sm text-gray-700 col-span-full">
-            <span>Name</span>
+            <span>Nama</span>
             <input
               value={values.name}
               onChange={(event) => handleChange('name', event.target.value)}
@@ -217,7 +218,7 @@ export function ProductForm({
             />
           </label>
           <label className="space-y-2 text-sm text-gray-700 col-span-full">
-            <span>Description</span>
+            <span>Deskripsi</span>
             <textarea
               value={values.description}
               onChange={(event) => handleChange('description', event.target.value)}
@@ -227,7 +228,7 @@ export function ProductForm({
             />
           </label>
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Price</span>
+            <span>Harga</span>
             <input
               type="number"
               min={0}
@@ -238,7 +239,7 @@ export function ProductForm({
             />
           </label>
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Original Price</span>
+            <span>Harga asli</span>
             <input
               type="number"
               min={0}
@@ -248,7 +249,7 @@ export function ProductForm({
             />
           </label>
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Stock</span>
+            <span>Stok</span>
             <input
               type="number"
               min={0}
@@ -269,7 +270,7 @@ export function ProductForm({
             />
           </label>
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Category</span>
+            <span>Kategori</span>
             <select
               value={values.categoryId}
               onChange={(event) => handleChange('categoryId', event.target.value)}
@@ -285,13 +286,13 @@ export function ProductForm({
           </label>
           <div className="space-y-2 text-sm text-gray-700 col-span-full">
             <div className="flex items-center justify-between">
-              <span>Product Images</span>
+              <span>Gambar Produk</span>
               <span className="text-xs text-gray-500" aria-live="polite">
                 {imageCounter(images)}
               </span>
             </div>
             <p className="text-xs text-gray-500">
-              The first image is the cover. Up to {MAX_PRODUCT_IMAGES} images.
+              Gambar pertama menjadi sampul. Maksimal {MAX_PRODUCT_IMAGES} gambar.
             </p>
 
             <input
@@ -305,7 +306,7 @@ export function ProductForm({
 
             {isUploading && (
               <p className="text-xs text-gray-500">
-                Uploading...
+                Mengunggah...
               </p>
             )}
 
@@ -367,13 +368,13 @@ export function ProductForm({
             >
               {statusOptions.map((status) => (
                 <option key={status} value={status}>
-                  {status}
+                  {productStatusLabel(status)}
                 </option>
               ))}
             </select>
           </label>
           <div className="space-y-2 text-sm text-gray-700">
-            <span>Flags</span>
+            <span>Penanda</span>
             <div className="flex flex-wrap gap-4">
               <label className="inline-flex items-center gap-2 text-sm text-gray-700">
                 <input
@@ -382,7 +383,7 @@ export function ProductForm({
                   onChange={(event) => handleChange('isBestSeller', event.target.checked)}
                   className="h-4 w-4 rounded border-gray-300 text-[#465fff] focus:ring-[#465fff]"
                 />
-                Best seller
+                Terlaris
               </label>
               <label className="inline-flex items-center gap-2 text-sm text-gray-700">
                 <input
@@ -391,7 +392,7 @@ export function ProductForm({
                   onChange={(event) => handleChange('isNew', event.target.checked)}
                   className="h-4 w-4 rounded border-gray-300 text-[#465fff] focus:ring-[#465fff]"
                 />
-                New
+                Baru
               </label>
               <label className="inline-flex items-center gap-2 text-sm text-gray-700">
                 <input
@@ -400,7 +401,7 @@ export function ProductForm({
                   onChange={(event) => handleChange('isPromoSpecial', event.target.checked)}
                   className="h-4 w-4 rounded border-gray-300 text-[#465fff] focus:ring-[#465fff]"
                 />
-                Promo Special
+                Promo Spesial
               </label>
               <label className="inline-flex items-center gap-2 text-sm text-gray-700">
                 <input
@@ -413,8 +414,8 @@ export function ProductForm({
               </label>
             </div>
             <p className="text-xs text-gray-500">
-              Promo Special and Trial Pack products appear in the storefront homepage sections &quot;Promo Spesial
-              Produk&quot; and &quot;Trial Pack&quot;.
+              Produk Promo Spesial dan Trial Pack tampil di bagian beranda storefront &quot;Promo Spesial
+              Produk&quot; dan &quot;Trial Pack&quot;.
             </p>
           </div>
         </div>
@@ -425,20 +426,20 @@ export function ProductForm({
             PaxelBox: the outer carton is chosen from total order quantity. */}
         <div className="space-y-3 border-t border-gray-100 pt-6">
           <div>
-            <h3 className="text-sm font-semibold text-gray-900">Physical Product Data</h3>
+            <h3 className="text-sm font-semibold text-gray-900">Data Fisik Produk</h3>
             <p className="mt-1 text-xs text-gray-500">
-              Real measurements of the product itself. Required before this product can be shipped —
-              shipping is quoted from the actual weight, and the courier needs the dimensions to book.
-              Leave blank if not yet measured; blank values are left unchanged.
+              Ukuran asli produk. Wajib diisi sebelum produk ini bisa dikirim —
+              ongkir dihitung dari berat sebenarnya, dan kurir membutuhkan dimensi untuk pemesanan.
+              Kosongkan jika belum diukur; nilai kosong tidak akan mengubah data.
             </p>
           </div>
 
           <div className="grid gap-4 lg:grid-cols-4">
             {([
-              ['weightGram', 'Weight (gram)'],
-              ['lengthCm', 'Length (cm)'],
-              ['widthCm', 'Width (cm)'],
-              ['heightCm', 'Height (cm)'],
+              ['weightGram', 'Berat (gram)'],
+              ['lengthCm', 'Panjang (cm)'],
+              ['widthCm', 'Lebar (cm)'],
+              ['heightCm', 'Tinggi (cm)'],
             ] as Array<[PhysicalNumericField, string]>).map(([field, labelText]) => (
               <label key={field} className="space-y-2 text-sm text-gray-700">
                 <span>{labelText}</span>
@@ -454,7 +455,7 @@ export function ProductForm({
                   className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none focus:border-[#465fff] focus:bg-white"
                 />
                 <span className="block text-xs text-gray-400">
-                  {PHYSICAL_LIMITS[field].min}–{PHYSICAL_LIMITS[field].max} {PHYSICAL_LIMITS[field].unit}, whole numbers only
+                  {PHYSICAL_LIMITS[field].min}–{PHYSICAL_LIMITS[field].max} {PHYSICAL_LIMITS[field].unit}, bilangan bulat saja
                 </span>
               </label>
             ))}
@@ -467,7 +468,7 @@ export function ProductForm({
               onChange={(event) => setPhysical((current) => ({ ...current, isFragile: event.target.checked }))}
               className="h-4 w-4 rounded border-gray-300 text-[#465fff] focus:ring-[#465fff]"
             />
-            Fragile
+            Mudah pecah
           </label>
 
           {physicalErrors.length > 0 ? (
@@ -501,7 +502,7 @@ export function ProductForm({
                 await onDelete?.();
               }}
             >
-              {isDeleting ? 'Deleting...' : 'Delete'}
+              {isDeleting ? 'Menghapus...' : 'Hapus'}
             </Button>
           ) : null}
         </div>

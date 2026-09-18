@@ -27,13 +27,13 @@ export default function CartPage() {
     return (
       <StorefrontShell>
         <section className="mx-auto max-w-3xl px-4 py-8">
-          <h1 className="mb-6 text-2xl font-bold">Your Cart</h1>
+          <h1 className="mb-6 text-2xl font-bold">Keranjang Saya</h1>
           <Empty
-            title="Your cart is empty"
-            description="Add some bakso to get started."
+            title="Keranjang Anda kosong"
+            description="Yuk, tambahkan bakso favorit Anda."
             action={
               <Button asChild className="mt-2">
-                <Link href="/catalog">Browse catalog</Link>
+                <Link href="/catalog">Lihat Katalog</Link>
               </Button>
             }
           />
@@ -46,9 +46,9 @@ export default function CartPage() {
     <StorefrontShell>
       <section className="mx-auto max-w-5xl px-4 py-8">
         <div className="mb-6 flex items-center justify-between">
-          <h1 className="text-2xl font-bold">Your Cart</h1>
+          <h1 className="text-2xl font-bold">Keranjang Saya</h1>
           <Button variant="ghost" size="sm" className="text-destructive" onClick={() => clear()}>
-            Clear all
+            Hapus semua
           </Button>
         </div>
 
@@ -62,7 +62,7 @@ export default function CartPage() {
                 onCheckedChange={(checked) => setAllSelected(checked === true)}
               />
               <label htmlFor="cart-select-all" className="cursor-pointer text-sm font-medium">
-                Select all
+                Pilih semua
               </label>
               <span className="text-sm text-muted-foreground">
                 ({selectedCount} of {lines.length} selected)
@@ -75,7 +75,7 @@ export default function CartPage() {
                     className="size-5"
                     checked={line.selected}
                     onCheckedChange={(checked) => setSelected(line.lineId, checked === true)}
-                    aria-label={`Select ${line.name}`}
+                    aria-label={`Pilih ${line.name}`}
                   />
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={line.imageUrl} alt={line.name} className="size-20 shrink-0 rounded-xl object-cover" />
@@ -91,14 +91,14 @@ export default function CartPage() {
                           + {line.toppings.map((t) => `${t.name} (${formatIDR(t.price)})`).join(', ')}
                         </p>
                       )}
-                      <p className="text-sm text-muted-foreground">{formatIDR(lineUnitPrice(line))} each</p>
+                      <p className="text-sm text-muted-foreground">{formatIDR(lineUnitPrice(line))} / item</p>
                     </div>
                     <Button
                       variant="ghost"
                       size="icon"
                       className="size-8 shrink-0 text-muted-foreground hover:text-destructive"
                       onClick={() => remove(line.lineId)}
-                      aria-label="Remove item"
+                      aria-label="Hapus item"
                     >
                       <Trash2 className="size-4" />
                     </Button>
@@ -110,7 +110,7 @@ export default function CartPage() {
                         size="icon"
                         className="size-8 rounded-full"
                         onClick={() => setQty(line.lineId, line.qty - 1)}
-                        aria-label="Decrease quantity"
+                        aria-label="Kurangi jumlah"
                       >
                         <Minus className="size-3.5" />
                       </Button>
@@ -120,7 +120,7 @@ export default function CartPage() {
                         size="icon"
                         className="size-8 rounded-full"
                         onClick={() => setQty(line.lineId, line.qty + 1)}
-                        aria-label="Increase quantity"
+                        aria-label="Tambah jumlah"
                       >
                         <Plus className="size-3.5" />
                       </Button>
@@ -138,32 +138,32 @@ export default function CartPage() {
               server at checkout (matching the checkout page), never fabricated here. */}
           <div className="lg:sticky lg:top-24 lg:self-start">
             <Card className="space-y-4 p-5">
-              <h2 className="font-semibold">Order summary</h2>
+              <h2 className="font-semibold">Ringkasan pesanan</h2>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">
-                  Subtotal ({selectedCount} of {lines.length} items)
+                  Subtotal ({selectedCount} dari {lines.length} item)
                 </span>
                 <span className="font-medium">{formatIDR(subtotal)}</span>
               </div>
               <p className="text-xs text-muted-foreground">
-                Shipping and discounts are calculated by the server at checkout.
+                Ongkos kirim dan diskon dihitung saat checkout.
               </p>
               <Separator />
               {selectedCount > 0 ? (
                 <Button asChild size="lg" className="w-full rounded-full">
                   <Link href="/checkout">
-                    Proceed to checkout
+                    Lanjut ke Checkout
                     <ChevronRight className="ml-1 size-4" />
                   </Link>
                 </Button>
               ) : (
                 <>
                   <Button size="lg" className="w-full rounded-full" disabled>
-                    Proceed to checkout
+                    Lanjut ke Checkout
                     <ChevronRight className="ml-1 size-4" />
                   </Button>
                   <p role="status" className="text-center text-sm text-muted-foreground">
-                    Select at least one item to check out.
+                    Pilih minimal satu item untuk checkout.
                   </p>
                 </>
               )}

@@ -46,7 +46,7 @@ export default function PromoDetailPage() {
   if (promoQuery.isLoading) {
     return (
       <AdminShell requiredPermissions={ROUTE_PERMISSIONS.promoUpdate}>
-        <p className="text-sm text-gray-500">Loading voucher details…</p>
+        <p className="text-sm text-gray-500">Memuat detail voucher…</p>
       </AdminShell>
     );
   }
@@ -55,8 +55,8 @@ export default function PromoDetailPage() {
     return (
       <AdminShell requiredPermissions={ROUTE_PERMISSIONS.promoUpdate}>
         <div className="space-y-3 rounded-2xl border border-red-100 bg-red-50 p-6 text-sm text-red-700">
-          <p>Unable to load voucher details. Please try again later.</p>
-          <Link href="/promos" className="font-medium text-[#465fff] underline">Back to vouchers</Link>
+          <p>Gagal memuat detail voucher. Silakan coba lagi nanti.</p>
+          <Link href="/promos" className="font-medium text-[#465fff] underline">Kembali ke voucher</Link>
         </div>
       </AdminShell>
     );
@@ -66,10 +66,10 @@ export default function PromoDetailPage() {
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.promoUpdate}>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold text-gray-900">Edit Voucher</h2>
-          <p className="mt-1 text-sm text-gray-500">Update settings for this promo code.</p>
+          <h2 className="text-xl font-semibold text-gray-900">Ubah Voucher</h2>
+          <p className="mt-1 text-sm text-gray-500">Perbarui pengaturan kode promo ini.</p>
         </div>
-        <Link href="/promos" className="text-sm font-medium text-[#465fff] hover:text-indigo-700">Back to vouchers</Link>
+        <Link href="/promos" className="text-sm font-medium text-[#465fff] hover:text-indigo-700">Kembali ke voucher</Link>
       </div>
       <PromoForm
         initialValues={promoQuery.data}
@@ -89,7 +89,7 @@ export default function PromoDetailPage() {
             action: () => deletePromo.mutateAsync(),
           });
         }}
-        submitLabel={updatePromo.isPending ? 'Save changes' : 'Save voucher'}
+        submitLabel={updatePromo.isPending ? 'Simpan perubahan' : 'Simpan voucher'}
         isSubmitting={updatePromo.isPending}
         isDeleting={deletePromo.isPending}
       />

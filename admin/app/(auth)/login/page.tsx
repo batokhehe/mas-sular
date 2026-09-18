@@ -23,7 +23,7 @@ export default function LoginPage() {
       // Dashboard.read, otherwise their first accessible page (STAFF -> /orders).
       router.replace(firstAccessibleRoute(data.permissions ?? []));
     } catch (err) {
-      setError((err as Error).message || 'Login failed.');
+      setError((err as Error).message || 'Gagal masuk.');
     } finally {
       setIsSubmitting(false);
     }
@@ -34,8 +34,8 @@ export default function LoginPage() {
       <section className="w-full max-w-sm rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
         <div className="mb-6">
           <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-[#465fff] font-bold text-white">BMS</div>
-          <h1 className="text-xl font-semibold text-gray-900">Admin Login</h1>
-          <p className="mt-1 text-sm text-gray-500">Sign in with your admin email and password.</p>
+          <h1 className="text-xl font-semibold text-gray-900">Masuk Admin</h1>
+          <p className="mt-1 text-sm text-gray-500">Masuk dengan email dan password admin Anda.</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5">
@@ -72,7 +72,7 @@ export default function LoginPage() {
           {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
 
           <Button type="submit" className="w-full" disabled={isSubmitting}>
-            {isSubmitting ? 'Signing in...' : 'Sign in'}
+            {isSubmitting ? 'Sedang masuk...' : 'Masuk'}
           </Button>
         </form>
       </section>

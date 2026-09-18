@@ -19,7 +19,7 @@ export function TrendChart({ points, color = '#465fff', height = 220 }: { points
   const area = `${line} L ${x(n - 1).toFixed(1)} ${H - pad} L ${x(0).toFixed(1)} ${H - pad} Z`;
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ width: '100%', height }} role="img" aria-label="Trend chart">
+    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ width: '100%', height }} role="img" aria-label="Grafik tren">
       <defs>
         <linearGradient id="trend-fill" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor={color} stopOpacity="0.22" />
@@ -48,7 +48,7 @@ export function BarChart({ values, color = '#ef4444', height = 160 }: { values: 
   const n = values.length;
   const bw = n > 0 ? (W - pad * 2) / n : 0;
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ width: '100%', height }} role="img" aria-label="Bar chart">
+    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ width: '100%', height }} role="img" aria-label="Grafik batang">
       {[0.25, 0.5, 0.75].map((f) => (
         <line key={f} x1={pad} x2={W - pad} y1={H * f} y2={H * f} stroke="#f1f5f9" strokeWidth="1" />
       ))}

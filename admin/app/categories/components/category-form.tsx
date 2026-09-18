@@ -64,7 +64,7 @@ export function CategoryForm({
       <form onSubmit={handleSubmit} className="mt-4 space-y-6">
         <div className="grid gap-4 lg:grid-cols-2">
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Name</span>
+            <span>Nama</span>
             <input
               value={values.name}
               onChange={(event) => {
@@ -94,7 +94,7 @@ export function CategoryForm({
           </label>
 
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Icon</span>
+            <span>Ikon</span>
             <input
               value={values.icon ?? ''}
               onChange={(event) => setValues((current) => ({ ...current, icon: event.target.value }))}
@@ -103,7 +103,7 @@ export function CategoryForm({
           </label>
 
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Sort Order</span>
+            <span>Urutan</span>
             <input
               type="number"
               min={0}
@@ -126,7 +126,7 @@ export function CategoryForm({
               disabled={isDeleting}
               onClick={onDelete}
             >
-              Delete
+              Hapus
             </Button>
           ) : null}
         </div>

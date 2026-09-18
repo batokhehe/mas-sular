@@ -28,7 +28,7 @@ export function serviceLabel(
   service: string | null | undefined,
   options: ReadonlyArray<{ value: string; label: string }>,
 ): string {
-  if (!service) return 'Not set';
+  if (!service) return 'Belum diatur';
   return options.find((option) => option.value === service)?.label ?? service;
 }
 

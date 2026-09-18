@@ -47,7 +47,7 @@ export default function ProductDetailPage() {
   if (categoriesQuery.isLoading || productQuery.isLoading) {
     return (
       <AdminShell requiredPermissions={ROUTE_PERMISSIONS.productUpdate}>
-        <p className="p-6 text-sm text-gray-500">Loading product details…</p>
+        <p className="p-6 text-sm text-gray-500">Memuat detail produk…</p>
       </AdminShell>
     );
   }
@@ -56,9 +56,9 @@ export default function ProductDetailPage() {
     return (
       <AdminShell requiredPermissions={ROUTE_PERMISSIONS.productUpdate}>
         <div className="space-y-3 rounded-2xl border border-red-100 bg-red-50 p-6 text-sm text-red-700">
-          <p>Unable to load product details. Please reauthenticate or try again later.</p>
+          <p>Gagal memuat detail produk. Silakan masuk ulang atau coba lagi nanti.</p>
           <Link href="/products" className="font-medium text-[#465fff] underline">
-            Back to products
+            Kembali ke produk
           </Link>
         </div>
       </AdminShell>
@@ -69,11 +69,11 @@ export default function ProductDetailPage() {
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.productUpdate}>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold text-gray-900">Edit Product</h2>
-          <p className="mt-1 text-sm text-gray-500">Update catalog details and inventory for this product.</p>
+          <h2 className="text-xl font-semibold text-gray-900">Ubah Produk</h2>
+          <p className="mt-1 text-sm text-gray-500">Perbarui detail katalog dan stok produk ini.</p>
         </div>
         <Link href="/products" className="text-sm font-medium text-[#465fff] hover:text-indigo-700">
-          Back to products
+          Kembali ke produk
         </Link>
       </div>
       <ProductForm
@@ -88,13 +88,13 @@ export default function ProductDetailPage() {
         }}
         onDelete={async () => {
           await runWithFeedback({
-            confirm: () => confirmDelete('Product'),
+            confirm: () => confirmDelete('Produk'),
             loading: ADMIN_LOADING_MESSAGES.delete,
-            success: ADMIN_SUCCESS_MESSAGES.deleted('Product'),
+            success: ADMIN_SUCCESS_MESSAGES.deleted('Produk'),
             action: () => deleteProduct.mutateAsync(),
           });
         }}
-        submitLabel={updateProduct.isPending ? 'Saving...' : 'Save Changes'}
+        submitLabel={updateProduct.isPending ? 'Menyimpan...' : 'Simpan Perubahan'}
         isSubmitting={updateProduct.isPending}
         isDeleting={deleteProduct.isPending}
       />

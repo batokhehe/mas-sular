@@ -48,7 +48,7 @@ export default function ToppingDetailPage() {
   if (toppingQuery.isLoading) {
     return (
       <AdminShell requiredPermissions={ROUTE_PERMISSIONS.toppingUpdate}>
-        <p className="p-6 text-sm text-gray-500">Loading topping details...</p>
+        <p className="p-6 text-sm text-gray-500">Memuat detail topping...</p>
       </AdminShell>
     );
   }
@@ -57,9 +57,9 @@ export default function ToppingDetailPage() {
     return (
       <AdminShell requiredPermissions={ROUTE_PERMISSIONS.toppingUpdate}>
         <div className="space-y-3 rounded-2xl border border-red-100 bg-red-50 p-6 text-sm text-red-700">
-          <p>Unable to load topping details. Please try again later.</p>
+          <p>Gagal memuat detail topping. Silakan coba lagi nanti.</p>
           <Link href="/toppings" className="font-medium text-[#465fff] underline">
-            Back to toppings
+            Kembali ke topping
           </Link>
         </div>
       </AdminShell>
@@ -70,11 +70,11 @@ export default function ToppingDetailPage() {
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.toppingUpdate}>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold text-gray-900">Edit Topping</h2>
-          <p className="mt-1 text-sm text-gray-500">Existing orders keep the name and price they were placed with.</p>
+          <h2 className="text-xl font-semibold text-gray-900">Ubah Topping</h2>
+          <p className="mt-1 text-sm text-gray-500">Pesanan yang sudah ada tetap memakai nama dan harga saat dipesan.</p>
         </div>
         <Link href="/toppings" className="text-sm font-medium text-[#465fff] hover:text-indigo-700">
-          Back to toppings
+          Kembali ke topping
         </Link>
       </div>
       <ToppingForm
@@ -99,7 +99,7 @@ export default function ToppingDetailPage() {
               }
             : undefined
         }
-        submitLabel={updateTopping.isPending ? 'Saving...' : 'Save Topping'}
+        submitLabel={updateTopping.isPending ? 'Menyimpan...' : 'Simpan Topping'}
         isSubmitting={updateTopping.isPending}
         isDeleting={deleteTopping.isPending}
       />

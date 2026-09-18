@@ -10,7 +10,7 @@ const ep = (over: Record<string, unknown> = {}) => ({
 
 test('ranges: all four time filters defined', () => {
   assert.deepEqual(PERF_RANGES.map((r) => r.key), ['1h', '24h', '7d', '30d']);
-  assert.equal(PERF_RANGES[0].label, 'Last Hour');
+  assert.equal(PERF_RANGES[0].label, '1 Jam Terakhir');
 });
 
 test('formatMs: ms below 1s, seconds above', () => {

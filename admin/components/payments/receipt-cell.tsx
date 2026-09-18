@@ -21,11 +21,11 @@ function isPdfUrl(url: string): boolean {
 function StatusBadge({ uploaded }: { uploaded: boolean }) {
   return uploaded ? (
     <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700 ring-1 ring-green-200">
-      Uploaded
+      Diunggah
     </span>
   ) : (
     <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500 ring-1 ring-gray-200">
-      No Receipt
+      Tanpa bukti
     </span>
   );
 }
@@ -50,7 +50,7 @@ export function ReceiptCell({ url, orderNumber }: Props) {
             type="button"
             onClick={() => setOpen(true)}
             className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
-            aria-label={`Preview receipt for ${orderNumber}`}
+            aria-label={`Pratinjau bukti pembayaran ${orderNumber}`}
           >
             <FileText className="h-4 w-4 text-red-500" /> PDF
           </button>
@@ -60,7 +60,7 @@ export function ReceiptCell({ url, orderNumber }: Props) {
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={url}
-              alt={`Receipt for ${orderNumber}`}
+              alt={`Bukti pembayaran ${orderNumber}`}
               loading="lazy"
               onLoad={() => setLoaded(true)}
               onClick={() => setOpen(true)}
@@ -139,7 +139,7 @@ function ReceiptModal({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
       role="dialog"
       aria-modal="true"
-      aria-label={`Payment receipt for ${orderNumber}`}
+      aria-label={`Bukti pembayaran ${orderNumber}`}
       onClick={onClose}
     >
       <div
@@ -148,12 +148,12 @@ function ReceiptModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
-          <h3 className="text-sm font-semibold text-gray-900">Payment receipt · {orderNumber}</h3>
+          <h3 className="text-sm font-semibold text-gray-900">Bukti pembayaran · {orderNumber}</h3>
           <button
             type="button"
             onClick={onClose}
             className="rounded-full p-1 text-gray-400 hover:bg-gray-100"
-            aria-label="Close preview"
+            aria-label="Tutup pratinjau"
           >
             <X className="h-5 w-5" />
           </button>
@@ -161,12 +161,12 @@ function ReceiptModal({
 
         <div className="flex min-h-[260px] flex-1 items-center justify-center overflow-auto bg-gray-50 p-4">
           {pdf ? (
-            <iframe title={`Receipt PDF for ${orderNumber}`} src={url} className="h-[70vh] w-full rounded-md border-0" />
+            <iframe title={`PDF bukti pembayaran ${orderNumber}`} src={url} className="h-[70vh] w-full rounded-md border-0" />
           ) : (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={url}
-              alt={`Receipt for ${orderNumber}`}
+              alt={`Bukti pembayaran ${orderNumber}`}
               onClick={() => setZoomed((z) => !z)}
               className={
                 zoomed
@@ -184,7 +184,7 @@ function ReceiptModal({
               onClick={() => setZoomed((z) => !z)}
               className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
             >
-              <ZoomIn className="h-4 w-4" /> {zoomed ? 'Fit' : 'Zoom'}
+              <ZoomIn className="h-4 w-4" /> {zoomed ? 'Pas layar' : 'Perbesar'}
             </button>
           ) : null}
           <a
@@ -192,7 +192,7 @@ function ReceiptModal({
             download
             className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
           >
-            <Download className="h-4 w-4" /> Download
+            <Download className="h-4 w-4" /> Unduh
           </a>
           <a
             href={url}
@@ -200,14 +200,14 @@ function ReceiptModal({
             rel="noopener noreferrer"
             className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
           >
-            <ExternalLink className="h-4 w-4" /> Open in New Tab
+            <ExternalLink className="h-4 w-4" /> Buka di Tab Baru
           </a>
           <button
             type="button"
             onClick={onClose}
             className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
           >
-            Close
+            Tutup
           </button>
         </div>
       </div>

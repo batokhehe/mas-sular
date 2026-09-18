@@ -52,5 +52,5 @@ test('worker status colors + labels cover every health level', () => {
     assert.ok(WORKER_DOT[s]);
     assert.ok(WORKER_LABEL[s]);
   }
-  assert.equal(WORKER_LABEL.gray, 'Disabled');
+  assert.equal(WORKER_LABEL.gray, 'Nonaktif');
 });

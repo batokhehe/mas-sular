@@ -42,27 +42,27 @@ export default function NotificationDrawer({ id, onClose, onResend }: { id: stri
   return (
     <>
       <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />
-      <aside className="fixed inset-y-0 right-0 z-50 flex w-full flex-col bg-white shadow-2xl" style={{ maxWidth: width }} role="dialog" aria-label="Notification detail">
+      <aside className="fixed inset-y-0 right-0 z-50 flex w-full flex-col bg-white shadow-2xl" style={{ maxWidth: width }} role="dialog" aria-label="Detail notifikasi">
         {/* Resize handle (desktop) — drag to adjust, persisted across sessions. */}
         <div
           {...dragProps}
           className="absolute inset-y-0 left-0 hidden w-2 cursor-col-resize items-center justify-center hover:bg-gray-100 sm:flex"
-          title="Drag to resize"
+          title="Seret untuk mengubah ukuran"
         >
           <GripVertical className="h-4 w-4 text-gray-300" />
         </div>
         <div className="flex items-center justify-between border-b border-gray-100 py-4 pl-5 pr-5">
           <div>
-            <h3 className="font-semibold text-gray-900">Notification detail</h3>
+            <h3 className="font-semibold text-gray-900">Detail notifikasi</h3>
             {n ? <p className="mt-0.5 font-mono text-[11px] text-gray-400">{n.id}</p> : null}
           </div>
           <div className="flex items-center gap-3">
             {d ? (
               <button onClick={download} className="inline-flex items-center gap-1 text-xs font-medium text-[#465fff]">
-                <Download className="h-3.5 w-3.5" /> Download JSON
+                <Download className="h-3.5 w-3.5" /> Unduh JSON
               </button>
             ) : null}
-            <button onClick={onClose} className="text-gray-400 hover:text-gray-700" aria-label="Close"><X className="h-5 w-5" /></button>
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-700" aria-label="Tutup"><X className="h-5 w-5" /></button>
           </div>
         </div>
         <div className="flex-1 space-y-4 overflow-y-auto p-5 text-sm">
@@ -78,46 +78,46 @@ export default function NotificationDrawer({ id, onClose, onResend }: { id: stri
 
               {canResend(n.status) ? (
                 <PermissionGate permissions={ROUTE_PERMISSIONS.notificationResend}>
-                  <Button onClick={() => onResend(n.id)} className="w-full gap-2"><Send className="h-4 w-4" /> Resend (re-queue via redrive)</Button>
+                  <Button onClick={() => onResend(n.id)} className="w-full gap-2"><Send className="h-4 w-4" /> Kirim ulang (antrekan ulang via redrive)</Button>
                 </PermissionGate>
               ) : null}
 
-              <InspectorCard title="General">
+              <InspectorCard title="Umum">
                 <dl className="space-y-1.5">
                   <Field label="ID" value={n.id} mono copyable />
-                  <Field label="Channel" value={n.channel} />
+                  <Field label="Kanal" value={n.channel} />
                   <Field label="Status" value={n.status} />
                   <Field label="Template" value={n.template} mono />
-                  <Field label="Recipient" value={n.recipient || '—'} copyable={!!n.recipient} />
-                  <Field label="Subject" value={d.rendered?.subject ?? '—'} />
-                  <Field label="Created" value={dt(n.createdAt)} />
-                  <Field label="Sent" value={dt(n.sentAt)} />
-                  <Field label="Duration" value={deliveryLabel(n.deliverySec)} />
+                  <Field label="Penerima" value={n.recipient || '—'} copyable={!!n.recipient} />
+                  <Field label="Subjek" value={d.rendered?.subject ?? '—'} />
+                  <Field label="Dibuat" value={dt(n.createdAt)} />
+                  <Field label="Terkirim" value={dt(n.sentAt)} />
+                  <Field label="Durasi" value={deliveryLabel(n.deliverySec)} />
                 </dl>
               </InspectorCard>
 
-              <InspectorCard title="Timeline">
+              <InspectorCard title="Riwayat">
                 <Timeline steps={buildTimeline(n)} />
               </InspectorCard>
 
-              <InspectorCard title="Payload" action={<CopyButton text={payloadJson} label="Copy" />}>
+              <InspectorCard title="Payload" action={<CopyButton text={payloadJson} label="Salin" />}>
                 <pre className="max-h-64 overflow-auto rounded-lg bg-gray-50 p-3 text-xs text-gray-700">{payloadJson}</pre>
               </InspectorCard>
 
-              <InspectorCard title="Provider" action={<CopyButton text={responseJson} label="Copy response" />}>
+              <InspectorCard title="Penyedia" action={<CopyButton text={responseJson} label="Salin respons" />}>
                 <dl className="space-y-1.5">
-                  <Field label="Provider" value={providerOf(n.channel)} />
-                  <Field label="Provider Message ID" value={n.providerMessageId ?? '—'} mono copyable={!!n.providerMessageId} />
+                  <Field label="Penyedia" value={providerOf(n.channel)} />
+                  <Field label="ID Pesan Penyedia" value={n.providerMessageId ?? '—'} mono copyable={!!n.providerMessageId} />
                   <Field label="Error" value={d.retryHistory.lastError ?? '—'} tone={d.retryHistory.lastError ? 'error' : undefined} />
-                  <Field label="Retry Count" value={String(Math.max(0, d.retryHistory.attempts - 1))} />
-                  <Field label="Next Retry" value={n.status === 'PENDING' ? dt(d.retryHistory.nextAttemptAt) : '—'} />
-                  <Field label="Locked by" value={d.retryHistory.lockedBy ?? '—'} mono={!!d.retryHistory.lockedBy} />
+                  <Field label="Jumlah percobaan ulang" value={String(Math.max(0, d.retryHistory.attempts - 1))} />
+                  <Field label="Coba ulang berikutnya" value={n.status === 'PENDING' ? dt(d.retryHistory.nextAttemptAt) : '—'} />
+                  <Field label="Dikunci oleh" value={d.retryHistory.lockedBy ?? '—'} mono={!!d.retryHistory.lockedBy} />
                 </dl>
               </InspectorCard>
 
               <InspectorCard title="Related Resources">
                 {links.length === 0 ? (
-                  <p className="text-xs text-gray-400">No related order, payment, shipment, or customer.</p>
+                  <p className="text-xs text-gray-400">Tidak ada pesanan, pembayaran, pengiriman, atau pelanggan terkait.</p>
                 ) : (
                   <div className="flex flex-wrap gap-2">
                     {links.map((l) => (
@@ -130,7 +130,7 @@ export default function NotificationDrawer({ id, onClose, onResend }: { id: stri
               </InspectorCard>
 
               {d.rendered ? (
-                <InspectorCard title="Rendered Message">
+                <InspectorCard title="Pesan Ter-render">
                   <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-lg bg-gray-50 p-3 text-xs text-gray-700">{d.rendered.body}</pre>
                 </InspectorCard>
               ) : null}
@@ -199,21 +199,21 @@ function ConversationCard({ notificationId }: { notificationId: string }) {
   const recent = items.slice(-8);
   return (
     <InspectorCard
-      title="Customer Conversation"
+      title="Percakapan Pelanggan"
       action={
         <Link href={`/system/communications?notification=${notificationId}`} className="inline-flex items-center gap-1 text-xs font-medium text-[#465fff]">
-          <ExternalLink className="h-3.5 w-3.5" /> Open full view
+          <ExternalLink className="h-3.5 w-3.5" /> Buka tampilan penuh
         </Link>
       }
     >
       {query.isLoading ? (
         <div className="space-y-2">{Array.from({ length: 3 }).map((_, i) => <div key={i} className="h-4 w-full animate-pulse rounded bg-gray-100" />)}</div>
       ) : query.isError || !bundle ? (
-        <p className="text-xs text-gray-400">Conversation unavailable.</p>
+        <p className="text-xs text-gray-400">Percakapan tidak tersedia.</p>
       ) : (
         <>
           <p className="mb-2 text-xs text-gray-400">
-            {bundle.customer ? `${bundle.customer.name} — ` : ''}{items.length} notification(s){items.length > recent.length ? `, showing last ${recent.length}` : ''}
+            {bundle.customer ? `${bundle.customer.name} — ` : ''}{items.length} notifikasi{items.length > recent.length ? `, menampilkan ${recent.length} terakhir` : ''}
           </p>
           <ul className="space-y-2">
             {recent.map((c) => (
@@ -291,7 +291,7 @@ function Field({ label, value, mono, copyable, tone }: { label: string; value: s
       <dd className={`flex min-w-0 items-start justify-end gap-1.5 break-all text-right font-medium ${tone === 'error' ? 'text-red-600' : 'text-gray-800'} ${mono ? 'font-mono text-xs leading-5' : ''}`}>
         {value}
         {copyable && value !== '—' ? (
-          <button onClick={() => void navigator.clipboard?.writeText(value)} className="mt-0.5 shrink-0 text-gray-300 hover:text-[#465fff]" title={`Copy ${label}`}>
+          <button onClick={() => void navigator.clipboard?.writeText(value)} className="mt-0.5 shrink-0 text-gray-300 hover:text-[#465fff]" title={`Salin ${label}`}>
             <Copy className="h-3 w-3" />
           </button>
         ) : null}

@@ -14,14 +14,14 @@ const rp = (n: number) => n.toLocaleString('id-ID');
 export function summaryCards(d: SystemDashboard): KpiCard[] {
   const s = d.summary;
   return [
-    { key: 'requests', label: 'Total Requests Today', value: rp(s.totalRequestsToday), tone: 'default' },
-    { key: 'avg', label: 'Average Response Time', value: `${rp(s.avgResponseTimeMs)}ms`, tone: 'default' },
-    { key: 'errorRate', label: 'Error Rate', value: `${s.errorRatePct}%`, tone: s.errorRatePct >= 5 ? 'error' : s.errorRatePct > 1 ? 'warn' : 'ok' },
-    { key: 'warnings', label: 'Warnings Today', value: rp(s.warningsToday), tone: s.warningsToday > 0 ? 'warn' : 'default' },
-    { key: 'errors', label: 'Errors Today', value: rp(s.errorsToday), tone: s.errorsToday > 0 ? 'error' : 'ok' },
-    { key: 'workers', label: 'Active Workers', value: rp(s.activeWorkers), tone: 'default' },
-    { key: 'pendingNotif', label: 'Pending Notifications', value: rp(s.pendingNotifications), tone: s.pendingNotifications > 0 ? 'warn' : 'default' },
-    { key: 'pendingQueue', label: 'Pending Queue', value: rp(s.pendingQueue), tone: s.pendingQueue > 0 ? 'warn' : 'default' },
+    { key: 'requests', label: 'Total Request Hari Ini', value: rp(s.totalRequestsToday), tone: 'default' },
+    { key: 'avg', label: 'Rata-rata Waktu Respons', value: `${rp(s.avgResponseTimeMs)}ms`, tone: 'default' },
+    { key: 'errorRate', label: 'Tingkat Error', value: `${s.errorRatePct}%`, tone: s.errorRatePct >= 5 ? 'error' : s.errorRatePct > 1 ? 'warn' : 'ok' },
+    { key: 'warnings', label: 'Peringatan Hari Ini', value: rp(s.warningsToday), tone: s.warningsToday > 0 ? 'warn' : 'default' },
+    { key: 'errors', label: 'Error Hari Ini', value: rp(s.errorsToday), tone: s.errorsToday > 0 ? 'error' : 'ok' },
+    { key: 'workers', label: 'Worker Aktif', value: rp(s.activeWorkers), tone: 'default' },
+    { key: 'pendingNotif', label: 'Notifikasi Tertunda', value: rp(s.pendingNotifications), tone: s.pendingNotifications > 0 ? 'warn' : 'default' },
+    { key: 'pendingQueue', label: 'Antrean Tertunda', value: rp(s.pendingQueue), tone: s.pendingQueue > 0 ? 'warn' : 'default' },
   ];
 }
 
@@ -42,10 +42,10 @@ export const WORKER_DOT: Record<SysHealthColor, string> = {
   gray: 'bg-gray-300',
 };
 export const WORKER_LABEL: Record<SysHealthColor, string> = {
-  green: 'Running',
-  yellow: 'Idle / degraded',
-  red: 'Failing',
-  gray: 'Disabled',
+  green: 'Berjalan',
+  yellow: 'Diam / menurun',
+  red: 'Gagal',
+  gray: 'Nonaktif',
 };
 
 /** Bar values (counts) for the errors-per-hour chart. */

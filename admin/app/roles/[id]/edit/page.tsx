@@ -16,7 +16,7 @@ export default function EditRolePage() {
 
   const roleQuery = useQuery({
     queryKey: ['admin-role', roleId],
-    queryFn: () => (roleId ? fetchAdminRole(roleId) : Promise.reject(new Error('Missing role id'))),
+    queryFn: () => (roleId ? fetchAdminRole(roleId) : Promise.reject(new Error('ID peran tidak ada'))),
     enabled: Boolean(roleId),
     retry: false,
   });
@@ -58,7 +58,7 @@ export default function EditRolePage() {
   if (roleQuery.isLoading || permissionsQuery.isLoading) {
     return (
       <AdminShell requiredPermissions={ROUTE_PERMISSIONS.roleUpdate}>
-        <p className="text-sm text-gray-500">Loading role information…</p>
+        <p className="text-sm text-gray-500">Memuat informasi peran…</p>
       </AdminShell>
     );
   }
@@ -67,7 +67,7 @@ export default function EditRolePage() {
     return (
       <AdminShell requiredPermissions={ROUTE_PERMISSIONS.roleUpdate}>
         <div className="rounded-2xl border border-red-100 bg-red-50 p-6 text-sm text-red-700">
-          <p>Unable to load role data. Please try again later.</p>
+          <p>Gagal memuat data peran. Silakan coba lagi nanti.</p>
         </div>
       </AdminShell>
     );
@@ -76,16 +76,16 @@ export default function EditRolePage() {
   return (
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.roleUpdate}>
       <div className="mb-6">
-        <h2 className="text-xl font-semibold text-gray-900">Edit Role</h2>
-        <p className="mt-1 text-sm text-gray-500">Update role name, description, and permissions.</p>
+        <h2 className="text-xl font-semibold text-gray-900">Ubah Peran</h2>
+        <p className="mt-1 text-sm text-gray-500">Perbarui nama, deskripsi, dan izin peran.</p>
       </div>
 
       {conflict ? (
         <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-          <p className="font-medium">Role was modified by another administrator.</p>
+          <p className="font-medium">Peran telah diubah oleh administrator lain.</p>
           <p className="mt-1">
-            Your changes below have not been saved. Reload this page to see the current permissions,
-            then reapply your edits.
+            Perubahan Anda di bawah belum disimpan. Muat ulang halaman ini untuk melihat izin terbaru,
+            lalu terapkan kembali perubahan Anda.
           </p>
         </div>
       ) : null}
@@ -93,7 +93,7 @@ export default function EditRolePage() {
       <RoleForm
         permissions={permissionsQuery.data}
         initialValues={roleQuery.data}
-        submitLabel="Update Role"
+        submitLabel="Perbarui Peran"
         isSubmitting={updateRole.isPending}
         onSubmit={async (values) => {
           await runWithFeedback({

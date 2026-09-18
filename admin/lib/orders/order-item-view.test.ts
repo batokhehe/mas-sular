@@ -87,7 +87,7 @@ test('the page renders base price, each "+ topping price", the per-item total an
   assert.match(page, /Qty \{item\.quantity\} × \{rp\(item\.unitPrice\)\}/, 'base price line kept');
   assert.match(page, /\{pricing\.toppings\.length > 0 \? \(/, 'topping block only when there are toppings');
   assert.match(page, /<span>\+ \{t\.name\}<\/span> <span>\{rp\(t\.price\)\}<\/span>/);
-  assert.match(page, /Per item incl\. toppings<\/span> <span>\{rp\(pricing\.unitTotal\)\}<\/span>/);
+  assert.match(page, /Per item termasuk topping<\/span> <span>\{rp\(pricing\.unitTotal\)\}<\/span>/);
   assert.match(page, /\{rp\(pricing\.lineTotal\)\}/);
   assert.doesNotMatch(page, /rp\(item\.unitPrice \* item\.quantity\)/, 'the base-only line total is gone');
   assert.doesNotMatch(page, /Toppings: \{item\.toppings\.map/, 'no more names-only line');

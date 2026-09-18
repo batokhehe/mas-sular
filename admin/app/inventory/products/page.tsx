@@ -44,33 +44,33 @@ export default function ProductInventoryPage() {
   return (
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.productInventory}>
       <div className="mb-6">
-        <h2 className="text-xl font-semibold text-gray-900">Product Inventory</h2>
-        <p className="mt-1 text-sm text-gray-500">Per-outlet stock (source of truth). Reserved holds are subtracted from available.</p>
+        <h2 className="text-xl font-semibold text-gray-900">Stok Produk</h2>
+        <p className="mt-1 text-sm text-gray-500">Stok per outlet (sumber data utama). Stok yang direservasi dikurangkan dari stok tersedia.</p>
       </div>
       <Card>
         <div className="flex items-end gap-3">
           <label className="space-y-1 text-sm text-gray-600">
-            <span className="block text-xs uppercase text-gray-400">Search</span>
-            <input value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} placeholder="Product or outlet…" className="h-11 w-60 rounded-xl border border-gray-200 bg-white px-4 text-sm outline-none focus:border-[#465fff]" />
+            <span className="block text-xs uppercase text-gray-400">Cari</span>
+            <input value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} placeholder="Produk atau outlet…" className="h-11 w-60 rounded-xl border border-gray-200 bg-white px-4 text-sm outline-none focus:border-[#465fff]" />
           </label>
         </div>
         <div className="mt-5 overflow-x-auto">
           {isLoading ? (
-            <p className="p-6 text-sm text-gray-500">Loading…</p>
+            <p className="p-6 text-sm text-gray-500">Memuat…</p>
           ) : isError ? (
-            <p className="p-6 text-sm text-red-600">Unable to load inventory.</p>
+            <p className="p-6 text-sm text-red-600">Gagal memuat stok.</p>
           ) : (data?.items.length ?? 0) === 0 ? (
-            <p className="p-6 text-sm text-gray-500">No inventory rows. Seed ProductInventory or add outlets.</p>
+            <p className="p-6 text-sm text-gray-500">Belum ada data stok. Isi ProductInventory atau tambahkan outlet.</p>
           ) : (
             <table className="w-full min-w-[720px] text-left text-sm">
               <thead>
                 <tr className="border-b border-gray-100 text-xs uppercase text-gray-400">
-                  <th className="py-3 font-medium">Product</th>
+                  <th className="py-3 font-medium">Produk</th>
                   <th className="py-3 font-medium">Outlet</th>
-                  <th className="py-3 font-medium">Stock</th>
-                  <th className="py-3 font-medium">Reserved</th>
-                  <th className="py-3 font-medium">Available</th>
-                  <th className="py-3 font-medium">Actions</th>
+                  <th className="py-3 font-medium">Stok</th>
+                  <th className="py-3 font-medium">Direservasi</th>
+                  <th className="py-3 font-medium">Tersedia</th>
+                  <th className="py-3 font-medium">Aksi</th>
                 </tr>
               </thead>
               <tbody>
@@ -86,12 +86,12 @@ export default function ProductInventoryPage() {
                         {editing?.id === r.id ? (
                           <span className="flex items-center gap-2">
                             <input value={value} onChange={(e) => setValue(e.target.value.replace(/\D/g, ''))} className="h-9 w-20 rounded-lg border border-gray-200 px-2 text-sm" />
-                            <Button className="h-9" onClick={() => save(r)} disabled={mutation.isPending}>Save</Button>
-                            <button className="text-xs text-gray-500" onClick={() => setEditing(null)}>Cancel</button>
+                            <Button className="h-9" onClick={() => save(r)} disabled={mutation.isPending}>Simpan</Button>
+                            <button className="text-xs text-gray-500" onClick={() => setEditing(null)}>Batal</button>
                           </span>
                         ) : (
                           <button className="rounded-lg px-3 py-1.5 text-xs font-medium text-[#465fff] ring-1 ring-gray-200 hover:bg-gray-50" onClick={() => { setEditing(r); setValue(String(r.stock)); }}>
-                            Adjust
+                            Sesuaikan
                           </button>
                         )}
                       </PermissionGate>

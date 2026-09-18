@@ -112,7 +112,7 @@ test('form wiring: existing upload endpoint, multiple files, cover badge, up/dow
 test('form wiring: legacy start, successes kept on failure, images[] sent in display order', () => {
   assert.match(FORM, /useState<string\[\]>\(\(\) => initialImages\(initialValues\)\)/);
   assert.match(FORM, /\(url\) => setImages\(\(current\) => addImages\(current, \[url\]\)\)/);
-  assert.match(FORM, /The images already uploaded are kept/);
+  assert.match(FORM, /Gambar yang sudah terunggah tetap disimpan/);
   assert.match(FORM, /const gallery = imagesPayload\(images\);/);
-  assert.match(FORM, /Please upload an image first/);
+  assert.match(FORM, /Unggah gambar terlebih dahulu/);
 });

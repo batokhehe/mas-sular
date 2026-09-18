@@ -49,7 +49,7 @@ test('16. a section with no eligible products does not render (no empty heading)
 
 test('Trial Pack sits right after Promo Spesial Produk; the three promo headings never collide', () => {
   assert.ok(HOME.indexOf('title="Promo Spesial Produk"') < HOME.indexOf('title="Trial Pack"'))
-  assert.ok(HOME.indexOf('title="Trial Pack"') < HOME.indexOf('title="Best Sellers"'))
+  assert.ok(HOME.indexOf('title="Trial Pack"') < HOME.indexOf('title="Terlaris"'))
   assert.match(PROMO_CAROUSEL, /<h2 className="mb-4 text-xl font-bold">Promo Spesial<\/h2>/)
   assert.equal(/Promo Spesial Produk|Trial Pack/.test(PROMO_CAROUSEL), false)
 })

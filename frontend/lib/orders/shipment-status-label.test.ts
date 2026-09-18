@@ -34,17 +34,17 @@ test('every backend shipment status has a label (the CREATED case that crashed /
     assert.ok(view.label && view.label !== status, `${status} has a customer label`)
     assert.ok(['default', 'secondary', 'destructive', 'outline'].includes(view.variant))
   }
-  assert.deepEqual(shipmentStatusLabel('CREATED'), { label: 'Booked', variant: 'secondary' })
-  assert.deepEqual(shipmentStatusLabel('CANCELLED'), { label: 'Cancelled', variant: 'destructive' })
+  assert.deepEqual(shipmentStatusLabel('CREATED'), { label: 'Pengiriman dibuat', variant: 'secondary' })
+  assert.deepEqual(shipmentStatusLabel('CANCELLED'), { label: 'Dibatalkan', variant: 'destructive' })
 })
 
-test('the previously known labels are unchanged', () => {
-  assert.deepEqual(SHIPMENT_LABEL.PENDING, { label: 'Pending', variant: 'outline' })
-  assert.deepEqual(SHIPMENT_LABEL.RATE_SELECTED, { label: 'Rate selected', variant: 'outline' })
-  assert.deepEqual(SHIPMENT_LABEL.PICKED_UP, { label: 'Picked up', variant: 'secondary' })
-  assert.deepEqual(SHIPMENT_LABEL.IN_TRANSIT, { label: 'In transit', variant: 'secondary' })
-  assert.deepEqual(SHIPMENT_LABEL.DELIVERED, { label: 'Delivered', variant: 'default' })
-  assert.deepEqual(SHIPMENT_LABEL.FAILED, { label: 'Failed', variant: 'destructive' })
+test('the previously known statuses keep their (Indonesian) labels and variants', () => {
+  assert.deepEqual(SHIPMENT_LABEL.PENDING, { label: 'Menunggu', variant: 'outline' })
+  assert.deepEqual(SHIPMENT_LABEL.RATE_SELECTED, { label: 'Menunggu pengiriman', variant: 'outline' })
+  assert.deepEqual(SHIPMENT_LABEL.PICKED_UP, { label: 'Dijemput kurir', variant: 'secondary' })
+  assert.deepEqual(SHIPMENT_LABEL.IN_TRANSIT, { label: 'Dalam perjalanan', variant: 'secondary' })
+  assert.deepEqual(SHIPMENT_LABEL.DELIVERED, { label: 'Terkirim', variant: 'default' })
+  assert.deepEqual(SHIPMENT_LABEL.FAILED, { label: 'Gagal dikirim', variant: 'destructive' })
 })
 
 test('a status this build has never seen shows as-is instead of throwing', () => {

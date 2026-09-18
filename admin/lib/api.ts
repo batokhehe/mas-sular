@@ -97,7 +97,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
       credentials: 'include',
     });
   } catch (error) {
-    const networkError = new Error(`Unable to connect to API server: ${error instanceof Error ? error.message : String(error)}`) as ApiError;
+    const networkError = new Error(`Tidak dapat terhubung ke server API: ${error instanceof Error ? error.message : String(error)}`) as ApiError;
     throw networkError;
   }
 

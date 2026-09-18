@@ -47,7 +47,7 @@ export default function BannerDetailPage() {
   if (bannerQuery.isLoading) {
     return (
       <AdminShell requiredPermissions={ROUTE_PERMISSIONS.bannerUpdate}>
-        <p className="p-6 text-sm text-gray-500">Loading banner details...</p>
+        <p className="p-6 text-sm text-gray-500">Memuat detail banner...</p>
       </AdminShell>
     );
   }
@@ -56,9 +56,9 @@ export default function BannerDetailPage() {
     return (
       <AdminShell requiredPermissions={ROUTE_PERMISSIONS.bannerUpdate}>
         <div className="space-y-3 rounded-2xl border border-red-100 bg-red-50 p-6 text-sm text-red-700">
-          <p>Unable to load banner details. Please try again later.</p>
+          <p>Gagal memuat detail banner. Silakan coba lagi nanti.</p>
           <Link href="/banners" className="font-medium text-[#465fff] underline">
-            Back to banners
+            Kembali ke banner
           </Link>
         </div>
       </AdminShell>
@@ -69,11 +69,11 @@ export default function BannerDetailPage() {
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.bannerUpdate}>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold text-gray-900">Edit Banner</h2>
-          <p className="mt-1 text-sm text-gray-500">Update banner copy, schedule, and placement.</p>
+          <h2 className="text-xl font-semibold text-gray-900">Ubah Banner</h2>
+          <p className="mt-1 text-sm text-gray-500">Perbarui teks, jadwal, dan penempatan banner.</p>
         </div>
         <Link href="/banners" className="text-sm font-medium text-[#465fff] hover:text-indigo-700">
-          Back to banners
+          Kembali ke banner
         </Link>
       </div>
       <PermissionGate permissions={ROUTE_PERMISSIONS.bannerUpdate}>
@@ -95,7 +95,7 @@ export default function BannerDetailPage() {
               action: () => deleteBanner.mutateAsync(),
             });
           }}
-          submitLabel={updateBanner.isPending ? 'Saving...' : 'Save Banner'}
+          submitLabel={updateBanner.isPending ? 'Menyimpan...' : 'Simpan Banner'}
           isSubmitting={updateBanner.isPending}
           isDeleting={deleteBanner.isPending}
         />

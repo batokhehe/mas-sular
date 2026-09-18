@@ -46,7 +46,7 @@ export function ToppingForm({ initialValues, onSubmit, onDelete, isSubmitting, i
       <form onSubmit={handleSubmit} noValidate className="mt-4 space-y-6">
         <div className="grid gap-4 lg:grid-cols-2">
           <label className="space-y-2 text-sm text-gray-700" htmlFor="topping-name">
-            <span>Name</span>
+            <span>Nama</span>
             <input
               id="topping-name"
               value={values.name}
@@ -60,7 +60,7 @@ export function ToppingForm({ initialValues, onSubmit, onDelete, isSubmitting, i
           </label>
 
           <label className="space-y-2 text-sm text-gray-700" htmlFor="topping-price">
-            <span>Price (Rp)</span>
+            <span>Harga (Rp)</span>
             <input
               id="topping-price"
               inputMode="numeric"
@@ -74,7 +74,7 @@ export function ToppingForm({ initialValues, onSubmit, onDelete, isSubmitting, i
             {errors.price ? (
               <span className="block text-xs text-red-600">{errors.price}</span>
             ) : (
-              <span className="block text-xs text-gray-400">A price change applies to new orders only.</span>
+              <span className="block text-xs text-gray-400">Perubahan harga hanya berlaku untuk pesanan baru.</span>
             )}
           </label>
 
@@ -87,8 +87,8 @@ export function ToppingForm({ initialValues, onSubmit, onDelete, isSubmitting, i
               className="size-4 rounded border-gray-300"
             />
             <span>
-              Active
-              <span className="block text-xs text-gray-400">Only active toppings are offered to customers.</span>
+              Aktif
+              <span className="block text-xs text-gray-400">Hanya topping aktif yang ditawarkan ke pelanggan.</span>
             </span>
           </label>
         </div>
@@ -104,7 +104,7 @@ export function ToppingForm({ initialValues, onSubmit, onDelete, isSubmitting, i
               disabled={isDeleting}
               onClick={onDelete}
             >
-              Delete
+              Hapus
             </Button>
           ) : null}
         </div>

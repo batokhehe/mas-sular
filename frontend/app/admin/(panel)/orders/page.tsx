@@ -7,6 +7,7 @@ import { adminApi } from '@/lib/api/admin.api'
 import { qk } from '@/lib/query/keys'
 import { usePermissions } from '@/lib/auth/use-permissions'
 import { formatIDR } from '@/lib/utils/format'
+import { orderStatusLabel, paymentStatusLabel } from '@/lib/invoice/labels'
 import { orderStatusVariant } from '@/lib/utils/status'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -42,7 +43,7 @@ export default function AdminOrdersPage() {
   })
 
   if (!can('Order.read')) {
-    return <Empty title="No access" description="You do not have permission to view orders." />
+    return <Empty title="Tidak ada akses" description="Anda tidak memiliki izin untuk melihat pesanan." />
   }
 
   const orders = data ?? []
@@ -50,7 +51,7 @@ export default function AdminOrdersPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold">Orders</h1>
+        <h1 className="text-2xl font-bold">Pesanan</h1>
         <Select value={status} onValueChange={(v) => setStatus(v as OrderStatus | 'ALL')}>
           <SelectTrigger className="w-48">
             <SelectValue />
@@ -58,7 +59,7 @@ export default function AdminOrdersPage() {
           <SelectContent>
             {FILTERS.map((s) => (
               <SelectItem key={s} value={s}>
-                {s}
+                {s === 'ALL' ? 'Semua' : orderStatusLabel(s)}
               </SelectItem>
             ))}
           </SelectContent>
@@ -74,18 +75,18 @@ export default function AdminOrdersPage() {
       ) : isError ? (
         <ErrorState onRetry={() => void refetch()} />
       ) : orders.length === 0 ? (
-        <Empty title={`No ${status} orders`} />
+        <Empty title={status === 'ALL' ? 'Belum ada pesanan' : `Tidak ada pesanan berstatus ${orderStatusLabel(status)}`} />
       ) : (
         <div className="overflow-x-auto rounded-lg border">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Order</TableHead>
-                <TableHead>Customer</TableHead>
-                <TableHead>Payment</TableHead>
+                <TableHead>Pesanan</TableHead>
+                <TableHead>Pelanggan</TableHead>
+                <TableHead>Pembayaran</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Total</TableHead>
-                <TableHead>Date</TableHead>
+                <TableHead>Tanggal</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -98,10 +99,10 @@ export default function AdminOrdersPage() {
                   </TableCell>
                   <TableCell>{order.user?.name ?? '—'}</TableCell>
                   <TableCell>
-                    {order.payment ? <Badge variant="outline">{order.payment.status}</Badge> : '—'}
+                    {order.payment ? <Badge variant="outline">{paymentStatusLabel(order.payment.status)}</Badge> : '—'}
                   </TableCell>
                   <TableCell>
-                    <Badge variant={orderStatusVariant(order.status)}>{order.status}</Badge>
+                    <Badge variant={orderStatusVariant(order.status)}>{orderStatusLabel(order.status)}</Badge>
                   </TableCell>
                   <TableCell>{formatIDR(order.totalPrice)}</TableCell>
                   <TableCell className="text-muted-foreground">

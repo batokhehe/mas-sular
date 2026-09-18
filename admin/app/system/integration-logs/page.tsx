@@ -74,10 +74,10 @@ export default function IntegrationLogsPage() {
   return (
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.integrationLogs}>
       <div className="mb-6">
-        <h2 className="text-xl font-semibold text-gray-900">Integration Logs</h2>
+        <h2 className="text-xl font-semibold text-gray-900">Log Integrasi</h2>
         <p className="mt-1 text-sm text-gray-500">
-          Every external API exchange with Paxel, JNE and Midtrans — one record per HTTP attempt, plus the application outcome. The
-          detail view shows the request and response exactly as exchanged, including credentials and personal data.
+          Setiap pertukaran API eksternal dengan Paxel, JNE, dan Midtrans — satu catatan per percobaan HTTP, beserta hasil di aplikasi. Tampilan
+          detail menunjukkan request dan respons persis seperti yang dipertukarkan, termasuk kredensial dan data pribadi.
         </p>
       </div>
 
@@ -87,11 +87,11 @@ export default function IntegrationLogsPage() {
             id="integration-search"
             defaultValue={filters.search ?? ''}
             onChange={(e) => patch({ search: e.target.value })}
-            placeholder="Order, payment, shipment, operation id, endpoint or error…"
+            placeholder="Pesanan, pembayaran, pengiriman, operation id, endpoint, atau error…"
             className={`${inputClass} w-full md:w-80`}
           />
           <select value={filters.provider ?? ''} onChange={(e) => patch({ provider: e.target.value as IntegrationProvider | '', operation: '' })} className={inputClass}>
-            <option value="">All providers</option>
+            <option value="">Semua penyedia</option>
             {INTEGRATION_PROVIDERS.map((p) => (
               <option key={p} value={p}>
                 {p}
@@ -99,7 +99,7 @@ export default function IntegrationLogsPage() {
             ))}
           </select>
           <select value={filters.operation ?? ''} onChange={(e) => patch({ operation: e.target.value })} className={inputClass}>
-            <option value="">All operations</option>
+            <option value="">Semua operasi</option>
             {operationOptions(filters.provider).map((op) => (
               <option key={op} value={op}>
                 {op}
@@ -107,12 +107,12 @@ export default function IntegrationLogsPage() {
             ))}
           </select>
           <select value={filters.direction ?? ''} onChange={(e) => patch({ direction: e.target.value as IntegrationLogFilters['direction'] })} className={inputClass}>
-            <option value="">All directions</option>
-            <option value="OUTBOUND">Outbound</option>
+            <option value="">Semua arah</option>
+            <option value="OUTBOUND">Keluar</option>
             <option value="INBOUND">Inbound (webhook)</option>
           </select>
           <select value={filters.applicationOutcome ?? ''} onChange={(e) => patch({ applicationOutcome: e.target.value as IntegrationOutcome | '' })} className={inputClass}>
-            <option value="">All outcomes</option>
+            <option value="">Semua hasil</option>
             {INTEGRATION_OUTCOMES.map((o) => (
               <option key={o} value={o}>
                 {o}
@@ -124,26 +124,26 @@ export default function IntegrationLogsPage() {
           <input type="date" value={filters.dateTo?.slice(0, 10) ?? ''} onChange={(e) => patch({ dateTo: e.target.value })} className={inputClass} />
         </div>
 
-        <CardTitle>External API calls</CardTitle>
+        <CardTitle>Panggilan API eksternal</CardTitle>
         <div className="mt-4 overflow-x-auto">
           {query.isLoading ? (
-            <p className="p-6 text-sm text-gray-500">Loading integration logs...</p>
+            <p className="p-6 text-sm text-gray-500">Memuat log integrasi...</p>
           ) : query.isError ? (
-            <p className="p-6 text-sm text-red-600">Unable to load integration logs. Please reauthenticate.</p>
+            <p className="p-6 text-sm text-red-600">Gagal memuat log integrasi. Silakan masuk ulang.</p>
           ) : rows.length === 0 ? (
-            <p className="p-6 text-sm text-gray-500">No external API calls match these filters.</p>
+            <p className="p-6 text-sm text-gray-500">Tidak ada panggilan API eksternal yang cocok dengan filter ini.</p>
           ) : (
             <table className="w-full min-w-[1000px] text-left text-sm">
               <thead>
                 <tr className="border-b border-gray-100 text-xs uppercase text-gray-400">
-                  <th className="py-3 font-medium">Time</th>
-                  <th className="py-3 font-medium">Provider</th>
-                  <th className="py-3 font-medium">Operation</th>
-                  <th className="py-3 font-medium">Direction</th>
+                  <th className="py-3 font-medium">Waktu</th>
+                  <th className="py-3 font-medium">Penyedia</th>
+                  <th className="py-3 font-medium">Operasi</th>
+                  <th className="py-3 font-medium">Arah</th>
                   <th className="py-3 font-medium">HTTP</th>
-                  <th className="py-3 font-medium">Duration</th>
-                  <th className="py-3 font-medium">Order</th>
-                  <th className="py-3 font-medium">Outcome</th>
+                  <th className="py-3 font-medium">Durasi</th>
+                  <th className="py-3 font-medium">Pesanan</th>
+                  <th className="py-3 font-medium">Hasil</th>
                 </tr>
               </thead>
               <tbody>
@@ -152,7 +152,7 @@ export default function IntegrationLogsPage() {
                     <td className="py-2.5 whitespace-nowrap text-gray-500">{dt(log.createdAt)}</td>
                     <td className="py-2.5 font-medium text-gray-800">{log.provider}</td>
                     <td className="py-2.5 font-mono text-xs text-gray-700">{log.operation}</td>
-                    <td className="py-2.5 text-gray-500">{log.direction === 'INBOUND' ? 'Inbound' : 'Outbound'}</td>
+                    <td className="py-2.5 text-gray-500">{log.direction === 'INBOUND' ? 'Masuk' : 'Keluar'}</td>
                     <td className="py-2.5">
                       <Tag tone={httpStatusTone(log.httpStatus)}>{log.httpStatus ?? '—'}</Tag>
                     </td>
@@ -209,37 +209,37 @@ function LogDrawer({ log, loading, onClose }: { log?: IntegrationLogDetail; load
               <section>
                 <p className="mb-2 text-xs font-semibold uppercase text-gray-400">Request</p>
                 <dl className="space-y-1.5">
-                  <Field label="Method" value={log.method ?? '—'} />
+                  <Field label="Metode" value={log.method ?? '—'} />
                   <Field label="URL" value={<span className="break-all font-mono text-xs">{exactEndpoint(log) ?? '—'}</span>} />
                 </dl>
-                <ExactPayload title="Request body" value={log.rawRequestBody} />
+                <ExactPayload title="Body request" value={log.rawRequestBody} />
               </section>
 
               <section>
-                <p className="mb-2 text-xs font-semibold uppercase text-gray-400">Response</p>
+                <p className="mb-2 text-xs font-semibold uppercase text-gray-400">Respons</p>
                 <dl className="space-y-1.5">
-                  <Field label="HTTP status" value={<Tag tone={httpStatusTone(log.httpStatus)}>{log.httpStatus ?? '—'}</Tag>} />
-                  <Field label="Outcome" value={<Tag tone={outcomeTone(log.applicationOutcome)}>{log.applicationOutcome}</Tag>} />
+                  <Field label="Status HTTP" value={<Tag tone={httpStatusTone(log.httpStatus)}>{log.httpStatus ?? '—'}</Tag>} />
+                  <Field label="Hasil" value={<Tag tone={outcomeTone(log.applicationOutcome)}>{log.applicationOutcome}</Tag>} />
                   {log.errorMessage ? <Field label="Error" value={<span className="whitespace-pre-wrap break-words text-right">{log.errorMessage}</span>} /> : null}
-                  {log.errorClass ? <Field label="Error class" value={log.errorClass} /> : null}
+                  {log.errorClass ? <Field label="Kelas error" value={log.errorClass} /> : null}
                 </dl>
-                <ExactPayload title="Response body" value={log.rawResponseBody} />
+                <ExactPayload title="Body respons" value={log.rawResponseBody} />
               </section>
 
               <section>
-                <p className="mb-2 text-xs font-semibold uppercase text-gray-400">Context</p>
+                <p className="mb-2 text-xs font-semibold uppercase text-gray-400">Konteks</p>
                 <dl className="space-y-1.5">
-                  <Field label="Provider / operation" value={`${log.provider} · ${log.operation}`} />
-                  <Field label="Direction" value={log.direction} />
-                  <Field label="Attempt" value={formatAttempt(log)} />
-                  <Field label="Duration" value={formatDuration(log.durationMs)} />
-                  <Field label="Time" value={dt(log.createdAt)} />
+                  <Field label="Penyedia / operasi" value={`${log.provider} · ${log.operation}`} />
+                  <Field label="Arah" value={log.direction} />
+                  <Field label="Percobaan" value={formatAttempt(log)} />
+                  <Field label="Durasi" value={formatDuration(log.durationMs)} />
+                  <Field label="Waktu" value={dt(log.createdAt)} />
                   <Field label="Operation ID" value={<span className="font-mono text-xs">{log.operationId}</span>} />
                   <Field label="Request ID" value={<span className="font-mono text-xs">{log.requestId ?? '—'}</span>} />
                   <Field label="Correlation ID" value={<span className="font-mono text-xs">{log.correlationId ?? '—'}</span>} />
-                  <Field label="Order ID" value={<span className="font-mono text-xs">{log.orderId ?? '—'}</span>} />
-                  <Field label="Payment ID" value={<span className="font-mono text-xs">{log.paymentId ?? '—'}</span>} />
-                  <Field label="Shipment ID" value={<span className="font-mono text-xs">{log.shipmentId ?? '—'}</span>} />
+                  <Field label="ID Pesanan" value={<span className="font-mono text-xs">{log.orderId ?? '—'}</span>} />
+                  <Field label="ID Pembayaran" value={<span className="font-mono text-xs">{log.paymentId ?? '—'}</span>} />
+                  <Field label="ID Pengiriman" value={<span className="font-mono text-xs">{log.shipmentId ?? '—'}</span>} />
                 </dl>
               </section>
             </>
@@ -257,7 +257,7 @@ function LogDrawer({ log, loading, onClose }: { log?: IntegrationLogDetail; load
  */
 function ExactPayload({ title, value }: { title: string; value: string | null }) {
   const body = exactBody(value);
-  if (!body.captured) return <p className="mt-2 text-xs text-gray-400">{title}: not captured for this record</p>;
+  if (!body.captured) return <p className="mt-2 text-xs text-gray-400">{title}: tidak tercatat untuk data ini</p>;
   if (body.empty) return <p className="mt-2 text-xs text-gray-400">{title}: (empty body)</p>;
   return (
     <details className="mt-2 rounded-lg border border-gray-100">

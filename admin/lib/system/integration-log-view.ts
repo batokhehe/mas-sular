@@ -48,10 +48,10 @@ export function formatDuration(ms: number | null): string {
   return ms >= 1_000 ? `${(ms / 1_000).toFixed(2)}s` : `${ms}ms`;
 }
 
-/** "2 of 3" for a retried attempt; an application-outcome record has no attempt. */
+/** "2 dari 3" for a retried attempt; an application-outcome record has no attempt. */
 export function formatAttempt(log: Pick<IntegrationLog, 'attempt' | 'maxAttempts'>): string {
-  if (log.attempt === null) return 'result';
-  return log.maxAttempts ? `${log.attempt} of ${log.maxAttempts}` : String(log.attempt);
+  if (log.attempt === null) return 'hasil';
+  return log.maxAttempts ? `${log.attempt} dari ${log.maxAttempts}` : String(log.attempt);
 }
 
 /** The business identifier to show in the Order column. */

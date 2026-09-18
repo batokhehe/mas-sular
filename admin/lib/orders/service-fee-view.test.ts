@@ -23,23 +23,23 @@ test('rule labels follow the Midtrans pricing shapes', () => {
 });
 
 test('fee mode says who bore the fee, including the compliance override', () => {
-  assert.match(feeModeLabel(false, rule({})), /^Merchant absorbs \(PAYMENT_SERVICE_FEE_ENABLED=false\)/);
-  assert.match(feeModeLabel(true, rule({})), /^Customer pays/);
-  assert.match(feeModeLabel(true, rule({ channel: 'QRIS', passThrough: 'PROHIBITED' })), /pass-through prohibited/);
+  assert.match(feeModeLabel(false, rule({})), /^Ditanggung merchant \(PAYMENT_SERVICE_FEE_ENABLED=false\)/);
+  assert.match(feeModeLabel(true, rule({})), /^Dibayar pelanggan/);
+  assert.match(feeModeLabel(true, rule({ channel: 'QRIS', passThrough: 'PROHIBITED' })), /tidak boleh dibebankan ke pelanggan/);
   assert.equal(feeModeLabel(null, null), '—'); // orders recorded before the breakdown
 });
 
 test('fee mode names the per-channel variable that decided it, when the snapshot records one', () => {
   const channel = { enabled: false, variable: 'PAYMENT_FEE_VA_BRI_ENABLED', source: 'CHANNEL' as const };
-  assert.equal(feeModeLabel(false, rule({ channel: 'BRI_VA', setting: channel })), 'Merchant absorbs (PAYMENT_FEE_VA_BRI_ENABLED=false)');
+  assert.equal(feeModeLabel(false, rule({ channel: 'BRI_VA', setting: channel })), 'Ditanggung merchant (PAYMENT_FEE_VA_BRI_ENABLED=false)');
   assert.equal(
     feeModeLabel(true, rule({ channel: 'GOPAY', setting: { enabled: true, variable: 'PAYMENT_FEE_EWALLET_GOPAY_ENABLED', source: 'CHANNEL' } })),
-    'Customer pays (PAYMENT_FEE_EWALLET_GOPAY_ENABLED=true)',
+    'Dibayar pelanggan (PAYMENT_FEE_EWALLET_GOPAY_ENABLED=true)',
   );
   // Inherited from the global switch.
   assert.equal(
     feeModeLabel(true, rule({ setting: { enabled: true, variable: 'PAYMENT_SERVICE_FEE_ENABLED', source: 'GLOBAL' } })),
-    'Customer pays (PAYMENT_SERVICE_FEE_ENABLED=true)',
+    'Dibayar pelanggan (PAYMENT_SERVICE_FEE_ENABLED=true)',
   );
 });
 

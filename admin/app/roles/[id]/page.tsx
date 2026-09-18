@@ -17,7 +17,7 @@ export default function RoleDetailPage() {
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['admin-role', roleId],
-    queryFn: () => (roleId ? fetchAdminRole(roleId) : Promise.reject(new Error('Missing role id'))),
+    queryFn: () => (roleId ? fetchAdminRole(roleId) : Promise.reject(new Error('ID peran tidak ada'))),
     enabled: Boolean(roleId),
     retry: false,
   });
@@ -25,7 +25,7 @@ export default function RoleDetailPage() {
   if (isLoading) {
     return (
       <AdminShell requiredPermissions={ROUTE_PERMISSIONS.roles}>
-        <p className="text-sm text-gray-500">Loading role details…</p>
+        <p className="text-sm text-gray-500">Memuat detail peran…</p>
       </AdminShell>
     );
   }
@@ -34,7 +34,7 @@ export default function RoleDetailPage() {
     return (
       <AdminShell requiredPermissions={ROUTE_PERMISSIONS.roles}>
         <div className="space-y-3 rounded-2xl border border-red-100 bg-red-50 p-6 text-sm text-red-700">
-          <p>Unable to load role details. Please try again later.</p>
+          <p>Gagal memuat detail peran. Silakan coba lagi nanti.</p>
         </div>
       </AdminShell>
     );
@@ -44,12 +44,12 @@ export default function RoleDetailPage() {
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.roles}>
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-xl font-semibold text-gray-900">Role Details</h2>
-          <p className="mt-1 text-sm text-gray-500">Review role permissions and approval scope.</p>
+          <h2 className="text-xl font-semibold text-gray-900">Detail Peran</h2>
+          <p className="mt-1 text-sm text-gray-500">Tinjau izin dan cakupan persetujuan peran.</p>
         </div>
         <PermissionGate permissions={ROUTE_PERMISSIONS.roleUpdate}>
           <Link href={`/roles/${roleId}/edit`}>
-            <Button>Edit Role</Button>
+            <Button>Ubah Peran</Button>
           </Link>
         </PermissionGate>
       </div>
@@ -58,11 +58,11 @@ export default function RoleDetailPage() {
         <CardTitle>{data.name}</CardTitle>
         <div className="mt-4 space-y-4 text-sm text-gray-700">
           <div>
-            <p className="text-xs uppercase text-gray-400">Description</p>
-            <p className="mt-2 text-gray-900">{data.description ?? 'No description available.'}</p>
+            <p className="text-xs uppercase text-gray-400">Deskripsi</p>
+            <p className="mt-2 text-gray-900">{data.description ?? 'Tidak ada deskripsi.'}</p>
           </div>
           <div>
-            <p className="text-xs uppercase text-gray-400">Permissions</p>
+            <p className="text-xs uppercase text-gray-400">Izin</p>
             {data.permissions.length > 0 ? (
               <div className="mt-3 grid gap-2 sm:grid-cols-2">
                 {data.permissions.map((assignment) => (
@@ -72,7 +72,7 @@ export default function RoleDetailPage() {
                 ))}
               </div>
             ) : (
-              <p className="mt-2 text-sm text-gray-500">No permissions assigned.</p>
+              <p className="mt-2 text-sm text-gray-500">Belum ada izin yang ditetapkan.</p>
             )}
           </div>
         </div>

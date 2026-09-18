@@ -1812,7 +1812,7 @@ export async function exportAuditCsv(f: AuditFilters = {}): Promise<Blob> {
     headers: { 'Content-Type': 'application/json', ...(await csrfHeaders('POST')) },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`Export failed (${res.status})`);
+  if (!res.ok) throw new Error(`Ekspor gagal (${res.status})`);
   return res.blob();
 }
 

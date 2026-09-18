@@ -12,17 +12,17 @@ import type { ShipmentStatus } from '@/lib/types/enums'
 export type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline'
 
 export const SHIPMENT_LABEL: Record<ShipmentStatus, { label: string; variant: BadgeVariant }> = {
-  PENDING: { label: 'Pending', variant: 'outline' },
-  RATE_SELECTED: { label: 'Rate selected', variant: 'outline' },
-  CREATED: { label: 'Booked', variant: 'secondary' },
-  WAITING_PICKUP: { label: 'Awaiting pickup', variant: 'secondary' },
-  PICKED_UP: { label: 'Picked up', variant: 'secondary' },
-  IN_TRANSIT: { label: 'In transit', variant: 'secondary' },
-  OUT_FOR_DELIVERY: { label: 'Out for delivery', variant: 'secondary' },
-  DELIVERED: { label: 'Delivered', variant: 'default' },
-  FAILED: { label: 'Failed', variant: 'destructive' },
-  CANCELLED: { label: 'Cancelled', variant: 'destructive' },
-  UNKNOWN: { label: 'Status unavailable', variant: 'outline' },
+  PENDING: { label: 'Menunggu', variant: 'outline' },
+  RATE_SELECTED: { label: 'Menunggu pengiriman', variant: 'outline' },
+  CREATED: { label: 'Pengiriman dibuat', variant: 'secondary' },
+  WAITING_PICKUP: { label: 'Menunggu dijemput kurir', variant: 'secondary' },
+  PICKED_UP: { label: 'Dijemput kurir', variant: 'secondary' },
+  IN_TRANSIT: { label: 'Dalam perjalanan', variant: 'secondary' },
+  OUT_FOR_DELIVERY: { label: 'Sedang diantar', variant: 'secondary' },
+  DELIVERED: { label: 'Terkirim', variant: 'default' },
+  FAILED: { label: 'Gagal dikirim', variant: 'destructive' },
+  CANCELLED: { label: 'Dibatalkan', variant: 'destructive' },
+  UNKNOWN: { label: 'Tidak diketahui', variant: 'outline' },
 }
 
 export function shipmentStatusLabel(status: string): { label: string; variant: BadgeVariant } {

@@ -8,6 +8,7 @@ import { adminApi } from '@/lib/api/admin.api'
 import { qk } from '@/lib/query/keys'
 import { usePermissions } from '@/lib/auth/use-permissions'
 import { formatIDR } from '@/lib/utils/format'
+import { orderStatusLabel, paymentMethodLabel, paymentStatusLabel, shipmentStatusLabel } from '@/lib/invoice/labels'
 import {
   NEXT_ORDER_STATUS,
   CANCELLABLE_ORDER_STATUS,
@@ -58,20 +59,20 @@ export default function AdminOrderDetailPage() {
     onSuccess: invalidate,
   })
 
-  if (!can('Order.read')) return <ErrorState title="No access" description="You cannot view orders." />
+  if (!can('Order.read')) return <ErrorState title="Tidak ada akses" description="Anda tidak dapat melihat pesanan." />
   if (isLoading) return <DetailSkeleton />
-  if (isError || !order) return <ErrorState description="Order not found." onRetry={() => void refetch()} />
+  if (isError || !order) return <ErrorState description="Pesanan tidak ditemukan." onRetry={() => void refetch()} />
 
   const nextStatuses = NEXT_ORDER_STATUS[order.status] ?? []
   const canCancel = CANCELLABLE_ORDER_STATUS.has(order.status)
 
   async function changeStatus(next: OrderStatus, opts?: { title?: string }) {
     if (!order) return
-    if (!(await confirmStatusChange(order.status, next, { title: opts?.title }))) return
+    if (!(await confirmStatusChange(orderStatusLabel(order.status), orderStatusLabel(next), { title: opts?.title }))) return
     showLoading()
     try {
       await setStatus.mutateAsync(next)
-      await showSuccess('Success', 'Order updated successfully')
+      await showSuccess('Berhasil', 'Pesanan berhasil diperbarui')
     } catch (error) {
       await showError(error)
     }
@@ -88,7 +89,7 @@ export default function AdminOrderDetailPage() {
               {new Date(order.createdAt).toLocaleString('id-ID')} · {formatIDR(order.totalPrice)}
             </p>
           </div>
-          <Badge variant={orderStatusVariant(order.status)}>{order.status}</Badge>
+          <Badge variant={orderStatusVariant(order.status)}>{orderStatusLabel(order.status)}</Badge>
         </div>
 
         {can('Order.update') ? (
@@ -96,7 +97,7 @@ export default function AdminOrderDetailPage() {
             {nextStatuses.map((next) => (
               <Button key={next} size="sm" disabled={setStatus.isPending} onClick={() => changeStatus(next)}>
                 {setStatus.isPending ? <Loader2 className="mr-1 size-4 animate-spin" /> : null}
-                Mark as {next}
+                Tandai {orderStatusLabel(next)}
               </Button>
             ))}
             {canCancel ? (
@@ -104,13 +105,13 @@ export default function AdminOrderDetailPage() {
                 size="sm"
                 variant="destructive"
                 disabled={setStatus.isPending}
-                onClick={() => changeStatus('CANCELLED', { title: 'Cancel Order?' })}
+                onClick={() => changeStatus('CANCELLED', { title: 'Batalkan pesanan?' })}
               >
-                Cancel order
+                Batalkan pesanan
               </Button>
             ) : null}
             {nextStatuses.length === 0 && !canCancel ? (
-              <p className="text-sm text-muted-foreground">No further transitions.</p>
+              <p className="text-sm text-muted-foreground">Tidak ada perubahan status berikutnya.</p>
             ) : null}
           </div>
         ) : null}
@@ -119,12 +120,12 @@ export default function AdminOrderDetailPage() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {/* Customer + address */}
         <Card className="space-y-2 p-5">
-          <h2 className="font-semibold">Customer</h2>
+          <h2 className="font-semibold">Pelanggan</h2>
           <p className="text-sm">{order.user?.name ?? '—'}</p>
           <p className="text-sm text-muted-foreground">{order.user?.email}</p>
           <p className="text-sm text-muted-foreground">{order.user?.phone ?? '—'}</p>
           <Separator className="my-2" />
-          <h3 className="text-sm font-semibold">Delivery address</h3>
+          <h3 className="text-sm font-semibold">Alamat pengiriman</h3>
           {order.address ? (
             <p className="text-sm text-muted-foreground">
               {order.address.recipientName} · {order.address.phone}
@@ -138,12 +139,12 @@ export default function AdminOrderDetailPage() {
 
         {/* Payment */}
         <Card className="space-y-2 p-5">
-          <h2 className="font-semibold">Payment</h2>
+          <h2 className="font-semibold">Pembayaran</h2>
           {order.payment ? (
             <>
               <div className="flex items-center gap-2">
-                <Badge variant={paymentStatusVariant(order.payment.status)}>{order.payment.status}</Badge>
-                <span className="text-sm text-muted-foreground">{order.payment.method}</span>
+                <Badge variant={paymentStatusVariant(order.payment.status)}>{paymentStatusLabel(order.payment.status)}</Badge>
+                <span className="text-sm text-muted-foreground">{paymentMethodLabel(order.payment.method)}</span>
               </div>
               <p className="text-sm">{formatIDR(order.payment.amount)}</p>
               {order.payment.manualReceiptUrl ? (
@@ -153,19 +154,19 @@ export default function AdminOrderDetailPage() {
                   rel="noopener noreferrer"
                   className="text-sm text-primary underline"
                 >
-                  View receipt
+                  Lihat bukti pembayaran
                 </a>
               ) : null}
             </>
           ) : (
-            <p className="text-sm text-muted-foreground">No payment record.</p>
+            <p className="text-sm text-muted-foreground">Belum ada data pembayaran.</p>
           )}
         </Card>
       </div>
 
       {/* Items */}
       <Card className="p-5">
-        <h2 className="mb-3 font-semibold">Items</h2>
+        <h2 className="mb-3 font-semibold">Item</h2>
         <ul className="divide-y">
           {(order.items ?? []).map((item) => (
             <li key={item.id} className="flex items-center justify-between py-2 text-sm">
@@ -222,7 +223,7 @@ function ShipmentSection({
         cost: Number(cost) || 0,
         trackingNumber: tracking || undefined,
       })
-      await showSuccess('Success', 'Shipment created successfully')
+      await showSuccess('Berhasil', 'Pengiriman berhasil dibuat')
     } catch (error) {
       await showError(error)
     }
@@ -233,7 +234,7 @@ function ShipmentSection({
     showLoading()
     try {
       await update.mutateAsync({ trackingNumber: tracking || undefined })
-      await showSuccess('Success', 'Shipment updated successfully')
+      await showSuccess('Berhasil', 'Pengiriman berhasil diperbarui')
     } catch (error) {
       await showError(error)
     }
@@ -241,11 +242,11 @@ function ShipmentSection({
 
   async function handleStatusChange(next: ShipmentStatus) {
     if (!shipment || next === shipment.status) return
-    if (!(await confirmStatusChange(shipment.status, next, { title: 'Update Shipment Status?' }))) return
+    if (!(await confirmStatusChange(shipmentStatusLabel(shipment.status), shipmentStatusLabel(next), { title: 'Ubah status pengiriman?' }))) return
     showLoading()
     try {
       await update.mutateAsync({ status: next })
-      await showSuccess('Success', 'Shipment updated successfully')
+      await showSuccess('Berhasil', 'Pengiriman berhasil diperbarui')
     } catch (error) {
       await showError(error)
     }
@@ -253,12 +254,12 @@ function ShipmentSection({
 
   return (
     <Card className="space-y-3 p-5">
-      <h2 className="font-semibold">Shipment</h2>
+      <h2 className="font-semibold">Pengiriman</h2>
 
       {shipment ? (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2 text-sm">
-            <Badge variant={shipmentStatusVariant(shipment.status)}>{shipment.status}</Badge>
+            <Badge variant={shipmentStatusVariant(shipment.status)}>{shipmentStatusLabel(shipment.status)}</Badge>
             <span>
               {shipment.provider} · {shipment.service} · {formatIDR(shipment.cost)}
             </span>
@@ -267,11 +268,11 @@ function ShipmentSection({
           {canManage ? (
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
               <div className="flex-1 space-y-1.5">
-                <Label htmlFor="tracking">Tracking number</Label>
+                <Label htmlFor="tracking">Nomor resi</Label>
                 <Input id="tracking" value={tracking} onChange={(e) => setTracking(e.target.value)} />
               </div>
               <Button variant="outline" disabled={update.isPending} onClick={handleSaveTracking}>
-                Save tracking
+                Simpan resi
               </Button>
               <div className="space-y-1.5">
                 <Label>Status</Label>
@@ -282,7 +283,7 @@ function ShipmentSection({
                   <SelectContent>
                     {SHIPMENT_STATUSES.map((s) => (
                       <SelectItem key={s} value={s}>
-                        {s}
+                        {shipmentStatusLabel(s)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -294,30 +295,30 @@ function ShipmentSection({
       ) : canManage ? (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="space-y-1.5">
-            <Label htmlFor="provider">Courier</Label>
+            <Label htmlFor="provider">Kurir</Label>
             <Input id="provider" placeholder="JNE, Paxel…" value={provider} onChange={(e) => setProvider(e.target.value)} />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="service">Service</Label>
+            <Label htmlFor="service">Layanan</Label>
             <Input id="service" placeholder="REG, Same Day…" value={service} onChange={(e) => setService(e.target.value)} />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="cost">Cost</Label>
+            <Label htmlFor="cost">Biaya</Label>
             <Input id="cost" type="number" value={cost} onChange={(e) => setCost(e.target.value)} />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="ctracking">Tracking number</Label>
+            <Label htmlFor="ctracking">Nomor resi</Label>
             <Input id="ctracking" value={tracking} onChange={(e) => setTracking(e.target.value)} />
           </div>
           <div className="sm:col-span-2">
             <Button disabled={create.isPending || !provider || !service} onClick={handleCreate}>
               {create.isPending ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
-              Create shipment
+              Buat pengiriman
             </Button>
           </div>
         </div>
       ) : (
-        <p className="text-sm text-muted-foreground">No shipment yet.</p>
+        <p className="text-sm text-muted-foreground">Belum ada pengiriman.</p>
       )}
     </Card>
   )

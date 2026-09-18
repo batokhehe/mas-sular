@@ -58,10 +58,10 @@ test('duration, attempt and context formatting', () => {
   assert.equal(formatDuration(1500), '1.50s');
   assert.equal(formatDuration(3195), '3.19s'); // the JNE generatecnote latency from the report
 
-  assert.equal(formatAttempt({ attempt: 2, maxAttempts: 3 }), '2 of 3');
+  assert.equal(formatAttempt({ attempt: 2, maxAttempts: 3 }), '2 dari 3');
   assert.equal(formatAttempt({ attempt: 1, maxAttempts: null }), '1');
   // The application-outcome record has no attempt of its own.
-  assert.equal(formatAttempt({ attempt: null, maxAttempts: null }), 'result');
+  assert.equal(formatAttempt({ attempt: null, maxAttempts: null }), 'hasil');
 
   assert.equal(contextLabel({ correlationId: 'BMS-1', orderId: 'o1', paymentId: null, shipmentId: null }), 'BMS-1');
   assert.equal(contextLabel({ correlationId: null, orderId: 'o1', paymentId: null, shipmentId: null }), 'o1');
@@ -91,21 +91,21 @@ test('the page is gated by IntegrationLog.read and registered in the System menu
   assert.deepEqual(ROUTE_PERMISSIONS.integrationLogs, ['IntegrationLog.read']);
   const page = read('app/system/integration-logs/page.tsx');
   assert.match(page, /<AdminShell requiredPermissions=\{ROUTE_PERMISSIONS\.integrationLogs\}>/);
-  assert.match(read('lib/navigation.ts'), /\{ href: '\/system\/integration-logs', label: 'Integration Logs', icon: 'integrations', permissions: ROUTE_PERMISSIONS\.integrationLogs \}/);
+  assert.match(read('lib/navigation.ts'), /\{ href: '\/system\/integration-logs', label: 'Log Integrasi', icon: 'integrations', permissions: ROUTE_PERMISSIONS\.integrationLogs \}/);
   assert.match(read('components/layout/sidebar.tsx'), /integrations: Plug,/);
 });
 
 test('the list shows the documented columns and the drawer the documented context', () => {
   const page = read('app/system/integration-logs/page.tsx');
-  for (const column of ['Time', 'Provider', 'Operation', 'Direction', 'HTTP', 'Duration', 'Order', 'Outcome']) {
+  for (const column of ['Waktu', 'Penyedia', 'Operasi', 'Arah', 'HTTP', 'Durasi', 'Pesanan', 'Hasil']) {
     assert.match(page, new RegExp(`<th className="py-3 font-medium">${column}</th>`), `column ${column}`);
   }
-  for (const field of ['Operation ID', 'Request ID', 'Correlation ID', 'Order ID', 'Payment ID', 'Shipment ID', 'Attempt', 'Duration']) {
+  for (const field of ['Operation ID', 'Request ID', 'Correlation ID', 'ID Pesanan', 'ID Pembayaran', 'ID Pengiriman', 'Percobaan', 'Durasi']) {
     assert.match(page, new RegExp(`<Field label="${field}"`), `context field ${field}`);
   }
   // The drawer shows the exchange EXACTLY as captured - never the sanitized copies.
-  assert.match(page, /<ExactPayload title="Request body" value=\{log\.rawRequestBody\} \/>/);
-  assert.match(page, /<ExactPayload title="Response body" value=\{log\.rawResponseBody\} \/>/);
+  assert.match(page, /<ExactPayload title="Body request" value=\{log\.rawRequestBody\} \/>/);
+  assert.match(page, /<ExactPayload title="Body respons" value=\{log\.rawResponseBody\} \/>/);
   assert.match(page, /<Field label="URL" value=\{<span className="break-all font-mono text-xs">\{exactEndpoint\(log\) \?\? '—'\}<\/span>\} \/>/);
   assert.doesNotMatch(page, /sanitizedRequest|sanitizedResponse|prettyPayload|JSON\.stringify/);
   // Rendered verbatim: whitespace preserved, the text itself untouched.

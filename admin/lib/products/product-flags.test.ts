@@ -19,7 +19,7 @@ const LIST = read('app/products/page.tsx');
 const TYPES = read('lib/admin.ts');
 
 const FLAGS = [
-  { field: 'isPromoSpecial', label: 'Promo Special' },
+  { field: 'isPromoSpecial', label: 'Promo Spesial' },
   { field: 'isTrialPack', label: 'Trial Pack' },
 ] as const;
 
@@ -44,9 +44,9 @@ for (const { field, label } of FLAGS) {
   });
 }
 
-test('both checkboxes live in the existing Flags group, next to Best seller and New', () => {
-  const flags = FORM.split('<span>Flags</span>')[1]?.split('</div>')[0] ?? '';
-  for (const label of ['Best seller', 'New', 'Promo Special', 'Trial Pack']) {
+test('both checkboxes live in the existing Flags (Penanda) group, next to Terlaris (best seller) and Baru (new)', () => {
+  const flags = FORM.split('<span>Penanda</span>')[1]?.split('</div>')[0] ?? '';
+  for (const label of ['Terlaris', 'Baru', 'Promo Spesial', 'Trial Pack']) {
     assert.ok(new RegExp(`/>\\s*${label}\\s*</label>`).test(flags), `${label} in the Flags group`);
   }
 });

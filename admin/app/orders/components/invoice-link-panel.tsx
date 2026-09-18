@@ -37,9 +37,9 @@ export function InvoiceLinkPanel({ orderId, recipientPhone }: { orderId: string;
 
   const create = () =>
     runWithFeedback({
-      confirm: active || link ? () => confirmApprove({ title: 'Create a new invoice link?', text: 'The current invoice link will stop working.' }) : undefined,
-      loading: 'Creating invoice link...',
-      success: 'Invoice link created',
+      confirm: active || link ? () => confirmApprove({ title: 'Buat tautan invoice baru?', text: 'Tautan invoice saat ini akan berhenti berfungsi.' }) : undefined,
+      loading: 'Membuat tautan invoice...',
+      success: 'Tautan invoice dibuat',
       action: async () => refreshAfterIssue(await createInvoiceLink(orderId)),
     });
 
@@ -47,13 +47,13 @@ export function InvoiceLinkPanel({ orderId, recipientPhone }: { orderId: string;
     runWithFeedback({
       confirm: () =>
         confirmApprove({
-          title: 'Send invoice via WhatsApp?',
-          text: `A new invoice link will be sent to ${recipientPhone ?? 'the customer'}. Any previous invoice link stops working.`,
+          title: 'Kirim invoice via WhatsApp?',
+          text: `Tautan invoice baru akan dikirim ke ${recipientPhone ?? 'pelanggan'}. Tautan invoice sebelumnya akan berhenti berfungsi.`,
         }),
-      loading: 'Queueing WhatsApp message...',
+      loading: 'Mengantrekan pesan WhatsApp...',
       // Accepted into the notification queue - delivery is reported in Notification History.
       success: (res: Awaited<ReturnType<typeof sendInvoiceLinkWhatsApp>>) =>
-        `WhatsApp message queued (${res.notification.status}). Delivery status appears in Notification History.`,
+        `Pesan WhatsApp diantrekan (${res.notification.status}). Status pengiriman tampil di Riwayat Notifikasi.`,
       action: async () => {
         const res = await sendInvoiceLinkWhatsApp(orderId);
         refreshAfterIssue(res);
@@ -66,9 +66,9 @@ export function InvoiceLinkPanel({ orderId, recipientPhone }: { orderId: string;
     if (!link) return;
     try {
       await navigator.clipboard.writeText(link.invoiceUrl);
-      showSuccess('Invoice link copied');
+      showSuccess('Tautan invoice disalin');
     } catch (err) {
-      void showError(err instanceof Error ? err : new Error('Could not copy the link - select it and copy manually.'));
+      void showError(err instanceof Error ? err : new Error('Tautan tidak dapat disalin - pilih lalu salin secara manual.'));
     }
   };
   // noopener/noreferrer: the invoice tab gets no handle on the Admin, and the Admin URL is not sent as Referer.
@@ -81,12 +81,12 @@ export function InvoiceLinkPanel({ orderId, recipientPhone }: { orderId: string;
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="flex items-center gap-2">
           <FileText className="h-4 w-4 text-gray-400" />
-          <CardTitle>Customer Invoice</CardTitle>
+          <CardTitle>Invoice Pelanggan</CardTitle>
         </span>
       </div>
       <p className="mt-2 text-sm text-gray-500">
-        A read-only invoice page the customer can open without logging in. Links work for 30 days; creating or sending a new
-        link stops the previous one.
+        Halaman invoice hanya-baca yang bisa dibuka pelanggan tanpa masuk. Tautan berlaku 30 hari; membuat atau mengirim tautan
+        baru akan menonaktifkan tautan sebelumnya.
       </p>
 
       <div className="mt-3 text-sm">
@@ -94,43 +94,43 @@ export function InvoiceLinkPanel({ orderId, recipientPhone }: { orderId: string;
           <div className="space-y-2">
             <input
               readOnly
-              aria-label="Invoice link"
+              aria-label="Tautan invoice"
               value={link.invoiceUrl}
               onFocus={(e) => e.currentTarget.select()}
               className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 font-mono text-xs text-gray-700"
             />
-            <p className="text-xs text-gray-400">Expires {dt(link.expiresAt)}</p>
+            <p className="text-xs text-gray-400">Berlaku hingga {dt(link.expiresAt)}</p>
           </div>
         ) : statusQ.isLoading ? (
-          <p className="text-gray-400">Checking for an active link...</p>
+          <p className="text-gray-400">Memeriksa tautan aktif...</p>
         ) : active ? (
           <p className="text-gray-600">
-            An invoice link is active (created {dt(active.createdAt)}, expires {dt(active.expiresAt)}). For security it cannot be
-            shown again - create a new link to copy, open or print it.
+            Ada tautan invoice aktif (dibuat {dt(active.createdAt)}, berlaku hingga {dt(active.expiresAt)}). Demi keamanan, tautan ini tidak
+            dapat ditampilkan lagi - buat tautan baru untuk menyalin, membuka, atau mencetaknya.
           </p>
         ) : (
-          <p className="text-gray-600">No active invoice link.</p>
+          <p className="text-gray-600">Belum ada tautan invoice aktif.</p>
         )}
       </div>
 
       <div className="mt-4 flex flex-wrap gap-2">
         <PermissionGate permissions={ROUTE_PERMISSIONS.orderUpdate}>
-          <PanelButton icon={FileText} onClick={() => void create()}>{active || link ? 'Create new link' : 'Create invoice link'}</PanelButton>
+          <PanelButton icon={FileText} onClick={() => void create()}>{active || link ? 'Buat tautan baru' : 'Buat tautan invoice'}</PanelButton>
         </PermissionGate>
         {link ? (
           <>
-            <PanelButton icon={Copy} onClick={() => void copy()}>Copy link</PanelButton>
-            <PanelButton icon={ExternalLink} onClick={() => openInvoice()}>Open invoice</PanelButton>
-            <PanelButton icon={Printer} onClick={() => openInvoice(true)}>Print invoice</PanelButton>
+            <PanelButton icon={Copy} onClick={() => void copy()}>Salin tautan</PanelButton>
+            <PanelButton icon={ExternalLink} onClick={() => openInvoice()}>Buka invoice</PanelButton>
+            <PanelButton icon={Printer} onClick={() => openInvoice(true)}>Cetak invoice</PanelButton>
           </>
         ) : null}
         <PermissionGate permissions={[...ROUTE_PERMISSIONS.orderUpdate, ...ROUTE_PERMISSIONS.notificationSend]}>
           <PanelButton icon={MessageCircle} onClick={() => void sendWhatsApp()} disabled={!recipientPhone}>
-            Send via WhatsApp
+            Kirim via WhatsApp
           </PanelButton>
         </PermissionGate>
       </div>
-      {!recipientPhone ? <p className="mt-2 text-xs text-red-600">This order has no WhatsApp number.</p> : null}
+      {!recipientPhone ? <p className="mt-2 text-xs text-red-600">Pesanan ini tidak memiliki nomor WhatsApp.</p> : null}
     </Card>
   );
 }

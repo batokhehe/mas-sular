@@ -142,7 +142,7 @@ function OnboardingInner() {
               <div className="h-8 w-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-sm font-medium">
                 <Check className="h-4 w-4" />
               </div>
-              <span className="text-sm font-medium">Login</span>
+              <span className="text-sm font-medium">Masuk</span>
             </div>
             <div className="w-12 h-0.5 bg-primary" />
             <div className="flex items-center gap-2">

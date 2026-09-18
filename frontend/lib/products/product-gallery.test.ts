@@ -102,7 +102,7 @@ test('image error: a neutral internal placeholder with the same accessible name,
 
 test('product page: gallery replaces the single <img>; badges stay over the image; ProductCard untouched', () => {
   assert.match(PAGE, /<ProductGallery\s+product=\{product\}\s+overlay=\{/)
-  for (const badge of ['Best seller', 'variant="secondary">New', 'variant="destructive">-{discount}%']) assert.ok(PAGE.includes(badge), badge)
+  for (const badge of ['Terlaris', 'variant="secondary">Baru', 'variant="destructive">-{discount}%']) assert.ok(PAGE.includes(badge), badge)
   assert.equal(/<img /.test(PAGE), false)
   const card = read('components/storefront/product-card.tsx')
   assert.match(card, /<img src=\{product\.imageUrl\} alt=\{product\.name\} className="absolute inset-0 size-full object-cover" \/>/)

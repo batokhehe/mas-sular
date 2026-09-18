@@ -29,7 +29,7 @@ export function ProductSection({
             href={viewAllHref}
             className="inline-flex shrink-0 items-center text-sm font-medium text-primary hover:underline"
           >
-            View all
+            Lihat semua
             <ChevronRight className="ml-0.5 size-4" />
           </Link>
         ) : null}

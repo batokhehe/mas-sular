@@ -16,27 +16,27 @@ export default function OutletInventoryPage() {
   return (
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.productInventory}>
       <div className="mb-6">
-        <h2 className="text-xl font-semibold text-gray-900">Outlet Inventory</h2>
-        <p className="mt-1 text-sm text-gray-500">Aggregated stock / reserved / available / committed per outlet.</p>
+        <h2 className="text-xl font-semibold text-gray-900">Stok Outlet</h2>
+        <p className="mt-1 text-sm text-gray-500">Ringkasan stok / direservasi / tersedia / terkonfirmasi per outlet.</p>
       </div>
       <Card>
-        <CardTitle>Inventory by outlet</CardTitle>
+        <CardTitle>Stok per outlet</CardTitle>
         <div className="mt-4 overflow-x-auto">
           {isLoading ? (
-            <p className="p-6 text-sm text-gray-500">Loading…</p>
+            <p className="p-6 text-sm text-gray-500">Memuat…</p>
           ) : isError ? (
-            <p className="p-6 text-sm text-red-600">Unable to load report.</p>
+            <p className="p-6 text-sm text-red-600">Gagal memuat laporan.</p>
           ) : (data?.length ?? 0) === 0 ? (
-            <p className="p-6 text-sm text-gray-500">No per-outlet inventory yet.</p>
+            <p className="p-6 text-sm text-gray-500">Belum ada stok per outlet.</p>
           ) : (
             <table className="w-full min-w-[560px] text-left text-sm">
               <thead>
                 <tr className="border-b border-gray-100 text-xs uppercase text-gray-400">
                   <th className="py-3 font-medium">Outlet</th>
-                  <th className="py-3 font-medium">Stock</th>
-                  <th className="py-3 font-medium">Reserved</th>
-                  <th className="py-3 font-medium">Available</th>
-                  <th className="py-3 font-medium">Committed</th>
+                  <th className="py-3 font-medium">Stok</th>
+                  <th className="py-3 font-medium">Direservasi</th>
+                  <th className="py-3 font-medium">Tersedia</th>
+                  <th className="py-3 font-medium">Terkonfirmasi</th>
                 </tr>
               </thead>
               <tbody>

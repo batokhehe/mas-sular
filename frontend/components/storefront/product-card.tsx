@@ -37,8 +37,8 @@ export function ProductCard({ product }: { product: Product }) {
 
         {/* Badges (real flags) */}
         <div className="absolute left-2 top-2 flex flex-col gap-1">
-          {product.isBestSeller ? <Badge>Best seller</Badge> : null}
-          {product.isNew ? <Badge variant="secondary">New</Badge> : null}
+          {product.isBestSeller ? <Badge>Terlaris</Badge> : null}
+          {product.isNew ? <Badge variant="secondary">Baru</Badge> : null}
           {discount > 0 ? <Badge variant="destructive">-{discount}%</Badge> : null}
         </div>
 
@@ -46,7 +46,7 @@ export function ProductCard({ product }: { product: Product }) {
         {spicy > 0 ? (
           <div
             className="absolute bottom-2 left-2 flex items-center gap-0.5 rounded-full bg-background/80 px-2 py-1 backdrop-blur-sm"
-            aria-label={`Spicy level ${spicy}`}
+            aria-label={`Level pedas ${spicy}`}
           >
             {Array.from({ length: spicy }).map((_, i) => (
               <Flame key={i} className="size-3 fill-primary text-primary" />
@@ -83,10 +83,10 @@ export function ProductCard({ product }: { product: Product }) {
           disabled={outOfStock}
           onClick={() => {
             add(product)
-            toast.success('Added to cart')
+            toast.success('Ditambahkan ke keranjang')
           }}
         >
-          {outOfStock ? 'Out of stock' : 'Add to cart'}
+          {outOfStock ? 'Stok Habis' : 'Tambah ke Keranjang'}
         </Button>
       </div>
     </Card>

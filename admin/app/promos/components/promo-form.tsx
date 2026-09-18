@@ -97,7 +97,7 @@ export function PromoForm({
       <form onSubmit={handleSubmit} className="mt-4 space-y-6">
         <div className="grid gap-4 lg:grid-cols-2">
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Code</span>
+            <span>Kode</span>
             <input
               value={values.code}
               onChange={(event) => handleChange('code', event.target.value)}
@@ -106,7 +106,7 @@ export function PromoForm({
             />
           </label>
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Title</span>
+            <span>Judul</span>
             <input
               value={values.title}
               onChange={(event) => handleChange('title', event.target.value)}
@@ -115,7 +115,7 @@ export function PromoForm({
             />
           </label>
           <label className="space-y-2 text-sm text-gray-700 col-span-full">
-            <span>Description</span>
+            <span>Deskripsi</span>
             <textarea
               value={values.description}
               onChange={(event) => handleChange('description', event.target.value)}
@@ -125,7 +125,7 @@ export function PromoForm({
             />
           </label>
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Image URL</span>
+            <span>URL gambar</span>
             <input
               value={values.imageUrl ?? ''}
               onChange={(event) => handleChange('imageUrl', event.target.value)}
@@ -133,22 +133,22 @@ export function PromoForm({
             />
           </label>
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Voucher type</span>
+            <span>Tipe voucher</span>
             <select
               value={values.voucherType}
               onChange={(event) => handleChange('voucherType', event.target.value)}
               className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none focus:border-[#465fff] focus:bg-white"
             >
-              <option value="PERCENTAGE_DISCOUNT">Percentage discount</option>
-              <option value="FIXED_DISCOUNT">Fixed discount</option>
-              <option value="FREE_SHIPPING">Free shipping</option>
+              <option value="PERCENTAGE_DISCOUNT">Diskon persentase</option>
+              <option value="FIXED_DISCOUNT">Diskon nominal</option>
+              <option value="FREE_SHIPPING">Gratis ongkir</option>
             </select>
           </label>
 
           {values.voucherType === 'PERCENTAGE_DISCOUNT' ? (
             <>
               <label className="space-y-2 text-sm text-gray-700">
-                <span>Discount percentage</span>
+                <span>Persentase diskon</span>
                 <input
                   type="number"
                   min={0}
@@ -159,7 +159,7 @@ export function PromoForm({
                 />
               </label>
               <label className="space-y-2 text-sm text-gray-700">
-                <span>Max discount amount</span>
+                <span>Maksimal nominal diskon</span>
                 <input
                   type="number"
                   min={0}
@@ -171,7 +171,7 @@ export function PromoForm({
             </>
           ) : values.voucherType === 'FIXED_DISCOUNT' ? (
             <label className="space-y-2 text-sm text-gray-700">
-              <span>Discount amount</span>
+              <span>Nominal diskon</span>
               <input
                 type="number"
                 min={0}
@@ -182,7 +182,7 @@ export function PromoForm({
             </label>
           ) : (
             <label className="space-y-2 text-sm text-gray-700">
-              <span>Free shipping max amount</span>
+              <span>Maksimal potongan gratis ongkir</span>
               <input
                 type="number"
                 min={0}
@@ -194,7 +194,7 @@ export function PromoForm({
           )}
 
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Minimum order amount</span>
+            <span>Minimal nilai pesanan</span>
             <input
               type="number"
               min={0}
@@ -204,9 +204,9 @@ export function PromoForm({
             />
           </label>
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Max usage count</span>
+            <span>Maksimal jumlah pemakaian</span>
             {/* Blank = unlimited (omitted -> null). The floor is 1, not 0: the backend
-                enforces 0 as "no uses allowed" (hidden from the storefront, rejected at
+                enforces 0 as "tidak dapat dipakai" (hidden from the storefront, rejected at
                 checkout), so a 0 here only ever produced a dead voucher. See
                 lib/promos/usage-display.ts. */}
             <input
@@ -225,10 +225,10 @@ export function PromoForm({
               onChange={(event) => handleChange('isNewUserOnly', event.target.checked)}
               className="h-4 w-4 rounded border-gray-300 text-[#465fff] focus:ring-[#465fff]"
             />
-            <span>New users only</span>
+            <span>Khusus pengguna baru</span>
           </label>
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Starts at</span>
+            <span>Mulai</span>
             <input
               type="datetime-local"
               value={values.startDate ?? ''}
@@ -237,7 +237,7 @@ export function PromoForm({
             />
           </label>
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Ends at</span>
+            <span>Berakhir</span>
             <input
               type="datetime-local"
               value={values.endDate ?? ''}
@@ -252,7 +252,7 @@ export function PromoForm({
               onChange={(event) => handleChange('isActive', event.target.checked)}
               className="h-4 w-4 rounded border-gray-300 text-[#465fff] focus:ring-[#465fff]"
             />
-            <span>Active</span>
+            <span>Aktif</span>
           </label>
         </div>
 
@@ -260,7 +260,7 @@ export function PromoForm({
           <Button type="submit" disabled={isSubmitting}>{submitLabel}</Button>
           {onDelete ? (
             <Button type="button" className="bg-white text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50" disabled={isDeleting} onClick={onDelete}>
-              Delete
+              Hapus
             </Button>
           ) : null}
         </div>

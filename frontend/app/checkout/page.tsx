@@ -47,10 +47,10 @@ import type { CreateOrderInput } from '@/lib/api/orders.api'
 import type { Address, ShippingOption } from '@/lib/types/models'
 
 const schema = z.object({
-  address_id: z.string().min(1, 'Select a delivery address'),
+  address_id: z.string().min(1, 'Pilih alamat pengiriman'),
   courier: z.enum(['paxel', 'jne']),
   // The selector works in CHANNEL codes from GET /payments/channels only.
-  payment_channel: z.string().min(1, 'Select a payment method'),
+  payment_channel: z.string().min(1, 'Pilih metode pembayaran'),
   voucher_code: z.string().optional(),
 })
 type FormValues = z.infer<typeof schema>
@@ -244,7 +244,7 @@ export default function CheckoutPage() {
   if (meLoading) {
     return (
       <StorefrontShell>
-        <div className="mx-auto max-w-2xl px-4 py-16 text-center text-muted-foreground">Loading…</div>
+        <div className="mx-auto max-w-2xl px-4 py-16 text-center text-muted-foreground">Memuat…</div>
       </StorefrontShell>
     )
   }
@@ -253,11 +253,11 @@ export default function CheckoutPage() {
     return (
       <StorefrontShell>
         <Empty
-          title="Please sign in to checkout"
-          description="You need an account to place an order."
+          title="Silakan masuk untuk checkout"
+          description="Anda perlu akun untuk membuat pesanan."
           action={
             <Button asChild className="mt-2">
-              <Link href="/login">Sign in</Link>
+              <Link href="/login">Masuk</Link>
             </Button>
           }
         />
@@ -269,10 +269,10 @@ export default function CheckoutPage() {
     return (
       <StorefrontShell>
         <Empty
-          title="Your cart is empty"
+          title="Keranjang Anda kosong"
           action={
             <Button asChild className="mt-2">
-              <Link href="/catalog">Browse catalog</Link>
+              <Link href="/catalog">Lihat Katalog</Link>
             </Button>
           }
         />
@@ -285,11 +285,11 @@ export default function CheckoutPage() {
     return (
       <StorefrontShell>
         <Empty
-          title="No items selected"
-          description="Select the items you want to buy in your cart, then check out."
+          title="Belum ada item yang dipilih"
+          description="Pilih item yang ingin dibeli di keranjang, lalu lanjutkan ke checkout."
           action={
             <Button asChild className="mt-2">
-              <Link href="/cart">Back to cart</Link>
+              <Link href="/cart">Kembali ke keranjang</Link>
             </Button>
           }
         />
@@ -310,13 +310,13 @@ export default function CheckoutPage() {
               <Card className="space-y-3 p-4">
                 <div className="flex items-center gap-2">
                   <MapPin className="size-4 text-primary" />
-                  <Label className="text-base font-semibold">Delivery address</Label>
+                  <Label className="text-base font-semibold">Alamat pengiriman</Label>
                 </div>
                 {addresses.length === 0 ? (
                   <div className="space-y-2">
-                    <p className="text-sm text-muted-foreground">You need a delivery address to check out.</p>
+                    <p className="text-sm text-muted-foreground">Tambahkan alamat pengiriman untuk melanjutkan checkout.</p>
                     <Button type="button" size="sm" onClick={() => setAddAddressOpen(true)}>
-                      <Plus className="mr-1 size-4" /> Add address
+                      <Plus className="mr-1 size-4" /> Tambah alamat
                     </Button>
                   </div>
                 ) : (
@@ -339,7 +339,7 @@ export default function CheckoutPage() {
                             }}
                           >
                             <SelectTrigger>
-                              <SelectValue placeholder="Select an address" />
+                              <SelectValue placeholder="Pilih alamat" />
                             </SelectTrigger>
                             <SelectContent>
                               {addresses.map((a) => (
@@ -359,10 +359,10 @@ export default function CheckoutPage() {
                           ) : null}
                           <div className="flex flex-wrap gap-2">
                             <Button type="button" variant="outline" size="sm" onClick={() => setAddAddressOpen(true)}>
-                              <Plus className="mr-1 size-4" /> Add address
+                              <Plus className="mr-1 size-4" /> Tambah alamat
                             </Button>
                             <Button asChild variant="outline" size="sm">
-                              <Link href={ADDRESS_BOOK_FROM_CHECKOUT}>Change address</Link>
+                              <Link href={ADDRESS_BOOK_FROM_CHECKOUT}>Ubah alamat</Link>
                             </Button>
                           </div>
                         </div>
@@ -377,12 +377,12 @@ export default function CheckoutPage() {
               {/* Order items (the cart lines selected for this checkout) */}
               <Card className="space-y-3 p-4">
                 <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                  <h2 className="font-semibold">Order ({checkoutLines.length} items)</h2>
+                  <h2 className="font-semibold">Pesanan ({checkoutLines.length} item)</h2>
                   {unselectedCount > 0 ? (
                     <p className="text-xs text-muted-foreground">
-                      {unselectedCount} unselected {unselectedCount === 1 ? 'item stays' : 'items stay'} in your cart ·{' '}
+                      {unselectedCount} item yang tidak dipilih tetap di keranjang ·{' '}
                       <Link href="/cart" className="font-medium text-primary hover:underline">
-                        Change selection
+                        Ubah pilihan
                       </Link>
                     </p>
                   ) : null}
@@ -404,7 +404,7 @@ export default function CheckoutPage() {
                             + {line.toppings.map((t) => `${t.name} (${formatIDR(t.price)})`).join(', ')}
                           </p>
                         )}
-                        <p className="text-xs text-muted-foreground">{formatIDR(lineUnitPrice(line))} each</p>
+                        <p className="text-xs text-muted-foreground">{formatIDR(lineUnitPrice(line))} / item</p>
                       </div>
                       {/* Unit price (product + toppings) × qty (same per-line summation as cartSubtotal). */}
                       <p className="text-sm font-semibold text-primary">{formatIDR(lineTotal(line))}</p>
@@ -416,17 +416,17 @@ export default function CheckoutPage() {
               {/* Shipping service + payment */}
               <Card className="space-y-4 p-4">
                 <div className="space-y-2">
-                  <Label>Shipping method</Label>
+                  <Label>Metode pengiriman</Label>
                   {!selectedAddress ? (
-                    <p className="text-sm text-muted-foreground">Select a delivery address first.</p>
+                    <p className="text-sm text-muted-foreground">Pilih alamat pengiriman terlebih dahulu.</p>
                   ) : shippingQuery.isFetching ? (
                     <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Loader2 className="size-4 animate-spin" /> Loading shipping options…
+                      <Loader2 className="size-4 animate-spin" /> Memuat opsi pengiriman…
                     </p>
                   ) : shippingQuery.isError ? (
-                    <p className="text-sm text-destructive">Unable to load shipping options for this address.</p>
+                    <p className="text-sm text-destructive">Gagal memuat opsi pengiriman untuk alamat ini.</p>
                   ) : shippingOptions.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No shipping services available.</p>
+                    <p className="text-sm text-muted-foreground">Tidak ada layanan pengiriman yang tersedia.</p>
                   ) : (
                     // Grouped by the backend's stable `provider` id — presentation
                     // only; each button still selects the exact option object.
@@ -547,17 +547,17 @@ export default function CheckoutPage() {
             {/* Right column — sticky summary */}
             <div className="space-y-4 lg:sticky lg:top-24 lg:self-start">
               <Card className="space-y-2 p-4">
-                <Label htmlFor="voucher">Voucher code (optional)</Label>
-                <Input id="voucher" placeholder="e.g. WELCOME10" {...register('voucher_code')} />
+                <Label htmlFor="voucher">Kode voucher (opsional)</Label>
+                <Input id="voucher" placeholder="mis. WELCOME10" {...register('voucher_code')} />
               </Card>
 
               <Card className="space-y-3 p-4">
-                <h2 className="font-semibold">Order summary</h2>
+                <h2 className="font-semibold">Ringkasan pesanan</h2>
                 {/* Every amount below is rendered verbatim from the backend
                     /checkout/summary response — the client performs no money math. */}
                 {!canPlaceOrder ? (
                   <p className="text-xs text-muted-foreground">
-                    Select a delivery address and shipping service to see the total.
+                    Pilih alamat dan layanan pengiriman untuk melihat total.
                   </p>
                 ) : summaryQuery.isLoading ? (
                   <div className="space-y-2" aria-busy="true">
@@ -567,7 +567,7 @@ export default function CheckoutPage() {
                   </div>
                 ) : summaryQuery.isError ? (
                   <p className="text-xs text-destructive">
-                    {(summaryQuery.error as Error)?.message ?? 'Unable to load the order total.'}
+                    {(summaryQuery.error as Error)?.message ?? 'Gagal memuat total pesanan.'}
                   </p>
                 ) : (
                   summaryRows.map((row) => (
@@ -592,8 +592,8 @@ export default function CheckoutPage() {
                     <AlertCircle className="mt-0.5 size-4 text-amber-600" />
                     <span>
                       {conflict === 'processing'
-                        ? 'Your order is already being processed. Wait a moment, then retry — it will not create a duplicate.'
-                        : 'Your cart changed since the last attempt. Review and place the order again.'}
+                        ? 'Pesanan Anda sedang diproses. Tunggu sebentar lalu coba lagi — pesanan tidak akan dibuat dua kali.'
+                        : 'Keranjang Anda berubah sejak percobaan terakhir. Periksa kembali lalu buat pesanan lagi.'}
                     </span>
                   </div>
                 ) : null}
@@ -606,11 +606,11 @@ export default function CheckoutPage() {
                 >
                   {checkout.isPending ? (
                     <>
-                      <Loader2 className="mr-2 size-4 animate-spin" /> Placing order…
+                      <Loader2 className="mr-2 size-4 animate-spin" /> Membuat pesanan…
                     </>
                   ) : (
                     <>
-                      Place order
+                      Buat Pesanan
                       <ChevronRight className="ml-1 size-4" />
                     </>
                   )}
@@ -629,7 +629,7 @@ export default function CheckoutPage() {
           {/* Scrolls on short phones - the form is taller than a 667px screen. */}
           <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>New address</DialogTitle>
+              <DialogTitle>Alamat baru</DialogTitle>
             </DialogHeader>
             <AddressForm
               pending={createAddress.isPending}

@@ -40,11 +40,11 @@ export default function PromosPage() {
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-semibold text-gray-900">Voucher Management</h2>
-          <p className="mt-1 text-sm text-gray-500">Manage promo codes, discounts, and campaign scheduling.</p>
+          <p className="mt-1 text-sm text-gray-500">Kelola kode promo, diskon, dan jadwal kampanye.</p>
         </div>
         <PermissionGate permissions={ROUTE_PERMISSIONS.promoCreate}>
           <Link href="/promos/new">
-            <Button>New Voucher</Button>
+            <Button>Voucher Baru</Button>
           </Link>
         </PermissionGate>
       </div>
@@ -53,7 +53,7 @@ export default function PromosPage() {
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search vouchers by code or title"
+            placeholder="Cari voucher berdasarkan kode atau judul"
             className="h-11 w-full rounded-xl border border-gray-200 bg-gray-50 px-4 text-sm outline-none focus:border-[#465fff] focus:bg-white"
           />
           <select
@@ -69,26 +69,26 @@ export default function PromosPage() {
           </select>
         </div>
 
-        <CardTitle>Active Vouchers</CardTitle>
+        <CardTitle>Voucher Aktif</CardTitle>
         <div className="mt-4 overflow-x-auto">
           {isLoading ? (
-            <p className="p-6 text-sm text-gray-500">Loading vouchers…</p>
+            <p className="p-6 text-sm text-gray-500">Memuat voucher…</p>
           ) : isError ? (
-            <p className="p-6 text-sm text-red-600">Unable to load vouchers. Please reauthenticate.</p>
+            <p className="p-6 text-sm text-red-600">Gagal memuat voucher. Silakan masuk ulang.</p>
           ) : promos.length === 0 ? (
-            <p className="p-6 text-sm text-gray-500">No vouchers match the current filters.</p>
+            <p className="p-6 text-sm text-gray-500">Tidak ada voucher yang cocok dengan filter.</p>
           ) : (
             <table className="w-full min-w-[720px] text-left text-sm">
               <thead>
                 <tr className="border-b border-gray-100 text-xs uppercase text-gray-400">
-                  <th className="py-3 font-medium">Code</th>
-                  <th className="py-3 font-medium">Title</th>
-                  <th className="py-3 font-medium">Type</th>
-                  <th className="py-3 font-medium">Value</th>
-                  <th className="py-3 font-medium">Min. Order</th>
-                  <th className="py-3 font-medium">Usage</th>
+                  <th className="py-3 font-medium">Kode</th>
+                  <th className="py-3 font-medium">Judul</th>
+                  <th className="py-3 font-medium">Tipe</th>
+                  <th className="py-3 font-medium">Nilai</th>
+                  <th className="py-3 font-medium">Min. Pesanan</th>
+                  <th className="py-3 font-medium">Pemakaian</th>
                   <th className="py-3 font-medium">Status</th>
-                  <th className="py-3 font-medium">Actions</th>
+                  <th className="py-3 font-medium">Aksi</th>
                 </tr>
               </thead>
               <tbody>
@@ -107,11 +107,11 @@ export default function PromosPage() {
                     <td className="py-4 text-gray-500">Rp {promo.minimumOrderAmount.toLocaleString('id-ID')}</td>
                     <td className="py-4 text-gray-500">{formatPromoUsage(promo.currentUsageCount, promo.maxUsageCount)}</td>
                     <td className="py-4">
-                      <Badge tone={promo.isActive ? 'success' : 'neutral'}>{promo.isActive ? 'Active' : 'Inactive'}</Badge>
+                      <Badge tone={promo.isActive ? 'success' : 'neutral'}>{promo.isActive ? 'Aktif' : 'Nonaktif'}</Badge>
                     </td>
                     <td className="py-4">
                       <Link href={`/promos/${promo.id}`} className="text-sm font-medium text-[#465fff] hover:text-indigo-700">
-                        View
+                        Lihat
                       </Link>
                     </td>
                   </tr>

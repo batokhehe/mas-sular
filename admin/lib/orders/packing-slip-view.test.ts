@@ -56,12 +56,12 @@ test('route path', () => {
   assert.equal(packingSlipPath('0f1e-22'), '/orders/0f1e-22/packing-slip');
 });
 
-test('Order Detail: the old whole-page window.print() action is gone; "Packing Slip" lives in Order Summary', () => {
+test('Order Detail: the old whole-page window.print() action is gone; "Packing Slip" lives in Order Summary (Ringkasan Pesanan)', () => {
   assert.equal(/window\.print\(/.test(DETAIL), false);
   assert.equal(/Print Packing Slip/.test(DETAIL), false);
-  const summary = DETAIL.split('<Section title="Order Summary"')[1]?.split('</Section>')[0] ?? '';
+  const summary = DETAIL.split('<Section title="Ringkasan Pesanan"')[1]?.split('</Section>')[0] ?? '';
   assert.match(summary, /<ActionButton icon=\{Printer\} onClick=\{\(\) => window\.open\(packingSlipPath\(order\.id\), '_blank', 'noopener,noreferrer'\)\}>Packing Slip<\/ActionButton>/);
-  const quick = DETAIL.split('<CardTitle>Quick Actions</CardTitle>')[1]?.split('</Card>')[0] ?? '';
+  const quick = DETAIL.split('<CardTitle>Aksi Cepat</CardTitle>')[1]?.split('</Card>')[0] ?? '';
   assert.equal(/Packing Slip/.test(quick), false);
 });
 

@@ -48,7 +48,7 @@ test('#18 picking an address on Checkout records it as the customer\'s choice', 
 })
 
 test('#18 Checkout offers Add address (in place) and Change address (Address Book, with return)', () => {
-  assert.match(CHECKOUT, /<Link href=\{ADDRESS_BOOK_FROM_CHECKOUT\}>Change address<\/Link>/)
+  assert.match(CHECKOUT, /<Link href=\{ADDRESS_BOOK_FROM_CHECKOUT\}>Ubah alamat<\/Link>/)
   assert.ok((CHECKOUT.match(/onClick=\{\(\) => setAddAddressOpen\(true\)\}/g) ?? []).length >= 2, 'Add address with and without saved addresses')
   // The zero-address state no longer dead-ends in the Address Book.
   assert.equal(/href="\/account\/addresses"/.test(CHECKOUT), false)
@@ -71,7 +71,7 @@ test('the Add-address form is NOT inside the checkout <form> (saving must never 
 
 test('the order is placed with the SELECTED address id, and cannot be placed without one', () => {
   assert.match(CHECKOUT, /address_id: values\.address_id,/)
-  assert.match(CHECKOUT, /address_id: z\.string\(\)\.min\(1, 'Select a delivery address'\)/)
+  assert.match(CHECKOUT, /address_id: z\.string\(\)\.min\(1, 'Pilih alamat pengiriman'\)/)
   assert.match(CHECKOUT, /const selectedAddress = addresses\.find\(\(a\) => a\.id === selectedAddressId\)/)
   assert.match(CHECKOUT, /const canPlaceOrder = deliverable && !!selectedShipping/)
   assert.match(CHECKOUT, /disabled=\{checkout\.isPending \|\| !canPlaceOrder\}/)
@@ -97,7 +97,7 @@ test('address dialogs scroll on short phones (Save was below a 375x667 screen)',
 
 test('#17 Back to checkout is shown ONLY for an allowlisted return target', () => {
   assert.match(BOOK, /const returnTo = safeAddressBookReturn\(useSearchParams\(\)\.get\(RETURN_PARAM\)\)/)
-  assert.match(BOOK, /\{returnTo \? \(\s*<Button asChild[\s\S]*?<Link href=\{returnTo\}>[\s\S]*?Back to checkout/)
+  assert.match(BOOK, /\{returnTo \? \(\s*<Button asChild[\s\S]*?<Link href=\{returnTo\}>[\s\S]*?Kembali ke checkout/)
   // The raw query value never reaches navigation.
   assert.equal(/useSearchParams\(\)\.get\([^)]*\)\s*\}/.test(BOOK), false)
   assert.equal(/router\.(push|replace)|window\.location|location\.href/.test(BOOK), false)
@@ -106,7 +106,7 @@ test('#17 Back to checkout is shown ONLY for an allowlisted return target', () =
 test('#18 from Checkout, the Address Book lets the customer choose the delivery address', () => {
   assert.match(BOOK, /const deliveryAddressId = returnTo \? resolveCheckoutAddressId\(addresses, chosenAddressId\) : null/)
   assert.match(BOOK, /onClick=\{\(\) => chooseAddress\(address\.id\)\}/)
-  assert.match(BOOK, /Selected for delivery/)
+  assert.match(BOOK, /Dipilih untuk pengiriman/)
   // A new address added in that context becomes the choice; a direct visit writes nothing.
   assert.match(BOOK, /if \(returnTo\) chooseAddress\(created\.id\)/)
   assert.equal((BOOK.match(/chooseAddress\(/g) ?? []).length, 2)

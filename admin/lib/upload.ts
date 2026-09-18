@@ -13,7 +13,7 @@ export async function uploadImage(formData: FormData) {
     );
 
     if (!response.ok) {
-        throw new Error('Failed to upload image');
+        throw new Error('Gagal mengunggah gambar');
     }
 
     return response.json();

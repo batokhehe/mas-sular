@@ -20,10 +20,10 @@ import { formatRupiah } from '@/lib/utils/number';
 
 const rp = formatRupiah;
 const RANGES = [
-  { label: '7 Days', days: 7 },
-  { label: '30 Days', days: 30 },
-  { label: '90 Days', days: 90 },
-  { label: '1 Year', days: 365 },
+  { label: '7 Hari', days: 7 },
+  { label: '30 Hari', days: 30 },
+  { label: '90 Hari', days: 90 },
+  { label: '1 Tahun', days: 365 },
 ] as const;
 
 const METHOD_COLORS: Record<string, string> = { BANK_TRANSFER: '#465fff', QRIS: '#22c55e', COD: '#f59e0b', GATEWAY: '#a855f7' };
@@ -72,10 +72,10 @@ export default function DashboardPage() {
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.dashboard}>
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold text-gray-900">Executive Dashboard</h2>
-          <p className="mt-1 text-sm text-gray-500">Live operational snapshot for Bakso Mas Sular.</p>
+          <h2 className="text-xl font-semibold text-gray-900">Dasbor Eksekutif</h2>
+          <p className="mt-1 text-sm text-gray-500">Ringkasan operasional langsung Bakso Mas Sular.</p>
         </div>
-        {d ? <p className="text-xs text-gray-400">Updated {new Date(d.generatedAt).toLocaleTimeString('id-ID')}</p> : null}
+        {d ? <p className="text-xs text-gray-400">Diperbarui {new Date(d.generatedAt).toLocaleTimeString('id-ID')}</p> : null}
       </div>
 
       {query.isLoading ? (
@@ -84,21 +84,21 @@ export default function DashboardPage() {
         <Card>
           <div className="flex items-center gap-3 p-6 text-sm text-red-600">
             <AlertTriangle className="h-5 w-5" />
-            Unable to load the dashboard. Please reauthenticate or try again.
+            Gagal memuat dasbor. Silakan masuk ulang atau coba lagi.
           </div>
         </Card>
       ) : (
         <div className="space-y-6">
           {/* SECTION 1 — Today's Summary */}
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-            <DeltaCard label="Today's Revenue" value={rp(d.summary.todayRevenue.value)} delta={d.summary.todayRevenue} icon={Wallet} />
-            <DeltaCard label="Today's Orders" value={String(d.summary.todayOrders.value)} delta={d.summary.todayOrders} icon={ShoppingBag} />
-            <StatCard label="Pending Payments" value={d.summary.pendingPayments} icon={Clock} tone="amber" />
-            <StatCard label="Pending Verification" value={d.summary.pendingVerification} icon={ClipboardList} tone="blue" />
-            <StatCard label="Being Prepared" value={d.summary.processing} icon={Package} tone="blue" />
-            <StatCard label="Shipped" value={d.summary.shipped} icon={Truck} tone="indigo" />
-            <StatCard label="Delivered" value={d.summary.delivered} icon={PackageCheck} tone="emerald" />
-            <StatCard label="Cancelled" value={d.summary.cancelled} icon={XCircle} tone="red" />
+            <DeltaCard label="Pendapatan Hari Ini" value={rp(d.summary.todayRevenue.value)} delta={d.summary.todayRevenue} icon={Wallet} />
+            <DeltaCard label="Pesanan Hari Ini" value={String(d.summary.todayOrders.value)} delta={d.summary.todayOrders} icon={ShoppingBag} />
+            <StatCard label="Pembayaran Tertunda" value={d.summary.pendingPayments} icon={Clock} tone="amber" />
+            <StatCard label="Menunggu Verifikasi" value={d.summary.pendingVerification} icon={ClipboardList} tone="blue" />
+            <StatCard label="Sedang Disiapkan" value={d.summary.processing} icon={Package} tone="blue" />
+            <StatCard label="Dikirim" value={d.summary.shipped} icon={Truck} tone="indigo" />
+            <StatCard label="Terkirim" value={d.summary.delivered} icon={PackageCheck} tone="emerald" />
+            <StatCard label="Dibatalkan" value={d.summary.cancelled} icon={XCircle} tone="red" />
           </div>
 
           {/* SECTION 2 & 3 — Sales overview + Payment overview */}
@@ -106,8 +106,8 @@ export default function DashboardPage() {
             <Card>
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <CardTitle>Sales Overview</CardTitle>
-                  <p className="mt-1 text-sm text-gray-500">Revenue & orders trend</p>
+                  <CardTitle>Ringkasan Penjualan</CardTitle>
+                  <p className="mt-1 text-sm text-gray-500">Tren pendapatan & pesanan</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <div className="flex rounded-lg bg-gray-100 p-1 text-xs">
@@ -134,16 +134,16 @@ export default function DashboardPage() {
             </Card>
 
             <Card>
-              <CardTitle>Payment Overview</CardTitle>
+              <CardTitle>Ringkasan Pembayaran</CardTitle>
               <div className="mt-5 space-y-6">
                 <div>
-                  <p className="mb-3 text-xs font-medium uppercase text-gray-400">By Method</p>
+                  <p className="mb-3 text-xs font-medium uppercase text-gray-400">Per Metode</p>
                   <DonutChart
                     segments={d.paymentChart.byMethod.filter((s) => s.count > 0).map((s) => ({ label: s.key, value: s.count, color: METHOD_COLORS[s.key] ?? '#94a3b8' }))}
                   />
                 </div>
                 <div className="border-t border-gray-100 pt-5">
-                  <p className="mb-3 text-xs font-medium uppercase text-gray-400">By Status</p>
+                  <p className="mb-3 text-xs font-medium uppercase text-gray-400">Per Status</p>
                   <DonutChart
                     segments={d.paymentChart.byStatus.filter((s) => s.count > 0).map((s) => ({ label: s.key, value: s.count, color: STATUS_COLORS[s.key] ?? '#94a3b8' }))}
                   />
@@ -155,18 +155,18 @@ export default function DashboardPage() {
           {/* SECTION 4 & 5 — Top products + Top customers */}
           <div className="grid gap-6 xl:grid-cols-2">
             <Card>
-              <CardTitle>Top Selling Products</CardTitle>
+              <CardTitle>Produk Terlaris</CardTitle>
               <div className="mt-4 overflow-x-auto">
                 {d.topProducts.length === 0 ? (
-                  <p className="p-6 text-sm text-gray-500">No sales yet.</p>
+                  <p className="p-6 text-sm text-gray-500">Belum ada penjualan.</p>
                 ) : (
                   <table className="w-full min-w-[520px] text-left text-sm">
                     <thead>
                       <tr className="border-b border-gray-100 text-xs uppercase text-gray-400">
-                        <th className="py-2 font-medium">Product</th>
+                        <th className="py-2 font-medium">Produk</th>
                         <th className="py-2 text-right font-medium">Qty</th>
-                        <th className="py-2 text-right font-medium">Revenue</th>
-                        <th className="py-2 text-right font-medium">Avg</th>
+                        <th className="py-2 text-right font-medium">Pendapatan</th>
+                        <th className="py-2 text-right font-medium">Rata-rata</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -187,18 +187,18 @@ export default function DashboardPage() {
             </Card>
 
             <Card>
-              <CardTitle>Top Customers</CardTitle>
+              <CardTitle>Pelanggan Teratas</CardTitle>
               <div className="mt-4 overflow-x-auto">
                 {d.topCustomers.length === 0 ? (
-                  <p className="p-6 text-sm text-gray-500">No customers yet.</p>
+                  <p className="p-6 text-sm text-gray-500">Belum ada pelanggan.</p>
                 ) : (
                   <table className="w-full min-w-[520px] text-left text-sm">
                     <thead>
                       <tr className="border-b border-gray-100 text-xs uppercase text-gray-400">
-                        <th className="py-2 font-medium">Customer</th>
-                        <th className="py-2 text-right font-medium">Orders</th>
-                        <th className="py-2 text-right font-medium">Revenue</th>
-                        <th className="py-2 text-right font-medium">Last Order</th>
+                        <th className="py-2 font-medium">Pelanggan</th>
+                        <th className="py-2 text-right font-medium">Pesanan</th>
+                        <th className="py-2 text-right font-medium">Pendapatan</th>
+                        <th className="py-2 text-right font-medium">Pesanan Terakhir</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -223,21 +223,21 @@ export default function DashboardPage() {
           {/* SECTION 6 — Recent orders */}
           <Card>
             <div className="mb-4 flex items-center justify-between">
-              <CardTitle>Recent Orders</CardTitle>
-              <Link href="/orders" className="text-sm font-medium text-[#465fff] hover:underline">See all</Link>
+              <CardTitle>Pesanan Terbaru</CardTitle>
+              <Link href="/orders" className="text-sm font-medium text-[#465fff] hover:underline">Lihat semua</Link>
             </div>
             <div className="overflow-x-auto">
               {d.recentOrders.length === 0 ? (
-                <p className="p-6 text-sm text-gray-500">No orders yet.</p>
+                <p className="p-6 text-sm text-gray-500">Belum ada pesanan.</p>
               ) : (
                 <table className="w-full min-w-[760px] text-left text-sm">
                   <thead>
                     <tr className="border-b border-gray-100 text-xs uppercase text-gray-400">
-                      <th className="py-2 font-medium">Order</th>
-                      <th className="py-2 font-medium">Customer</th>
-                      <th className="py-2 font-medium">Payment</th>
+                      <th className="py-2 font-medium">Pesanan</th>
+                      <th className="py-2 font-medium">Pelanggan</th>
+                      <th className="py-2 font-medium">Pembayaran</th>
                       <th className="py-2 font-medium">Status</th>
-                      <th className="py-2 font-medium">Shipment</th>
+                      <th className="py-2 font-medium">Pengiriman</th>
                       <th className="py-2 text-right font-medium">Total</th>
                     </tr>
                   </thead>
@@ -263,22 +263,22 @@ export default function DashboardPage() {
           {/* SECTION 7 & 8 — Inventory alerts + Shipment overview */}
           <div className="grid gap-6 xl:grid-cols-2">
             <Card>
-              <CardTitle>Inventory Alerts</CardTitle>
+              <CardTitle>Peringatan Stok</CardTitle>
               <div className="mt-4 grid grid-cols-3 gap-3">
-                <MiniStat label="Low Stock" value={d.inventoryAlert.lowStock} tone="amber" />
-                <MiniStat label="Out of Stock" value={d.inventoryAlert.outOfStock} tone="red" />
-                <MiniStat label="Reserved" value={d.inventoryAlert.reserved} tone="blue" />
+                <MiniStat label="Stok Menipis" value={d.inventoryAlert.lowStock} tone="amber" />
+                <MiniStat label="Stok Habis" value={d.inventoryAlert.outOfStock} tone="red" />
+                <MiniStat label="Direservasi" value={d.inventoryAlert.reserved} tone="blue" />
               </div>
               <div className="mt-4">
-                <p className="mb-2 text-xs font-medium uppercase text-gray-400">Need Restock</p>
+                <p className="mb-2 text-xs font-medium uppercase text-gray-400">Perlu Restok</p>
                 {d.inventoryAlert.needRestock.length === 0 ? (
-                  <p className="text-sm text-gray-500">All products are sufficiently stocked.</p>
+                  <p className="text-sm text-gray-500">Semua produk memiliki stok yang cukup.</p>
                 ) : (
                   <ul className="space-y-2">
                     {d.inventoryAlert.needRestock.map((p) => (
                       <li key={p.id} className={`flex items-center justify-between rounded-lg border p-2.5 text-sm ${p.stock <= 0 ? 'border-red-200 bg-red-50' : 'border-amber-200 bg-amber-50'}`}>
                         <Link href={`/products/${p.id}`} className="font-medium text-gray-800 hover:underline">{p.name}</Link>
-                        <span className={`font-semibold ${p.stock <= 0 ? 'text-red-600' : 'text-amber-700'}`}>{p.stock} left</span>
+                        <span className={`font-semibold ${p.stock <= 0 ? 'text-red-600' : 'text-amber-700'}`}>sisa {p.stock}</span>
                       </li>
                     ))}
                   </ul>
@@ -287,12 +287,12 @@ export default function DashboardPage() {
             </Card>
 
             <Card>
-              <CardTitle>Shipment Overview</CardTitle>
+              <CardTitle>Ringkasan Pengiriman</CardTitle>
               <div className="mt-4 grid grid-cols-2 gap-3">
-                <MiniStat label="Waiting Shipment" value={d.shipmentSummary.waiting} tone="amber" icon={Clock} />
-                <MiniStat label="In Transit" value={d.shipmentSummary.inTransit} tone="blue" icon={Truck} />
-                <MiniStat label="Delivered Today" value={d.shipmentSummary.deliveredToday} tone="emerald" icon={PackageCheck} />
-                <MiniStat label="Failed Shipment" value={d.shipmentSummary.failed} tone="red" icon={XCircle} />
+                <MiniStat label="Menunggu Dikirim" value={d.shipmentSummary.waiting} tone="amber" icon={Clock} />
+                <MiniStat label="Dalam Perjalanan" value={d.shipmentSummary.inTransit} tone="blue" icon={Truck} />
+                <MiniStat label="Terkirim Hari Ini" value={d.shipmentSummary.deliveredToday} tone="emerald" icon={PackageCheck} />
+                <MiniStat label="Pengiriman Gagal" value={d.shipmentSummary.failed} tone="red" icon={XCircle} />
               </div>
             </Card>
           </div>
@@ -300,19 +300,19 @@ export default function DashboardPage() {
           {/* SECTION 9 & 10 — Quick actions + System health */}
           <div className="grid gap-6 xl:grid-cols-[1.5fr_1fr]">
             <Card>
-              <CardTitle>Quick Actions</CardTitle>
+              <CardTitle>Aksi Cepat</CardTitle>
               <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
-                <QuickAction href="/products/new" label="Create Product" icon={PlusCircle} />
-                <QuickAction href="/orders" label="View Orders" icon={ClipboardList} />
-                <QuickAction href="/payments" label="Pending Payments" icon={Wallet} />
-                <QuickAction href="/inventory/products" label="Inventory" icon={Boxes} />
-                <QuickAction href="/delivery-coverage" label="Delivery Coverage" icon={MapPin} />
-                <QuickAction href="/outlets" label="Outlets" icon={Store} />
+                <QuickAction href="/products/new" label="Buat Produk" icon={PlusCircle} />
+                <QuickAction href="/orders" label="Lihat Pesanan" icon={ClipboardList} />
+                <QuickAction href="/payments" label="Pembayaran Tertunda" icon={Wallet} />
+                <QuickAction href="/inventory/products" label="Stok" icon={Boxes} />
+                <QuickAction href="/delivery-coverage" label="Jangkauan Pengiriman" icon={MapPin} />
+                <QuickAction href="/outlets" label="Outlet" icon={Store} />
               </div>
             </Card>
 
             <Card>
-              <CardTitle>System Health</CardTitle>
+              <CardTitle>Kesehatan Sistem</CardTitle>
               <ul className="mt-4 space-y-2.5">
                 {([
                   ['Database', d.systemHealth.database],
@@ -359,7 +359,7 @@ function DeltaCard({ label, value, delta, icon: Icon }: { label: string; value: 
           {Math.abs(delta.changePct)}%
         </Badge>
       </div>
-      <p className="mt-1 text-xs text-gray-400">vs yesterday</p>
+      <p className="mt-1 text-xs text-gray-400">vs kemarin</p>
     </Card>
   );
 }

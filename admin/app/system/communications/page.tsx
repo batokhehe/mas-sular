@@ -58,10 +58,10 @@ function CommunicationsInner() {
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.communications}>
       <div className="mb-6">
         <nav className="flex items-center gap-1 text-xs text-gray-400">
-          System <ChevronRight className="h-3 w-3" /> <span className="font-medium text-gray-600">Customer Communications</span>
+          Sistem <ChevronRight className="h-3 w-3" /> <span className="font-medium text-gray-600">Komunikasi Pelanggan</span>
         </nav>
-        <h2 className="mt-1 text-xl font-semibold text-gray-900">Customer Communication Center</h2>
-        <p className="mt-1 text-sm text-gray-500">Every notification a customer received, grouped per order — plus manual sends through the same delivery pipeline.</p>
+        <h2 className="mt-1 text-xl font-semibold text-gray-900">Pusat Komunikasi Pelanggan</h2>
+        <p className="mt-1 text-sm text-gray-500">Setiap notifikasi yang diterima pelanggan, dikelompokkan per pesanan — termasuk pengiriman manual melalui jalur pengiriman yang sama.</p>
       </div>
 
       <CustomerSearch onSelect={selectCustomer} />
@@ -70,7 +70,7 @@ function CommunicationsInner() {
         <Card className="mt-6">
           <div className="flex flex-col items-center gap-2 p-10 text-center text-sm text-gray-500">
             <MessagesSquare className="h-6 w-6 text-gray-300" />
-            Search for a customer by name, phone, email, order number, or notification ID to open their conversation.
+            Cari pelanggan berdasarkan nama, telepon, email, nomor pesanan, atau ID notifikasi untuk membuka percakapannya.
           </div>
         </Card>
       ) : bundleQuery.isLoading ? (
@@ -79,8 +79,8 @@ function CommunicationsInner() {
         <Card className="mt-6">
           <div className="flex flex-col items-center gap-3 p-10 text-center">
             <AlertTriangle className="h-6 w-6 text-red-500" />
-            <p className="text-sm text-red-600">Unable to load the conversation.</p>
-            <Button onClick={() => void bundleQuery.refetch()}>Retry</Button>
+            <p className="text-sm text-red-600">Gagal memuat percakapan.</p>
+            <Button onClick={() => void bundleQuery.refetch()}>Coba ulang</Button>
           </div>
         </Card>
       ) : (
@@ -125,15 +125,15 @@ function CustomerSearch({ onSelect }: { onSelect: (c: CommunicationCustomer) => 
         <input
           value={term}
           onChange={(e) => setTerm(e.target.value)}
-          placeholder="Search customer, phone, email, order number, or notification ID…"
+          placeholder="Cari pelanggan, telepon, email, nomor pesanan, atau ID notifikasi…"
           className="h-11 w-full bg-transparent text-sm outline-none"
         />
       </label>
       {debounced.length >= 2 ? (
         search.isLoading ? (
-          <p className="mt-3 text-xs text-gray-400">Searching…</p>
+          <p className="mt-3 text-xs text-gray-400">Mencari…</p>
         ) : results.length === 0 ? (
-          <p className="mt-3 text-xs text-gray-400">No matching customers.</p>
+          <p className="mt-3 text-xs text-gray-400">Tidak ada pelanggan yang cocok.</p>
         ) : (
           <ul className="mt-3 divide-y divide-gray-50">
             {results.map((c) => (
@@ -144,7 +144,7 @@ function CustomerSearch({ onSelect }: { onSelect: (c: CommunicationCustomer) => 
                     <span className="font-medium text-gray-800">{c.name}</span>
                     <span className="text-xs text-gray-400">{c.email}{c.phone ? ` · ${c.phone}` : ''}</span>
                   </span>
-                  <span className="text-[11px] uppercase text-gray-300">via {c.via}</span>
+                  <span className="text-[11px] uppercase text-gray-300">melalui {c.via}</span>
                 </button>
               </li>
             ))}
@@ -161,12 +161,12 @@ function ConversationPanel({ bundle }: { bundle: CommunicationBundle }) {
   const groups = useMemo(() => conversationGroups(bundle.conversation), [bundle.conversation]);
   return (
     <Card>
-      <CardTitle>Conversation</CardTitle>
+      <CardTitle>Percakapan</CardTitle>
       <p className="mt-1 text-xs text-gray-400">
-        {bundle.conversation.length} notification(s){bundle.customer ? ` for ${bundle.customer.name}` : bundle.anchorRecipient ? ` to ${bundle.anchorRecipient}` : ''} — oldest first.
+        {bundle.conversation.length} notifikasi{bundle.customer ? ` untuk ${bundle.customer.name}` : bundle.anchorRecipient ? ` ke ${bundle.anchorRecipient}` : ''} — terlama di atas.
       </p>
       {groups.length === 0 ? (
-        <p className="p-10 text-center text-sm text-gray-500">No notifications for this customer yet.</p>
+        <p className="p-10 text-center text-sm text-gray-500">Belum ada notifikasi untuk pelanggan ini.</p>
       ) : (
         <div className="mt-4 space-y-6">
           {groups.map((g) => {
@@ -186,7 +186,7 @@ function ConversationPanel({ bundle }: { bundle: CommunicationBundle }) {
                   <h3 className="text-sm font-semibold text-gray-800">{g.label}</h3>
                   {href ? (
                     <Link href={href} className="inline-flex items-center gap-1 text-xs font-medium text-[#465fff]">
-                      <ExternalLink className="h-3 w-3" /> open
+                      <ExternalLink className="h-3 w-3" /> buka
                     </Link>
                   ) : null}
                 </div>
@@ -221,7 +221,7 @@ function ConversationEvent({ n }: { n: ConversationItem }) {
       </button>
       {open ? (
         <div className="mt-2 rounded-xl border border-gray-100 bg-gray-50/60 p-3">
-          {n.subject ? <p className="mb-2 text-xs text-gray-600"><span className="text-gray-400">Subject:</span> {n.subject}</p> : null}
+          {n.subject ? <p className="mb-2 text-xs text-gray-600"><span className="text-gray-400">Subjek:</span> {n.subject}</p> : null}
           <DeliveryTracking steps={deliveryTimeline(n)} />
           <p className="mt-2 font-mono text-[10px] text-gray-300">{n.id}</p>
         </div>
@@ -257,22 +257,22 @@ function ProfilePanel({ bundle }: { bundle: CommunicationBundle }) {
   const p = bundle.profile;
   return (
     <Card>
-      <CardTitle>Customer Profile</CardTitle>
+      <CardTitle>Profil Pelanggan</CardTitle>
       {!c ? (
         <p className="mt-3 text-sm text-gray-500">
-          No registered customer matched{bundle.anchorRecipient ? ` recipient ${bundle.anchorRecipient}` : ''} (guest or outdated contact).
+          Tidak ada pelanggan terdaftar yang cocok{bundle.anchorRecipient ? ` dengan penerima ${bundle.anchorRecipient}` : ''} (tamu atau kontak lama).
         </p>
       ) : (
         <dl className="mt-3 space-y-1.5 text-sm">
-          <Field label="Customer" value={c.name} href={`/users/${c.id}`} />
-          <Field label="Phone" value={c.phone ?? '—'} />
+          <Field label="Pelanggan" value={c.name} href={`/users/${c.id}`} />
+          <Field label="Telepon" value={c.phone ?? '—'} />
           <Field label="Email" value={c.email} />
-          <Field label="Total Orders" value={String(p?.totalOrders ?? 0)} />
-          <Field label="Completed Orders" value={String(p?.completedOrders ?? 0)} />
-          <Field label="Cancelled Orders" value={String(p?.cancelledOrders ?? 0)} />
-          <Field label="Last Order" value={dt(p?.lastOrderAt)} />
+          <Field label="Total Pesanan" value={String(p?.totalOrders ?? 0)} />
+          <Field label="Pesanan Selesai" value={String(p?.completedOrders ?? 0)} />
+          <Field label="Pesanan Dibatalkan" value={String(p?.cancelledOrders ?? 0)} />
+          <Field label="Pesanan Terakhir" value={dt(p?.lastOrderAt)} />
           <Field label="Lifetime Value" value={idr(p?.lifetimeValue ?? 0)} />
-          <Field label="Last Notification" value={dt(bundle.metrics.lastNotificationAt)} />
+          <Field label="Notifikasi Terakhir" value={dt(bundle.metrics.lastNotificationAt)} />
         </dl>
       )}
     </Card>
@@ -283,14 +283,14 @@ function MetricsPanel({ bundle }: { bundle: CommunicationBundle }) {
   const m = bundle.metrics;
   return (
     <Card>
-      <CardTitle>Notification Metrics</CardTitle>
+      <CardTitle>Metrik Notifikasi</CardTitle>
       <dl className="mt-3 space-y-1.5 text-sm">
-        <Field label="Notifications Sent" value={String(m.sent)} />
-        <Field label="Failed" value={String(m.failed)} />
-        <Field label="Queued" value={String(m.pending)} />
-        <Field label="Success Rate" value={m.successRatePct != null ? `${m.successRatePct}%` : '—'} />
-        <Field label="Avg Delivery" value={m.avgDeliverySec != null ? deliveryLabel(m.avgDeliverySec) : '—'} />
-        <Field label="Last Notification" value={dt(m.lastNotificationAt)} />
+        <Field label="Notifikasi Terkirim" value={String(m.sent)} />
+        <Field label="Gagal" value={String(m.failed)} />
+        <Field label="Diantrekan" value={String(m.pending)} />
+        <Field label="Tingkat Keberhasilan" value={m.successRatePct != null ? `${m.successRatePct}%` : '—'} />
+        <Field label="Rata-rata Terkirim" value={m.avgDeliverySec != null ? deliveryLabel(m.avgDeliverySec) : '—'} />
+        <Field label="Notifikasi Terakhir" value={dt(m.lastNotificationAt)} />
       </dl>
     </Card>
   );
@@ -333,7 +333,7 @@ function ManualSendPanel({ customer, onSent }: { customer: CommunicationCustomer
     if (!canSubmit) return;
     void runWithFeedback({
       loading: ADMIN_LOADING_MESSAGES.update,
-      success: 'Message queued — the sender worker will deliver it',
+      success: 'Pesan diantrekan — worker pengirim akan mengirimkannya',
       action: async () => {
         await sendM.mutateAsync({ ...body, recipient: recipient.trim(), customerId: customer?.id });
         setMessage('');
@@ -345,12 +345,12 @@ function ManualSendPanel({ customer, onSent }: { customer: CommunicationCustomer
 
   return (
     <Card>
-      <CardTitle>Manual Send</CardTitle>
-      <p className="mt-1 text-xs text-gray-400">Queued through the notification outbox — delivered by the existing sender worker.</p>
+      <CardTitle>Kirim Manual</CardTitle>
+      <p className="mt-1 text-xs text-gray-400">Diantrekan melalui outbox notifikasi — dikirim oleh worker pengirim yang ada.</p>
       <form onSubmit={submit} className="mt-3 space-y-3 text-sm">
         <div className="grid grid-cols-2 gap-3">
           <label className="space-y-1">
-            <span className="block text-xs uppercase text-gray-400">Channel</span>
+            <span className="block text-xs uppercase text-gray-400">Kanal</span>
             <select value={channel} onChange={(e) => setChannel(e.target.value as 'WHATSAPP' | 'EMAIL')} className="h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]">
               <option value="WHATSAPP">WhatsApp</option>
               <option value="EMAIL">Email</option>
@@ -369,28 +369,28 @@ function ManualSendPanel({ customer, onSent }: { customer: CommunicationCustomer
         </label>
         {tpl.needsOrderNumber ? (
           <label className="block space-y-1">
-            <span className="block text-xs uppercase text-gray-400">Order Number</span>
+            <span className="block text-xs uppercase text-gray-400">Nomor Pesanan</span>
             <input value={orderNumber} onChange={(e) => setOrderNumber(e.target.value)} className="h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" placeholder="BMS-…" />
           </label>
         ) : null}
         {tpl.needsSubject ? (
           <label className="block space-y-1">
-            <span className="block text-xs uppercase text-gray-400">Subject (email)</span>
+            <span className="block text-xs uppercase text-gray-400">Subjek (email)</span>
             <input value={subject} onChange={(e) => setSubject(e.target.value)} className="h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" />
           </label>
         ) : null}
         <label className="block space-y-1">
-          <span className="block text-xs uppercase text-gray-400">Message</span>
+          <span className="block text-xs uppercase text-gray-400">Pesan</span>
           <textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={4} maxLength={1000} className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm outline-none focus:border-[#465fff]" placeholder="Tulis pesan untuk pelanggan…" />
         </label>
 
         {preview ? (
           <div className="rounded-xl border border-gray-100 bg-gray-50/60 p-3">
-            <p className="text-[11px] uppercase text-gray-400">Preview — variables: {preview.variables.join(', ')}</p>
+            <p className="text-[11px] uppercase text-gray-400">Pratinjau — variabel: {preview.variables.join(', ')}</p>
             <p className="mt-1 text-xs font-semibold text-gray-800">{preview.rendered.subject}</p>
             <pre className="mt-1 whitespace-pre-wrap text-xs text-gray-600">{preview.rendered.body}</pre>
             {!preview.channels[channel] ? (
-              <p className="mt-2 text-xs font-medium text-amber-600">This channel is not configured for manual sends — the send will be rejected.</p>
+              <p className="mt-2 text-xs font-medium text-amber-600">Kanal ini tidak dikonfigurasi untuk pengiriman manual — pengiriman akan ditolak.</p>
             ) : null}
           </div>
         ) : null}
@@ -402,10 +402,10 @@ function ManualSendPanel({ customer, onSent }: { customer: CommunicationCustomer
             disabled={message.trim().length === 0 || previewM.isPending}
             className="inline-flex h-10 flex-1 items-center justify-center gap-1.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:border-[#465fff] hover:text-[#465fff] disabled:opacity-50"
           >
-            <Eye className="h-4 w-4" /> Preview
+            <Eye className="h-4 w-4" /> Pratinjau
           </button>
           <Button type="submit" disabled={!canSubmit} className="flex-1 gap-2">
-            <Send className="h-4 w-4" /> Send
+            <Send className="h-4 w-4" /> Kirim
           </Button>
         </div>
       </form>

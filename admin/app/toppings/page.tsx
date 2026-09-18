@@ -42,7 +42,7 @@ export default function ToppingsPage() {
     void runWithFeedback({
       confirm: () =>
         confirmStatusChange(toppingStatusLabel(topping).label, toppingStatusLabel({ isActive: next }).label, {
-          title: `${next ? 'Activate' : 'Deactivate'} ${topping.name}?`,
+          title: `${next ? 'Aktifkan' : 'Nonaktifkan'} ${topping.name}?`,
         }),
       loading: ADMIN_LOADING_MESSAGES.statusUpdate,
       success: ADMIN_SUCCESS_MESSAGES.updated,
@@ -56,12 +56,12 @@ export default function ToppingsPage() {
         <div>
           <h2 className="text-xl font-semibold text-gray-900">Topping Management</h2>
           <p className="mt-1 text-sm text-gray-500">
-            Optional extras customers can add to any product. Only active toppings are offered at checkout.
+            Tambahan opsional yang bisa ditambahkan pelanggan ke produk apa pun. Hanya topping aktif yang ditawarkan saat checkout.
           </p>
         </div>
         <PermissionGate permissions={ROUTE_PERMISSIONS.toppingCreate}>
           <Link href="/toppings/new">
-            <Button type="button">Add Topping</Button>
+            <Button type="button">Tambah Topping</Button>
           </Link>
         </PermissionGate>
       </div>
@@ -72,34 +72,34 @@ export default function ToppingsPage() {
             id="topping-search"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search toppings by name"
+            placeholder="Cari topping berdasarkan nama"
             className="h-11 w-full rounded-xl border border-gray-200 bg-gray-50 px-4 text-sm outline-none focus:border-[#465fff] focus:bg-white md:max-w-md"
           />
         </div>
 
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <CardTitle>Toppings</CardTitle>
+          <CardTitle>Topping</CardTitle>
           {data ? (
             <p className="text-sm text-gray-500">
-              {data.length} toppings · {activeCount} active
+              {data.length} topping · {activeCount} aktif
             </p>
           ) : null}
         </div>
         <div className="mt-4 overflow-x-auto">
           {isLoading ? (
-            <p className="p-6 text-sm text-gray-500">Loading toppings...</p>
+            <p className="p-6 text-sm text-gray-500">Memuat topping...</p>
           ) : isError ? (
-            <p className="p-6 text-sm text-red-600">Unable to load toppings. Please reauthenticate.</p>
+            <p className="p-6 text-sm text-red-600">Gagal memuat topping. Silakan masuk ulang.</p>
           ) : toppings.length === 0 ? (
-            <p className="p-6 text-sm text-gray-500">{data?.length ? 'No toppings match your search.' : 'No toppings yet.'}</p>
+            <p className="p-6 text-sm text-gray-500">{data?.length ? 'Tidak ada topping yang cocok dengan pencarian.' : 'Belum ada topping.'}</p>
           ) : (
             <table className="w-full min-w-[560px] text-left text-sm">
               <thead>
                 <tr className="border-b border-gray-100 text-xs uppercase text-gray-400">
-                  <th className="py-3 font-medium">Name</th>
-                  <th className="py-3 font-medium">Price</th>
+                  <th className="py-3 font-medium">Nama</th>
+                  <th className="py-3 font-medium">Harga</th>
                   <th className="py-3 font-medium">Status</th>
-                  <th className="py-3 font-medium">Actions</th>
+                  <th className="py-3 font-medium">Aksi</th>
                 </tr>
               </thead>
               <tbody>
@@ -115,11 +115,11 @@ export default function ToppingsPage() {
                       <td className="py-4">
                         <PermissionGate
                           permissions={ROUTE_PERMISSIONS.toppingUpdate}
-                          fallback={<span className="text-xs text-gray-400">View only</span>}
+                          fallback={<span className="text-xs text-gray-400">Hanya lihat</span>}
                         >
                           <div className="flex flex-wrap items-center gap-4">
                             <Link href={`/toppings/${topping.id}`} className="text-sm font-medium text-[#465fff] hover:text-indigo-700">
-                              Edit
+                              Ubah
                             </Link>
                             <button
                               type="button"
@@ -127,7 +127,7 @@ export default function ToppingsPage() {
                               disabled={setActive.isPending}
                               className="text-sm font-medium text-gray-600 hover:text-gray-900 disabled:opacity-50"
                             >
-                              {topping.isActive ? 'Deactivate' : 'Activate'}
+                              {topping.isActive ? 'Nonaktifkan' : 'Aktifkan'}
                             </button>
                           </div>
                         </PermissionGate>

@@ -37,8 +37,8 @@ export default function AdminLoginPage() {
     } catch (err) {
       setError(
         err instanceof ApiError && err.status === 401
-          ? 'Invalid email or password.'
-          : 'Login failed. Please try again.',
+          ? 'Email atau password salah.'
+          : 'Gagal masuk. Silakan coba lagi.',
       )
     }
   }
@@ -47,8 +47,8 @@ export default function AdminLoginPage() {
     <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-4">
       <Card className="space-y-6 p-8">
         <div className="text-center">
-          <h1 className="text-2xl font-bold">Admin Sign In</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Mas Sular operations dashboard</p>
+          <h1 className="text-2xl font-bold">Masuk Admin</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Dasbor operasional Mas Sular</p>
         </div>
 
         {error ? (
@@ -72,10 +72,10 @@ export default function AdminLoginPage() {
           <Button type="submit" className="w-full" disabled={isSubmitting}>
             {isSubmitting ? (
               <>
-                <Loader2 className="mr-2 size-4 animate-spin" /> Signing in…
+                <Loader2 className="mr-2 size-4 animate-spin" /> Sedang masuk…
               </>
             ) : (
-              'Sign in'
+              'Masuk'
             )}
           </Button>
         </form>

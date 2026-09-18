@@ -30,7 +30,7 @@ export default function PaymentAccountsPage() {
 
   const handleActivate = (id: string) =>
     runWithFeedback({
-      confirm: () => confirmStatusChange('Inactive', 'Active', { title: 'Activate this account?' }),
+      confirm: () => confirmStatusChange('Nonaktif', 'Aktif', { title: 'Aktifkan rekening ini?' }),
       loading: ADMIN_LOADING_MESSAGES.update,
       success: ADMIN_SUCCESS_MESSAGES.updated,
       action: () => activateMutation.mutateAsync(id),
@@ -38,9 +38,9 @@ export default function PaymentAccountsPage() {
 
   const handleDelete = (id: string) =>
     runWithFeedback({
-      confirm: () => confirmDelete('Payment Account'),
+      confirm: () => confirmDelete('Rekening Pembayaran'),
       loading: ADMIN_LOADING_MESSAGES.delete,
-      success: ADMIN_SUCCESS_MESSAGES.deleted('Payment Account'),
+      success: ADMIN_SUCCESS_MESSAGES.deleted('Rekening Pembayaran'),
       action: () => deleteMutation.mutateAsync(id),
     });
 
@@ -48,25 +48,25 @@ export default function PaymentAccountsPage() {
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.paymentAccounts}>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold text-gray-900">Payment Accounts</h2>
-          <p className="mt-1 text-sm text-gray-500">Bank accounts used in checkout WhatsApp notifications. Exactly one is active.</p>
+          <h2 className="text-xl font-semibold text-gray-900">Rekening Pembayaran</h2>
+          <p className="mt-1 text-sm text-gray-500">Rekening bank yang dipakai di notifikasi WhatsApp checkout. Tepat satu yang aktif.</p>
         </div>
         <PermissionGate permissions={ROUTE_PERMISSIONS.paymentAccountCreate}>
           <Link href="/payment-accounts/new">
-            <Button>Add Account</Button>
+            <Button>Tambah Rekening</Button>
           </Link>
         </PermissionGate>
       </div>
 
       <Card>
-        <CardTitle>Accounts</CardTitle>
+        <CardTitle>Daftar Rekening</CardTitle>
         <div className="mt-4 space-y-3">
           {isLoading ? (
-            <p className="p-6 text-sm text-gray-500">Loading payment accounts...</p>
+            <p className="p-6 text-sm text-gray-500">Memuat rekening pembayaran...</p>
           ) : isError ? (
-            <p className="p-6 text-sm text-red-600">Unable to load payment accounts. Please reauthenticate.</p>
+            <p className="p-6 text-sm text-red-600">Gagal memuat rekening pembayaran. Silakan masuk ulang.</p>
           ) : data?.length === 0 ? (
-            <p className="p-6 text-sm text-gray-500">No payment accounts yet.</p>
+            <p className="p-6 text-sm text-gray-500">Belum ada rekening pembayaran.</p>
           ) : (
             data?.map((account) => (
               <div key={account.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-100 p-4">
@@ -79,16 +79,16 @@ export default function PaymentAccountsPage() {
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  {account.isActive ? <Badge tone="success">Active</Badge> : <Badge tone="brand">Inactive</Badge>}
-                  {account.isVisible ? <Badge tone="brand">Visible</Badge> : null}
+                  {account.isActive ? <Badge tone="success">Aktif</Badge> : <Badge tone="brand">Nonaktif</Badge>}
+                  {account.isVisible ? <Badge tone="brand">Ditampilkan</Badge> : null}
                   {!account.isActive ? (
                     <PermissionGate permissions={ROUTE_PERMISSIONS.paymentAccountActivate}>
-                      <Button onClick={() => handleActivate(account.id)}>Activate</Button>
+                      <Button onClick={() => handleActivate(account.id)}>Aktifkan</Button>
                     </PermissionGate>
                   ) : null}
                   <PermissionGate permissions={ROUTE_PERMISSIONS.paymentAccountUpdate}>
                     <Link href={`/payment-accounts/${account.id}`}>
-                      <Button className="bg-white text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50">Edit</Button>
+                      <Button className="bg-white text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50">Ubah</Button>
                     </Link>
                   </PermissionGate>
                   {!account.isActive ? (
@@ -97,7 +97,7 @@ export default function PaymentAccountsPage() {
                         className="bg-white text-red-600 ring-1 ring-gray-200 hover:bg-gray-50"
                         onClick={() => handleDelete(account.id)}
                       >
-                        Delete
+                        Hapus
                       </Button>
                     </PermissionGate>
                   ) : null}

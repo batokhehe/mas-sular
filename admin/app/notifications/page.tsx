@@ -48,8 +48,8 @@ export default function NotificationsPage() {
 
   const markAll = () =>
     runWithFeedback({
-      loading: 'Marking all as read…',
-      success: 'All notifications marked as read',
+      loading: 'Menandai semua sudah dibaca…',
+      success: 'Semua notifikasi ditandai sudah dibaca',
       action: async () => {
         await markAllNotificationsRead();
         invalidate();
@@ -60,15 +60,15 @@ export default function NotificationsPage() {
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.notifications}>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">Notifications</h1>
-          <p className="mt-1 text-sm text-gray-500">Everything the platform wants you to know — orders, payments, inventory, and system events.</p>
+          <h1 className="text-xl font-semibold text-gray-900">Notifikasi</h1>
+          <p className="mt-1 text-sm text-gray-500">Semua informasi penting dari platform — pesanan, pembayaran, stok, dan event sistem.</p>
         </div>
         <div className="flex items-center gap-2">
           <Button className="border border-gray-200 bg-white text-gray-700 hover:bg-gray-50" onClick={() => query.refetch()} disabled={query.isRefetching}>
-            <RefreshCw className={`mr-2 h-4 w-4 ${query.isRefetching ? 'animate-spin' : ''}`} /> Refresh
+            <RefreshCw className={`mr-2 h-4 w-4 ${query.isRefetching ? 'animate-spin' : ''}`} /> Muat ulang
           </Button>
           <Button onClick={markAll}>
-            <CheckCheck className="mr-2 h-4 w-4" /> Mark all read
+            <CheckCheck className="mr-2 h-4 w-4" /> Tandai semua dibaca
           </Button>
         </div>
       </div>
@@ -93,9 +93,9 @@ export default function NotificationsPage() {
             ))}
           </div>
         ) : query.isError ? (
-          <p className="p-10 text-center text-sm text-red-600">Unable to load notifications. {(query.error as Error)?.message}</p>
+          <p className="p-10 text-center text-sm text-red-600">Gagal memuat notifikasi. {(query.error as Error)?.message}</p>
         ) : groups.length === 0 ? (
-          <p className="p-12 text-center text-sm text-gray-500">You&apos;re all caught up — nothing here.</p>
+          <p className="p-12 text-center text-sm text-gray-500">Tidak ada notifikasi baru.</p>
         ) : (
           groups.map((g) => (
             <div key={g.label}>
@@ -126,7 +126,7 @@ export default function NotificationsPage() {
           <div className="border-t border-gray-100 p-4 text-center">
             <Button className="border border-gray-200 bg-white text-gray-700 hover:bg-gray-50" onClick={() => query.fetchNextPage()} disabled={query.isFetchingNextPage}>
               {query.isFetchingNextPage ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              Load more
+              Muat lebih banyak
             </Button>
           </div>
         ) : null}

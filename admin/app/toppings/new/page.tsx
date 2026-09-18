@@ -24,8 +24,8 @@ export default function NewToppingPage() {
   return (
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.toppingCreate}>
       <div className="mb-6">
-        <h2 className="text-xl font-semibold text-gray-900">Add Topping</h2>
-        <p className="mt-1 text-sm text-gray-500">Create an optional extra customers can add to a product.</p>
+        <h2 className="text-xl font-semibold text-gray-900">Tambah Topping</h2>
+        <p className="mt-1 text-sm text-gray-500">Buat tambahan opsional yang bisa ditambahkan pelanggan ke produk.</p>
       </div>
       <ToppingForm
         onSubmit={async (payload) => {
@@ -35,7 +35,7 @@ export default function NewToppingPage() {
             action: () => createTopping.mutateAsync(payload),
           });
         }}
-        submitLabel={createTopping.isPending ? 'Creating...' : 'Create Topping'}
+        submitLabel={createTopping.isPending ? 'Membuat...' : 'Buat Topping'}
         isSubmitting={createTopping.isPending}
       />
     </AdminShell>

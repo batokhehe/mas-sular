@@ -33,12 +33,12 @@ type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline'
 
 // Payment status mapping — preserved exactly from the previous implementation.
 const PAYMENT_LABEL: Record<string, { label: string; variant: BadgeVariant }> = {
-  PENDING: { label: 'Awaiting payment', variant: 'outline' },
-  WAITING_VERIFICATION: { label: 'Under review', variant: 'secondary' },
-  PAID: { label: 'Paid', variant: 'default' },
-  FAILED: { label: 'Rejected', variant: 'destructive' },
-  EXPIRED: { label: 'Expired', variant: 'destructive' },
-  REFUNDED: { label: 'Refunded', variant: 'secondary' },
+  PENDING: { label: 'Belum dibayar', variant: 'outline' },
+  WAITING_VERIFICATION: { label: 'Menunggu verifikasi', variant: 'secondary' },
+  PAID: { label: 'Lunas', variant: 'default' },
+  FAILED: { label: 'Gagal', variant: 'destructive' },
+  EXPIRED: { label: 'Kedaluwarsa', variant: 'destructive' },
+  REFUNDED: { label: 'Dikembalikan', variant: 'secondary' },
 }
 
 const UPLOADABLE: PaymentStatus[] = ['PENDING', 'WAITING_VERIFICATION']
@@ -46,14 +46,14 @@ const RECEIPT_METHODS = new Set(['BANK_TRANSFER', 'QRIS'])
 
 // Presentation only — derived from the real OrderStatus values (shipment badges: lib/orders/shipment-status-label).
 const ORDER_META: Record<OrderStatus, { label: string; variant: BadgeVariant; icon: typeof Clock }> = {
-  PENDING: { label: 'Pending', variant: 'outline', icon: Clock },
-  PROCESSING: { label: 'Processing', variant: 'secondary', icon: Package },
-  PACKING: { label: 'Packing', variant: 'secondary', icon: Package },
-  SHIPPED: { label: 'Shipped', variant: 'secondary', icon: Truck },
-  DELIVERING: { label: 'Delivering', variant: 'secondary', icon: Truck },
-  DELIVERED: { label: 'Delivered', variant: 'default', icon: CheckCircle2 },
-  COMPLETED: { label: 'Completed', variant: 'default', icon: CheckCircle2 },
-  CANCELLED: { label: 'Cancelled', variant: 'destructive', icon: XCircle },
+  PENDING: { label: 'Menunggu pembayaran', variant: 'outline', icon: Clock },
+  PROCESSING: { label: 'Diproses', variant: 'secondary', icon: Package },
+  PACKING: { label: 'Dikemas', variant: 'secondary', icon: Package },
+  SHIPPED: { label: 'Dikirim', variant: 'secondary', icon: Truck },
+  DELIVERING: { label: 'Sedang diantar', variant: 'secondary', icon: Truck },
+  DELIVERED: { label: 'Diterima', variant: 'default', icon: CheckCircle2 },
+  COMPLETED: { label: 'Selesai', variant: 'default', icon: CheckCircle2 },
+  CANCELLED: { label: 'Dibatalkan', variant: 'destructive', icon: XCircle },
 }
 
 function OrderCard({ order, onRefetch }: { order: Order; onRefetch: () => void }) {
@@ -91,7 +91,7 @@ function OrderCard({ order, onRefetch }: { order: Order; onRefetch: () => void }
           {pay ? <Badge variant={pay.variant}>{pay.label}</Badge> : null}
           {shipmentBadge ? (
             <Badge variant={shipmentBadge.variant}>
-              Shipping: {shipmentBadge.label}
+              Pengiriman: {shipmentBadge.label}
             </Badge>
           ) : null}
         </div>
@@ -108,7 +108,7 @@ function OrderCard({ order, onRefetch }: { order: Order; onRefetch: () => void }
         onClick={() => setShowDetails((v) => !v)}
         className="flex items-center gap-1 text-sm font-medium text-primary"
       >
-        {showDetails ? 'Hide details' : 'View details'}
+        {showDetails ? 'Sembunyikan detail' : 'Lihat detail'}
         <ChevronDown className={cn('size-4 transition-transform', showDetails && 'rotate-180')} />
       </button>
 
@@ -116,7 +116,7 @@ function OrderCard({ order, onRefetch }: { order: Order; onRefetch: () => void }
         <div className="space-y-4 rounded-lg bg-muted/40 p-3 text-sm">
           {/* Items */}
           <div className="space-y-2">
-            <h4 className="font-medium">Items</h4>
+            <h4 className="font-medium">Item</h4>
             {items.map((item) => (
               <div key={item.id} className="flex items-start justify-between gap-3">
                 <div>
@@ -143,12 +143,12 @@ function OrderCard({ order, onRefetch }: { order: Order; onRefetch: () => void }
               <span>{formatIDR(order.subtotal)}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-muted-foreground">Delivery fee</span>
+              <span className="text-muted-foreground">Ongkos kirim</span>
               <span>{formatIDR(order.deliveryFee)}</span>
             </div>
             {order.voucherDiscountAmount > 0 ? (
               <div className="flex justify-between text-green-600">
-                <span>Voucher discount{order.voucherCode ? ` (${order.voucherCode})` : ''}</span>
+                <span>Diskon voucher{order.voucherCode ? ` (${order.voucherCode})` : ''}</span>
                 <span>-{formatIDR(order.voucherDiscountAmount)}</span>
               </div>
             ) : null}
@@ -170,14 +170,14 @@ function OrderCard({ order, onRefetch }: { order: Order; onRefetch: () => void }
             <>
               <Separator />
               <div className="space-y-1">
-                <h4 className="font-medium">Shipment</h4>
+                <h4 className="font-medium">Pengiriman</h4>
                 <p className="text-muted-foreground">
                   {order.shipment.provider} · {order.shipment.service} ·{' '}
                   {shipmentBadge?.label}
                 </p>
                 {order.shipment.trackingNumber ? (
                   <p className="text-muted-foreground">
-                    Tracking:{' '}
+                    No. resi:{' '}
                     {order.shipment.trackingUrl ? (
                       <a
                         href={order.shipment.trackingUrl}
@@ -194,7 +194,7 @@ function OrderCard({ order, onRefetch }: { order: Order; onRefetch: () => void }
                 ) : null}
                 {order.estimatedDelivery ? (
                   <p className="text-muted-foreground">
-                    Estimated delivery: {new Date(order.estimatedDelivery).toLocaleDateString('id-ID')}
+                    Estimasi tiba: {new Date(order.estimatedDelivery).toLocaleDateString('id-ID')}
                   </p>
                 ) : null}
               </div>
@@ -207,7 +207,7 @@ function OrderCard({ order, onRefetch }: { order: Order; onRefetch: () => void }
               <Separator />
               <div className="space-y-1">
                 <h4 className="flex items-center gap-1 font-medium">
-                  <MapPin className="size-3.5" /> Delivery address
+                  <MapPin className="size-3.5" /> Alamat pengiriman
                 </h4>
                 <p className="text-muted-foreground">
                   {order.address.recipientName} · {order.address.phone}
@@ -246,7 +246,7 @@ function OrderCard({ order, onRefetch }: { order: Order; onRefetch: () => void }
             />
           ) : (
             <Button size="sm" variant="outline" onClick={() => setShowUpload(true)}>
-              Upload payment receipt
+              Unggah bukti pembayaran
             </Button>
           )}
         </>
@@ -263,11 +263,11 @@ export default function OrdersPage() {
     return (
       <StorefrontShell>
         <Empty
-          title="Please sign in"
-          description="Sign in to view your orders."
+          title="Silakan masuk"
+          description="Masuk untuk melihat pesanan Anda."
           action={
             <Button asChild className="mt-2">
-              <Link href="/login">Sign in</Link>
+              <Link href="/login">Masuk</Link>
             </Button>
           }
         />
@@ -278,7 +278,7 @@ export default function OrdersPage() {
   return (
     <StorefrontShell>
       <section className="mx-auto max-w-3xl px-4 py-8">
-        <h1 className="mb-6 text-2xl font-bold">Order History</h1>
+        <h1 className="mb-6 text-2xl font-bold">Riwayat Pesanan</h1>
 
         {isLoading || meLoading ? (
           <div className="space-y-4">
@@ -290,10 +290,10 @@ export default function OrdersPage() {
           <ErrorState onRetry={() => void refetch()} />
         ) : !orders || orders.length === 0 ? (
           <Empty
-            title="No orders yet"
+            title="Belum ada pesanan"
             action={
               <Button asChild className="mt-2">
-                <Link href="/catalog">Start shopping</Link>
+                <Link href="/catalog">Mulai belanja</Link>
               </Button>
             }
           />

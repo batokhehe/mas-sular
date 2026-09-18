@@ -16,7 +16,7 @@ export function AdminTopbar() {
       <div className="flex items-center gap-2">
         <Sheet>
           <SheetTrigger asChild>
-            <Button variant="ghost" size="icon" className="lg:hidden" aria-label="Open menu">
+            <Button variant="ghost" size="icon" className="lg:hidden" aria-label="Buka menu">
               <Menu className="size-5" />
             </Button>
           </SheetTrigger>
@@ -29,7 +29,7 @@ export function AdminTopbar() {
       </div>
       <Button variant="ghost" size="sm" onClick={() => void adminLogout()}>
         <LogOut className="mr-2 size-4" />
-        Sign out
+        Keluar
       </Button>
     </header>
   )

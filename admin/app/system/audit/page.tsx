@@ -71,19 +71,19 @@ export default function AuditTrailPage() {
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
           <nav className="flex items-center gap-1 text-xs text-gray-400">
-            System <ChevronRight className="h-3 w-3" /> <span className="font-medium text-gray-600">Audit Trail</span>
+            Sistem <ChevronRight className="h-3 w-3" /> <span className="font-medium text-gray-600">Jejak Audit</span>
           </nav>
-          <h2 className="mt-1 text-xl font-semibold text-gray-900">Audit Trail</h2>
-          <p className="mt-1 text-sm text-gray-500">Every administrative action — who changed what, when, and how.</p>
+          <h2 className="mt-1 text-xl font-semibold text-gray-900">Jejak Audit</h2>
+          <p className="mt-1 text-sm text-gray-500">Setiap aksi administratif — siapa mengubah apa, kapan, dan bagaimana.</p>
         </div>
         <div className="flex gap-2">
           <PermissionGate permissions={ROUTE_PERMISSIONS.auditExport}>
             <Button onClick={() => void exportCsv()} className="gap-2 bg-white text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50">
-              <FileDown className="h-4 w-4" /> Export CSV
+              <FileDown className="h-4 w-4" /> Ekspor CSV
             </Button>
           </PermissionGate>
           <Button onClick={() => void query.refetch()} disabled={query.isFetching} className="gap-2">
-            <RefreshCw className={`h-4 w-4 ${query.isFetching ? 'animate-spin' : ''}`} /> Refresh
+            <RefreshCw className={`h-4 w-4 ${query.isFetching ? 'animate-spin' : ''}`} /> Muat ulang
           </Button>
         </div>
       </div>
@@ -94,46 +94,46 @@ export default function AuditTrailPage() {
         <Card>
           <div className="flex flex-col items-center gap-3 p-10 text-center">
             <AlertTriangle className="h-6 w-6 text-red-500" />
-            <p className="text-sm text-red-600">Unable to load the audit trail.</p>
-            <Button onClick={() => void query.refetch()}>Retry</Button>
+            <p className="text-sm text-red-600">Gagal memuat jejak audit.</p>
+            <Button onClick={() => void query.refetch()}>Coba ulang</Button>
           </div>
         </Card>
       ) : (
         <div className="space-y-6">
           {/* Summary cards */}
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-            <Stat label="Today's Changes" value={rp(data.summary.todayChanges)} />
+            <Stat label="Perubahan Hari Ini" value={rp(data.summary.todayChanges)} />
             <Stat label="Successful" value={rp(data.summary.successful)} tone="ok" />
-            <Stat label="Failed" value={rp(data.summary.failed)} tone={data.summary.failed > 0 ? 'error' : undefined} />
-            <Stat label="Unique Admins" value={rp(data.summary.uniqueAdmins)} />
+            <Stat label="Gagal" value={rp(data.summary.failed)} tone={data.summary.failed > 0 ? 'error' : undefined} />
+            <Stat label="Admin Unik" value={rp(data.summary.uniqueAdmins)} />
           </div>
 
           <Card>
             {/* Sticky filters */}
             <div className="sticky top-0 z-10 -mx-5 -mt-5 flex flex-wrap items-end gap-3 rounded-t-2xl border-b border-gray-100 bg-white/95 px-5 pb-4 pt-5 backdrop-blur">
-              <Filter label="Search"><input value={filters.search ?? ''} onChange={(e) => patch({ search: e.target.value || undefined })} placeholder="Entity, admin, request ID…" className="h-10 w-64 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm outline-none focus:border-[#465fff] focus:bg-white" /></Filter>
-              <Filter label="Module"><input value={filters.module ?? ''} onChange={(e) => patch({ module: e.target.value || undefined })} placeholder="payments" className="h-10 w-32 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
-              <Filter label="Action"><input value={filters.action ?? ''} onChange={(e) => patch({ action: e.target.value.toUpperCase() || undefined })} placeholder="VERIFY_PAYMENT" className="h-10 w-44 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
-              <Filter label="Admin"><input value={filters.admin ?? ''} onChange={(e) => patch({ admin: e.target.value || undefined })} placeholder="name / id" className="h-10 w-36 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
+              <Filter label="Cari"><input value={filters.search ?? ''} onChange={(e) => patch({ search: e.target.value || undefined })} placeholder="Entitas, admin, request ID…" className="h-10 w-64 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm outline-none focus:border-[#465fff] focus:bg-white" /></Filter>
+              <Filter label="Modul"><input value={filters.module ?? ''} onChange={(e) => patch({ module: e.target.value || undefined })} placeholder="payments" className="h-10 w-32 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
+              <Filter label="Aksi"><input value={filters.action ?? ''} onChange={(e) => patch({ action: e.target.value.toUpperCase() || undefined })} placeholder="VERIFY_PAYMENT" className="h-10 w-44 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
+              <Filter label="Admin"><input value={filters.admin ?? ''} onChange={(e) => patch({ admin: e.target.value || undefined })} placeholder="nama / id" className="h-10 w-36 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
               <Filter label="Status">
                 <select value={filters.success ?? ''} onChange={(e) => patch({ success: e.target.value as AuditFilters['success'] })} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]">
-                  <option value="">All</option><option value="true">Success</option><option value="false">Failed</option>
+                  <option value="">Semua</option><option value="true">Berhasil</option><option value="false">Gagal</option>
                 </select>
               </Filter>
-              <Filter label="From"><input type="datetime-local" onChange={(e) => patch({ dateFrom: e.target.value ? new Date(e.target.value).toISOString() : undefined })} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
-              <Filter label="To"><input type="datetime-local" onChange={(e) => patch({ dateTo: e.target.value ? new Date(e.target.value).toISOString() : undefined })} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
-              <button onClick={() => { setFilters({}); setPage(1); }} className="h-10 rounded-xl px-3 text-xs font-medium text-gray-500 hover:text-gray-800">Clear</button>
+              <Filter label="Dari"><input type="datetime-local" onChange={(e) => patch({ dateFrom: e.target.value ? new Date(e.target.value).toISOString() : undefined })} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
+              <Filter label="Sampai"><input type="datetime-local" onChange={(e) => patch({ dateTo: e.target.value ? new Date(e.target.value).toISOString() : undefined })} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
+              <button onClick={() => { setFilters({}); setPage(1); }} className="h-10 rounded-xl px-3 text-xs font-medium text-gray-500 hover:text-gray-800">Hapus</button>
             </div>
 
             <div className="mt-4 overflow-x-auto">
               {(data.items.length ?? 0) === 0 ? (
-                <p className="p-10 text-center text-sm text-gray-500">No audit entries found.</p>
+                <p className="p-10 text-center text-sm text-gray-500">Tidak ada entri audit ditemukan.</p>
               ) : (
                 <table className="w-full min-w-[1000px] text-left text-sm">
                   <thead>
                     <tr className="border-b border-gray-100 text-xs uppercase text-gray-400">
-                      <th className="py-2 font-medium">Time</th><th className="py-2 font-medium">Admin</th><th className="py-2 font-medium">Module</th>
-                      <th className="py-2 font-medium">Entity</th><th className="py-2 font-medium">Action</th><th className="py-2 font-medium">Status</th><th className="py-2 font-medium">Summary</th>
+                      <th className="py-2 font-medium">Waktu</th><th className="py-2 font-medium">Admin</th><th className="py-2 font-medium">Modul</th>
+                      <th className="py-2 font-medium">Entitas</th><th className="py-2 font-medium">Aksi</th><th className="py-2 font-medium">Status</th><th className="py-2 font-medium">Ringkasan</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -200,12 +200,12 @@ function AuditDrawer({ id, onClose, onNavigate }: { id: string; onClose: () => v
     <>
       <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />
       <aside className="fixed inset-y-0 right-0 z-50 flex flex-col bg-white shadow-2xl" style={{ width }}>
-        <div onPointerDown={() => { dragging.current = true; }} className="absolute inset-y-0 left-0 w-1.5 cursor-col-resize bg-transparent hover:bg-[#465fff]/30" title="Drag to resize" />
+        <div onPointerDown={() => { dragging.current = true; }} className="absolute inset-y-0 left-0 w-1.5 cursor-col-resize bg-transparent hover:bg-[#465fff]/30" title="Seret untuk mengubah ukuran" />
         <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
-          <h3 className="font-semibold text-gray-900">Audit entry</h3>
+          <h3 className="font-semibold text-gray-900">Entri audit</h3>
           <span className="flex items-center gap-2">
-            <button disabled={!d?.previous} onClick={() => d?.previous && onNavigate(d.previous.id)} title="Previous entry for this entity" className="rounded-lg p-1.5 text-gray-400 ring-1 ring-gray-200 hover:text-gray-700 disabled:opacity-30"><ChevronLeft className="h-4 w-4" /></button>
-            <button disabled={!d?.next} onClick={() => d?.next && onNavigate(d.next.id)} title="Next entry for this entity" className="rounded-lg p-1.5 text-gray-400 ring-1 ring-gray-200 hover:text-gray-700 disabled:opacity-30"><ChevronRight className="h-4 w-4" /></button>
+            <button disabled={!d?.previous} onClick={() => d?.previous && onNavigate(d.previous.id)} title="Entri sebelumnya untuk entitas ini" className="rounded-lg p-1.5 text-gray-400 ring-1 ring-gray-200 hover:text-gray-700 disabled:opacity-30"><ChevronLeft className="h-4 w-4" /></button>
+            <button disabled={!d?.next} onClick={() => d?.next && onNavigate(d.next.id)} title="Entri berikutnya untuk entitas ini" className="rounded-lg p-1.5 text-gray-400 ring-1 ring-gray-200 hover:text-gray-700 disabled:opacity-30"><ChevronRight className="h-4 w-4" /></button>
             <button onClick={onClose} className="ml-2 text-gray-400 hover:text-gray-700"><X className="h-5 w-5" /></button>
           </span>
         </div>
@@ -221,7 +221,7 @@ function AuditDrawer({ id, onClose, onNavigate }: { id: string; onClose: () => v
               </div>
 
               <section>
-                <p className="mb-2 text-xs font-semibold uppercase text-gray-400">Actor</p>
+                <p className="mb-2 text-xs font-semibold uppercase text-gray-400">Pelaku</p>
                 <dl className="space-y-1.5">
                   <Field label="Admin" value={e.adminName ?? e.adminId ?? 'system'} />
                   <Field label="IP" value={e.ipAddress ?? '—'} />
@@ -230,10 +230,10 @@ function AuditDrawer({ id, onClose, onNavigate }: { id: string; onClose: () => v
               </section>
 
               <section>
-                <p className="mb-2 text-xs font-semibold uppercase text-gray-400">Entity · Request</p>
+                <p className="mb-2 text-xs font-semibold uppercase text-gray-400">Entitas · Request</p>
                 <dl className="space-y-1.5">
-                  <Field label="Module" value={e.module} />
-                  <Field label="Entity" value={`${e.entity}${e.entityName ? ` · ${e.entityName}` : ''}`} />
+                  <Field label="Modul" value={e.module} />
+                  <Field label="Entitas" value={`${e.entity}${e.entityName ? ` · ${e.entityName}` : ''}`} />
                   <Field label="Entity ID" value={<span className="font-mono text-xs">{e.entityId ?? '—'}</span>} />
                   <Field
                     label="Request"
@@ -246,7 +246,7 @@ function AuditDrawer({ id, onClose, onNavigate }: { id: string; onClose: () => v
                 </dl>
                 {link ? (
                   <Link href={link} className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 hover:border-[#465fff] hover:text-[#465fff]">
-                    <ExternalLink className="h-3.5 w-3.5" /> Open {e.entity}
+                    <ExternalLink className="h-3.5 w-3.5" /> Buka {e.entity}
                   </Link>
                 ) : null}
               </section>
@@ -254,7 +254,7 @@ function AuditDrawer({ id, onClose, onNavigate }: { id: string; onClose: () => v
               {/* Per-entity timeline */}
               {d.timeline.length > 1 ? (
                 <section>
-                  <p className="mb-2 text-xs font-semibold uppercase text-gray-400">Entity Timeline</p>
+                  <p className="mb-2 text-xs font-semibold uppercase text-gray-400">Riwayat Entitas</p>
                   <ol className="relative ml-2 space-y-2 border-l border-gray-200 pl-4">
                     {d.timeline.map((t) => (
                       <li key={t.id} className="relative">
@@ -270,13 +270,13 @@ function AuditDrawer({ id, onClose, onNavigate }: { id: string; onClose: () => v
 
               {/* Diff viewer */}
               <section>
-                <p className="mb-2 text-xs font-semibold uppercase text-gray-400">Diff</p>
+                <p className="mb-2 text-xs font-semibold uppercase text-gray-400">Perbedaan</p>
                 {rows.length === 0 ? (
-                  <p className="text-sm text-gray-500">No field-level changes recorded.</p>
+                  <p className="text-sm text-gray-500">Tidak ada perubahan field yang tercatat.</p>
                 ) : (
                   <div className="overflow-hidden rounded-xl border border-gray-100">
                     <table className="w-full text-xs">
-                      <thead><tr className="border-b border-gray-100 bg-gray-50 text-left uppercase text-gray-400"><th className="px-3 py-2 font-medium">Field</th><th className="px-3 py-2 font-medium">Before</th><th className="px-3 py-2 font-medium">After</th></tr></thead>
+                      <thead><tr className="border-b border-gray-100 bg-gray-50 text-left uppercase text-gray-400"><th className="px-3 py-2 font-medium">Field</th><th className="px-3 py-2 font-medium">Sebelum</th><th className="px-3 py-2 font-medium">Sesudah</th></tr></thead>
                       <tbody>
                         {rows.map((r) => (
                           <tr key={r.field} className="border-b border-gray-50 last:border-0">
@@ -291,16 +291,16 @@ function AuditDrawer({ id, onClose, onNavigate }: { id: string; onClose: () => v
                 )}
               </section>
 
-              {e.before ? <JsonSection title="Before" value={e.before} onCopy={copy} /> : null}
-              {e.after ? <JsonSection title="After" value={e.after} onCopy={copy} /> : null}
+              {e.before ? <JsonSection title="Sebelum" value={e.before} onCopy={copy} /> : null}
+              {e.after ? <JsonSection title="Sesudah" value={e.after} onCopy={copy} /> : null}
               {e.metadata ? <JsonSection title="Metadata" value={e.metadata} onCopy={copy} /> : null}
 
               <section>
                 <div className="mb-2 flex items-center justify-between">
-                  <p className="text-xs font-semibold uppercase text-gray-400">Raw JSON</p>
+                  <p className="text-xs font-semibold uppercase text-gray-400">JSON Mentah</p>
                   <span className="flex gap-3">
-                    <button onClick={() => copy(rawJson)} className="inline-flex items-center gap-1 text-xs font-medium text-[#465fff]"><Copy className="h-3.5 w-3.5" /> Copy</button>
-                    <button onClick={download} className="inline-flex items-center gap-1 text-xs font-medium text-[#465fff]"><Download className="h-3.5 w-3.5" /> Download JSON</button>
+                    <button onClick={() => copy(rawJson)} className="inline-flex items-center gap-1 text-xs font-medium text-[#465fff]"><Copy className="h-3.5 w-3.5" /> Salin</button>
+                    <button onClick={download} className="inline-flex items-center gap-1 text-xs font-medium text-[#465fff]"><Download className="h-3.5 w-3.5" /> Unduh JSON</button>
                   </span>
                 </div>
                 <pre className="max-h-72 overflow-auto rounded-lg bg-gray-50 p-3 text-xs text-gray-700">{rawJson}</pre>
@@ -319,7 +319,7 @@ function JsonSection({ title, value, onCopy }: { title: string; value: unknown; 
     <section>
       <div className="mb-2 flex items-center justify-between">
         <p className="text-xs font-semibold uppercase text-gray-400">{title}</p>
-        <button onClick={() => onCopy(json)} className="inline-flex items-center gap-1 text-xs font-medium text-[#465fff]"><Copy className="h-3.5 w-3.5" /> Copy</button>
+        <button onClick={() => onCopy(json)} className="inline-flex items-center gap-1 text-xs font-medium text-[#465fff]"><Copy className="h-3.5 w-3.5" /> Salin</button>
       </div>
       <pre className="max-h-48 overflow-auto rounded-lg bg-gray-50 p-3 text-xs text-gray-700">{json}</pre>
     </section>

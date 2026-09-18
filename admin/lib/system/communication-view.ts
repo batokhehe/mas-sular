@@ -10,9 +10,9 @@ export const MANUAL_SEND_TEMPLATES: Array<{
   needsOrderNumber: boolean;
   needsSubject: boolean;
 }> = [
-  { value: 'manual.order-update', label: 'Order Update', needsOrderNumber: true, needsSubject: false },
-  { value: 'manual.shipment-update', label: 'Shipment Update', needsOrderNumber: true, needsSubject: false },
-  { value: 'manual.custom', label: 'Custom Message', needsOrderNumber: false, needsSubject: true },
+  { value: 'manual.order-update', label: 'Pembaruan Pesanan', needsOrderNumber: true, needsSubject: false },
+  { value: 'manual.shipment-update', label: 'Pembaruan Pengiriman', needsOrderNumber: true, needsSubject: false },
+  { value: 'manual.custom', label: 'Pesan Kustom', needsOrderNumber: false, needsSubject: true },
 ];
 
 // ---------------- Communication history badges ----------------
@@ -30,15 +30,15 @@ export function historyBadges(n: {
   resendAt: string | null;
 }): HistoryBadge[] {
   const badges: HistoryBadge[] = [];
-  if (n.status === 'SENT') badges.push({ label: 'Success', cls: 'bg-emerald-100 text-emerald-700' });
-  else if (n.status === 'FAILED') badges.push({ label: 'Failed', cls: 'bg-red-100 text-red-700' });
-  else badges.push({ label: 'Queued', cls: 'bg-amber-100 text-amber-700' });
-  if (n.attempts > 1) badges.push({ label: `Retry ×${n.attempts - 1}`, cls: 'bg-purple-100 text-purple-700' });
-  if (n.resendAt) badges.push({ label: 'Resend', cls: 'bg-blue-100 text-blue-700' });
+  if (n.status === 'SENT') badges.push({ label: 'Berhasil', cls: 'bg-emerald-100 text-emerald-700' });
+  else if (n.status === 'FAILED') badges.push({ label: 'Gagal', cls: 'bg-red-100 text-red-700' });
+  else badges.push({ label: 'Diantrekan', cls: 'bg-amber-100 text-amber-700' });
+  if (n.attempts > 1) badges.push({ label: `Coba ulang ×${n.attempts - 1}`, cls: 'bg-purple-100 text-purple-700' });
+  if (n.resendAt) badges.push({ label: 'Kirim ulang', cls: 'bg-blue-100 text-blue-700' });
   badges.push(
     n.isManual
       ? { label: 'Manual', cls: 'bg-indigo-100 text-indigo-700' }
-      : { label: 'Auto', cls: 'bg-gray-100 text-gray-600' },
+      : { label: 'Otomatis', cls: 'bg-gray-100 text-gray-600' },
   );
   return badges;
 }
@@ -64,31 +64,31 @@ export function deliveryTimeline(n: {
   lastError: string | null;
   providerMessageId: string | null;
 }): DeliveryStep[] {
-  const steps: DeliveryStep[] = [{ label: 'Queued', at: n.createdAt, tone: 'ok' }];
+  const steps: DeliveryStep[] = [{ label: 'Diantrekan', at: n.createdAt, tone: 'ok' }];
 
   if (n.attempts <= 0) {
-    steps.push({ label: 'Sending', at: n.nextAttemptAt, tone: 'pending', detail: 'Waiting for the sender worker' });
+    steps.push({ label: 'Mengirim', at: n.nextAttemptAt, tone: 'pending', detail: 'Menunggu worker pengirim' });
     return steps;
   }
 
   for (let attempt = 1; attempt <= n.attempts; attempt += 1) {
-    steps.push({ label: attempt === 1 ? 'Sending' : `Retry #${attempt - 1}`, at: null, tone: 'ok' });
-    if (attempt < n.attempts) steps.push({ label: 'Failed', at: null, tone: 'error' });
+    steps.push({ label: attempt === 1 ? 'Mengirim' : `Coba ulang #${attempt - 1}`, at: null, tone: 'ok' });
+    if (attempt < n.attempts) steps.push({ label: 'Gagal', at: null, tone: 'error' });
   }
 
   if (n.status === 'SENT') {
     steps.push({
-      label: 'Provider Accepted',
+      label: 'Diterima penyedia',
       at: n.sentAt,
       tone: 'ok',
-      detail: n.providerMessageId ? `Provider message ${n.providerMessageId}` : undefined,
+      detail: n.providerMessageId ? `Pesan penyedia ${n.providerMessageId}` : undefined,
     });
-    steps.push({ label: 'Delivered', at: n.sentAt, tone: 'ok' });
+    steps.push({ label: 'Terkirim', at: n.sentAt, tone: 'ok' });
   } else if (n.status === 'FAILED') {
-    steps.push({ label: 'Failed', at: null, tone: 'error', detail: n.lastError ?? undefined });
+    steps.push({ label: 'Gagal', at: null, tone: 'error', detail: n.lastError ?? undefined });
   } else {
-    steps.push({ label: 'Failed', at: null, tone: 'error', detail: n.lastError ?? undefined });
-    steps.push({ label: `Retry #${n.attempts}`, at: n.nextAttemptAt, tone: 'pending', detail: 'Scheduled' });
+    steps.push({ label: 'Gagal', at: null, tone: 'error', detail: n.lastError ?? undefined });
+    steps.push({ label: `Coba ulang #${n.attempts}`, at: n.nextAttemptAt, tone: 'pending', detail: 'Terjadwal' });
   }
   return steps;
 }
@@ -119,19 +119,19 @@ export function conversationGroups(items: ConversationItem[]): ConversationGroup
     if (r.orderId) {
       key = `order:${r.orderId}`;
       kind = 'order';
-      label = `Order ${r.orderNumber ?? short(r.orderId)}`;
+      label = `Pesanan ${r.orderNumber ?? short(r.orderId)}`;
     } else if (r.paymentId) {
       key = `payment:${r.paymentId}`;
       kind = 'payment';
-      label = `Payment ${short(r.paymentId)}`;
+      label = `Pembayaran ${short(r.paymentId)}`;
     } else if (r.shipmentId) {
       key = `shipment:${r.shipmentId}`;
       kind = 'shipment';
-      label = `Shipment ${short(r.shipmentId)}`;
+      label = `Pengiriman ${short(r.shipmentId)}`;
     } else {
       key = 'general';
       kind = 'general';
-      label = 'General';
+      label = 'Umum';
     }
     const group = groups.get(key);
     if (group) group.items.push(item);
@@ -146,33 +146,33 @@ export function conversationGroups(items: ConversationItem[]): ConversationGroup
 export function templateLabel(n: { template: string; stage: string | null; statusLabel: string | null; isManual: boolean }): string {
   switch (n.template) {
     case 'order.transfer':
-      return 'Order Created — Waiting Payment';
+      return 'Pesanan Dibuat — Menunggu Pembayaran';
     case 'order.cod':
-      return 'Order Created (COD)';
+      return 'Pesanan Dibuat (COD)';
     case 'order.received':
-      return 'Order Received';
+      return 'Pesanan Diterima';
     case 'payment.reminder':
-      return n.stage === 'second' ? 'Payment Reminder (48h)' : 'Payment Reminder (24h)';
+      return n.stage === 'second' ? 'Pengingat Pembayaran (48 jam)' : 'Pengingat Pembayaran (24 jam)';
     case 'payment.receipt_uploaded':
-      return 'Payment Uploaded';
+      return 'Bukti Pembayaran Diunggah';
     case 'payment.approved':
-      return 'Payment Verified';
+      return 'Pembayaran Terverifikasi';
     case 'payment.rejected':
-      return 'Payment Rejected';
+      return 'Pembayaran Ditolak';
     case 'payment.expired':
-      return 'Payment Expired';
+      return 'Pembayaran Kedaluwarsa';
     case 'order.shipped':
-      return 'Shipped';
+      return 'Dikirim';
     case 'order.delivered':
-      return 'Delivered';
+      return 'Diterima';
     case 'shipment.status':
-      return n.statusLabel ? `Shipment: ${n.statusLabel}` : 'Shipment Update';
+      return n.statusLabel ? `Pengiriman: ${n.statusLabel}` : 'Pembaruan Pengiriman';
     case 'manual.order-update':
-      return 'Manual: Order Update';
+      return 'Manual: Pembaruan Pesanan';
     case 'manual.shipment-update':
-      return 'Manual: Shipment Update';
+      return 'Manual: Pembaruan Pengiriman';
     case 'manual.custom':
-      return 'Manual Message';
+      return 'Pesan Manual';
     default:
       return n.template;
   }

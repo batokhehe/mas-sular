@@ -35,10 +35,10 @@ test('an unknown code is shown verbatim rather than guessed', () => {
   assert.equal(serviceLabel('SOMETHING_NEW', OPTIONS), 'SOMETHING_NEW');
 });
 
-test('a missing service reads as "Not set", not as a default service', () => {
-  assert.equal(serviceLabel(null, OPTIONS), 'Not set');
-  assert.equal(serviceLabel(undefined, OPTIONS), 'Not set');
-  assert.equal(serviceLabel('', OPTIONS), 'Not set');
+test('a missing service reads as "Belum diatur" (not set), not as a default service', () => {
+  assert.equal(serviceLabel(null, OPTIONS), 'Belum diatur');
+  assert.equal(serviceLabel(undefined, OPTIONS), 'Belum diatur');
+  assert.equal(serviceLabel('', OPTIONS), 'Belum diatur');
 });
 
 test('a single-service selection reports exactly that one service', () => {

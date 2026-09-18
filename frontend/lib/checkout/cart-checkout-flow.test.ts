@@ -26,19 +26,19 @@ test('every cart line has its own accessible checkbox bound to its selection', (
   assert.match(perLine, /<Checkbox[\s\S]*?checked=\{line\.selected\}/)
   // P0-1: keyed by the LINE (product + toppings), so "Baso" and "Baso + Keju" are independent.
   assert.match(perLine, /onCheckedChange=\{\(checked\) => setSelected\(line\.lineId, checked === true\)\}/)
-  assert.match(perLine, /aria-label=\{`Select \$\{line\.name\}`\}/)
+  assert.match(perLine, /aria-label=\{`Pilih \$\{line\.name\}`\}/)
 })
 
 test('Select all / Unselect all is one labelled checkbox over every line', () => {
   assert.match(CART, /const allSelected = lines\.length > 0 && selectedCount === lines\.length/)
   assert.match(CART, /id="cart-select-all"\s*checked=\{allSelected\}\s*onCheckedChange=\{\(checked\) => setAllSelected\(checked === true\)\}/)
-  assert.match(CART, /<label htmlFor="cart-select-all"[^>]*>\s*Select all\s*<\/label>/)
+  assert.match(CART, /<label htmlFor="cart-select-all"[^>]*>\s*Pilih semua\s*<\/label>/)
 })
 
 test('the summary shows the SELECTED subtotal, not the whole cart', () => {
   assert.match(CART, /const subtotal = selectedSubtotal\(lines\)/)
   assert.equal(/cartSubtotal\(/.test(CART), false)
-  assert.match(CART, /Subtotal \(\{selectedCount\} of \{lines\.length\} items\)/)
+  assert.match(CART, /Subtotal \(\{selectedCount\} dari \{lines\.length\} item\)/)
 })
 
 test('8. with nothing selected the checkout button is disabled and says why', () => {
@@ -48,7 +48,7 @@ test('8. with nothing selected the checkout button is disabled and says why', ()
   assert.match(enabled, /<Link href="\/checkout">/)
   assert.match(disabled, /<Button size="lg" className="w-full rounded-full" disabled>/)
   assert.equal(/href="\/checkout"/.test(disabled.split('</Card>')[0]), false, 'no checkout link when nothing is selected')
-  assert.match(disabled, /Select at least one item to check out\./)
+  assert.match(disabled, /Pilih minimal satu item untuk checkout\./)
 })
 
 test('existing cart behaviour is kept: quantity, remove, navigation, clear, empty state', () => {
@@ -57,10 +57,10 @@ test('existing cart behaviour is kept: quantity, remove, navigation, clear, empt
   assert.match(CART, /setQty\(line\.lineId, line\.qty \+ 1\)/)
   assert.match(CART, /onClick=\{\(\) => remove\(line\.lineId\)\}/)
   assert.match(CART, /<Link href=\{`\/catalog\/\$\{line\.slug\}`\}/)
-  assert.match(CART, /formatIDR\(lineUnitPrice\(line\)\)\} each/)
+  assert.match(CART, /formatIDR\(lineUnitPrice\(line\)\)\} \/ item/)
   assert.match(CART, /formatIDR\(lineTotal\(line\)\)/)
   assert.match(CART, /onClick=\{\(\) => clear\(\)\}/)
-  assert.match(CART, /if \(lines\.length === 0\) \{[\s\S]*?title="Your cart is empty"/)
+  assert.match(CART, /if \(lines\.length === 0\) \{[\s\S]*?title="Keranjang Anda kosong"/)
 })
 
 // ----------------------------------------------------------------- Checkout ---
@@ -74,7 +74,7 @@ test('9. Checkout builds the order from the explicit selected subset only', () =
   assert.match(CHECKOUT, /items: checkoutItems,\s*enabled: canPlaceOrder/)
   assert.match(CHECKOUT, /voucher_code: values\.voucher_code \|\| undefined,\s*items: checkoutItems,/)
   // What the customer sees is what is ordered.
-  assert.match(CHECKOUT, /Order \(\{checkoutLines\.length\} items\)/)
+  assert.match(CHECKOUT, /Pesanan \(\{checkoutLines\.length\} item\)/)
   assert.match(CHECKOUT, /\{checkoutLines\.map\(\(line\) => \(/)
 })
 
@@ -82,7 +82,7 @@ test('8. nothing selected: Checkout shows a clear message and never falls back t
   const guard = CHECKOUT.indexOf('if (checkoutLines.length === 0) {')
   assert.ok(guard > 0)
   assert.ok(guard < CHECKOUT.indexOf('<form onSubmit'), 'the form (and its submit) is never rendered without a selection')
-  assert.match(CHECKOUT.slice(guard), /title="No items selected"[\s\S]*?<Link href="\/cart">Back to cart<\/Link>/)
+  assert.match(CHECKOUT.slice(guard), /title="Belum ada item yang dipilih"[\s\S]*?<Link href="\/cart">Kembali ke keranjang<\/Link>/)
   assert.match(CHECKOUT, /if \(!selectedShipping \|\| checkoutItems\.length === 0\) return/)
   // The empty-cart state is unchanged and comes first.
   assert.ok(CHECKOUT.indexOf('if (lines.length === 0) {') < guard)
@@ -101,12 +101,12 @@ test('10/11. success removes only the purchased lines; nothing else ever removes
 
 test('the unselected items are visibly kept, with a way back to change the selection', () => {
   assert.match(CHECKOUT, /const unselectedCount = lines\.length - checkoutLines\.length/)
-  assert.match(CHECKOUT, /\{unselectedCount > 0 \? \([\s\S]*?in your cart[\s\S]*?<Link href="\/cart"[^>]*>\s*Change selection/)
+  assert.match(CHECKOUT, /\{unselectedCount > 0 \? \([\s\S]*?tetap di keranjang[\s\S]*?<Link href="\/cart"[^>]*>\s*Ubah pilihan/)
 })
 
 test('14. the #7/#17/#18 address flow is untouched by #6', () => {
   assert.match(CHECKOUT, /resolveCheckoutAddressId\(addresses, chosenAddressId\)/)
-  assert.match(CHECKOUT, /<Link href=\{ADDRESS_BOOK_FROM_CHECKOUT\}>Change address<\/Link>/)
+  assert.match(CHECKOUT, /<Link href=\{ADDRESS_BOOK_FROM_CHECKOUT\}>Ubah alamat<\/Link>/)
   assert.match(CHECKOUT, /onSuccess: onAddressCreated/)
   const success = CHECKOUT.split('onSuccess: (order) => {')[1]?.split('router.push')[0] ?? ''
   assert.match(success, /clearChosenAddress\(\)/)

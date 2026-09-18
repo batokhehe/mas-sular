@@ -13,24 +13,24 @@ export function StorefrontFooter() {
               <span className="text-lg font-bold tracking-tight">Bakso Mas Sular</span>
             </div>
             <p className="max-w-xs text-sm text-muted-foreground">
-              Premium Indonesian meatballs, delivered fresh to your door.
+              Bakso premium khas Indonesia, dikirim segar sampai ke rumah Anda.
             </p>
           </div>
           <nav className="flex flex-col gap-2 text-sm">
-            <span className="font-semibold">Explore</span>
+            <span className="font-semibold">Jelajahi</span>
             <Link href="/catalog" className="text-muted-foreground transition-colors hover:text-foreground">
-              Catalog
+              Katalog
             </Link>
             <Link href="/orders" className="text-muted-foreground transition-colors hover:text-foreground">
-              My orders
+              Pesanan Saya
             </Link>
             <Link href="/cart" className="text-muted-foreground transition-colors hover:text-foreground">
-              Cart
+              Keranjang
             </Link>
           </nav>
         </div>
         <p className="mt-8 border-t pt-6 text-xs text-muted-foreground">
-          © {new Date().getFullYear()} Bakso Mas Sular. All rights reserved.
+          © {new Date().getFullYear()} Bakso Mas Sular. Hak cipta dilindungi.
         </p>
       </div>
     </footer>

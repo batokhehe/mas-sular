@@ -14,9 +14,9 @@ interface Props {
 }
 
 const coverageTypeOptions: { value: CoverageType; label: string }[] = [
-  { value: 'DELIVERY', label: 'Delivery' },
-  { value: 'PICKUP_ONLY', label: 'Pickup Only' },
-  { value: 'DISABLED', label: 'Disabled' },
+  { value: 'DELIVERY', label: 'Diantar' },
+  { value: 'PICKUP_ONLY', label: 'Hanya Ambil Sendiri' },
+  { value: 'DISABLED', label: 'Nonaktif' },
 ];
 
 const inputClass =
@@ -41,12 +41,12 @@ export function CoverageForm({ initialValues, onSubmit, submitLabel, isSubmittin
     setError(null);
 
     if (!region.provinceId || !region.cityId) {
-      setError('Province and City are required.');
+      setError('Provinsi dan Kota wajib diisi.');
       return;
     }
-    if (deliveryFee < 0) return setError('Delivery fee must be >= 0.');
-    if (minimumOrder < 0) return setError('Minimum order must be >= 0.');
-    if (estimatedMinutes <= 0) return setError('Estimated minutes must be > 0.');
+    if (deliveryFee < 0) return setError('Ongkos kirim harus >= 0.');
+    if (minimumOrder < 0) return setError('Minimal pesanan harus >= 0.');
+    if (estimatedMinutes <= 0) return setError('Estimasi menit harus > 0.');
 
     await onSubmit({
       provinceId: region.provinceId,
@@ -66,16 +66,16 @@ export function CoverageForm({ initialValues, onSubmit, submitLabel, isSubmittin
       <CardTitle>{submitLabel}</CardTitle>
       <form onSubmit={handleSubmit} className="mt-4 space-y-6">
         <div>
-          <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">Coverage Area</p>
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">Area Jangkauan</p>
           <RegionChainSelect value={region} onChange={setRegion} />
           <p className="mt-2 text-xs text-gray-500">
-            Leave District/Village empty to apply the rule at a broader level. More specific rules take priority.
+            Kosongkan Kecamatan/Kelurahan untuk menerapkan aturan di tingkat yang lebih luas. Aturan yang lebih spesifik lebih diutamakan.
           </p>
         </div>
 
         <div className="grid gap-4 lg:grid-cols-2">
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Coverage Type *</span>
+            <span>Tipe Jangkauan *</span>
             <select
               value={coverageType}
               onChange={(e) => setCoverageType(e.target.value as CoverageType)}
@@ -90,7 +90,7 @@ export function CoverageForm({ initialValues, onSubmit, submitLabel, isSubmittin
           </label>
 
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Delivery Fee (Rp)</span>
+            <span>Ongkos Kirim (Rp)</span>
             <input
               type="number"
               min={0}
@@ -102,7 +102,7 @@ export function CoverageForm({ initialValues, onSubmit, submitLabel, isSubmittin
           </label>
 
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Minimum Order (Rp)</span>
+            <span>Minimal Pesanan (Rp)</span>
             <input
               type="number"
               min={0}
@@ -114,7 +114,7 @@ export function CoverageForm({ initialValues, onSubmit, submitLabel, isSubmittin
           </label>
 
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Estimated Delivery (minutes)</span>
+            <span>Estimasi Pengiriman (menit)</span>
             <input
               type="number"
               min={1}
@@ -132,7 +132,7 @@ export function CoverageForm({ initialValues, onSubmit, submitLabel, isSubmittin
             onChange={(e) => setIsActive(e.target.checked)}
             className="h-4 w-4 rounded border-gray-300 text-[#465fff] focus:ring-[#465fff]"
           />
-          <span>Active</span>
+          <span>Aktif</span>
         </label>
 
         {error ? <p className="text-sm text-red-600">{error}</p> : null}

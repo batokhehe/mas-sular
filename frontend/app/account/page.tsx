@@ -35,7 +35,7 @@ export default function AccountPage() {
 
   return (
     <section className="mx-auto max-w-2xl px-4 py-8">
-      <h1 className="mb-6 text-2xl font-bold">Account</h1>
+      <h1 className="mb-6 text-2xl font-bold">Akun</h1>
 
       {/* Profile header — real profile data */}
       <Card className="mb-6 flex items-center gap-4 p-5">
@@ -47,7 +47,7 @@ export default function AccountPage() {
           <h2 className="truncate text-lg font-bold">{user?.name}</h2>
           <p className="truncate text-sm text-muted-foreground">{user?.email}</p>
           {user?.phone ? <p className="truncate text-sm text-muted-foreground">{user.phone}</p> : null}
-          {memberSince ? <p className="text-xs text-muted-foreground">Member since {memberSince}</p> : null}
+          {memberSince ? <p className="text-xs text-muted-foreground">Member sejak {memberSince}</p> : null}
         </div>
       </Card>
 
@@ -61,14 +61,14 @@ export default function AccountPage() {
             ) : (
               <p className="text-2xl font-bold">{orderCount}</p>
             )}
-            <p className="text-xs text-muted-foreground">Orders</p>
+            <p className="text-xs text-muted-foreground">Pesanan</p>
           </Card>
         </Link>
         <Link href="/account/addresses">
           <Card className="flex flex-col items-center p-4 text-center transition-colors hover:bg-accent">
             <MapPin className="mb-2 size-5 text-primary" />
             <p className="text-2xl font-bold">{addressCount}</p>
-            <p className="text-xs text-muted-foreground">Addresses</p>
+            <p className="text-xs text-muted-foreground">Alamat</p>
           </Card>
         </Link>
       </div>
@@ -82,8 +82,8 @@ export default function AccountPage() {
                 <MapPin className="size-5 text-primary" />
               </span>
               <div>
-                <p className="font-medium">Address Book</p>
-                <p className="text-sm text-muted-foreground">{addressCount} saved</p>
+                <p className="font-medium">Buku Alamat</p>
+                <p className="text-sm text-muted-foreground">{addressCount} tersimpan</p>
               </div>
             </div>
             <ChevronRight className="size-5 text-muted-foreground" />
@@ -97,8 +97,8 @@ export default function AccountPage() {
                 <Package className="size-5 text-primary" />
               </span>
               <div>
-                <p className="font-medium">Order History</p>
-                <p className="text-sm text-muted-foreground">View all your orders</p>
+                <p className="font-medium">Riwayat Pesanan</p>
+                <p className="text-sm text-muted-foreground">Lihat semua pesanan Anda</p>
               </div>
             </div>
             <ChevronRight className="size-5 text-muted-foreground" />
@@ -116,21 +116,21 @@ export default function AccountPage() {
               )}
             </span>
             <div>
-              <p className="font-medium">Dark mode</p>
-              <p className="text-sm text-muted-foreground">Switch the app theme</p>
+              <p className="font-medium">Mode gelap</p>
+              <p className="text-sm text-muted-foreground">Ganti tema aplikasi</p>
             </div>
           </div>
           <Switch
             checked={mounted ? theme === 'dark' : false}
             onCheckedChange={(checked) => setTheme(checked ? 'dark' : 'light')}
-            aria-label="Toggle dark mode"
+            aria-label="Aktifkan mode gelap"
           />
         </Card>
 
         {/* Logout — real auth-context logout */}
         <Button variant="outline" className="w-full justify-start text-destructive" onClick={handleLogout}>
           <LogOut className="mr-2 size-4" />
-          Sign out
+          Keluar
         </Button>
       </div>
     </section>

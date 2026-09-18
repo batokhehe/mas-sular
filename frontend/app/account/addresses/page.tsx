@@ -64,22 +64,22 @@ function AddressBook() {
       {returnTo ? (
         <Button asChild variant="ghost" size="sm" className="-ml-2 mb-3">
           <Link href={returnTo}>
-            <ArrowLeft className="mr-1 size-4" /> Back to checkout
+            <ArrowLeft className="mr-1 size-4" /> Kembali ke checkout
           </Link>
         </Button>
       ) : null}
       <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Address Book</h1>
+        <h1 className="text-2xl font-bold">Buku Alamat</h1>
         <Dialog open={createOpen} onOpenChange={setCreateOpen}>
           <DialogTrigger asChild>
             <Button>
-              <Plus className="mr-1 size-4" /> Add address
+              <Plus className="mr-1 size-4" /> Tambah alamat
             </Button>
           </DialogTrigger>
           {/* Scrolls on short phones - the form is taller than a 667px screen. */}
           <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>New address</DialogTitle>
+              <DialogTitle>Alamat baru</DialogTitle>
             </DialogHeader>
             <AddressForm
               pending={create.isPending}
@@ -110,11 +110,11 @@ function AddressBook() {
         <ErrorState onRetry={() => void refetch()} />
       ) : addresses.length === 0 ? (
         <Empty
-          title="No addresses yet"
-          description="Add a delivery address to start ordering."
+          title="Belum ada alamat"
+          description="Tambahkan alamat pengiriman untuk mulai memesan."
           action={
             <Button className="mt-2" onClick={() => setCreateOpen(true)}>
-              Add address
+              Tambah alamat
             </Button>
           }
         />
@@ -126,21 +126,21 @@ function AddressBook() {
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
                     <p className="font-semibold">{address.label}</p>
-                    {address.isDefault ? <Badge>Default</Badge> : null}
+                    {address.isDefault ? <Badge>Utama</Badge> : null}
                   </div>
                   <p className="text-sm">
                     {address.recipientName} · {address.phone}
                   </p>
                   <p className="text-sm text-muted-foreground">{formatAddressLine(address)}</p>
-                  {address.notes ? <p className="text-xs text-muted-foreground">Notes: {address.notes}</p> : null}
+                  {address.notes ? <p className="text-xs text-muted-foreground">Catatan: {address.notes}</p> : null}
                   {returnTo ? (
                     address.id === deliveryAddressId ? (
                       <p className="flex items-center gap-1 pt-1 text-sm font-medium text-primary">
-                        <Check className="size-4" /> Selected for delivery
+                        <Check className="size-4" /> Dipilih untuk pengiriman
                       </p>
                     ) : (
                       <Button variant="outline" size="sm" className="mt-1" onClick={() => chooseAddress(address.id)}>
-                        Deliver here
+                        Kirim ke sini
                       </Button>
                     )
                   ) : null}
@@ -151,20 +151,20 @@ function AddressBook() {
                       variant="ghost"
                       size="icon"
                       className="size-8"
-                      title="Set as default"
+                      title="Jadikan utama"
                       onClick={() => update.mutate({ id: address.id, body: { isDefault: true } })}
                     >
                       <Star className="size-4" />
                     </Button>
                   ) : null}
-                  <Button variant="ghost" size="icon" className="size-8" title="Edit" onClick={() => setEditing(address)}>
+                  <Button variant="ghost" size="icon" className="size-8" title="Ubah" onClick={() => setEditing(address)}>
                     <Pencil className="size-4" />
                   </Button>
                   <Button
                     variant="ghost"
                     size="icon"
                     className="size-8 text-destructive"
-                    title="Delete"
+                    title="Hapus"
                     onClick={() => setDeleting(address)}
                   >
                     <Trash2 className="size-4" />
@@ -180,7 +180,7 @@ function AddressBook() {
       <Dialog open={!!editing} onOpenChange={(open) => !open && setEditing(null)}>
         <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Edit address</DialogTitle>
+            <DialogTitle>Ubah alamat</DialogTitle>
           </DialogHeader>
           {editing ? (
             <AddressForm
@@ -198,14 +198,14 @@ function AddressBook() {
       <Dialog open={!!deleting} onOpenChange={(open) => !open && setDeleting(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete address?</DialogTitle>
+            <DialogTitle>Hapus alamat?</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            {deleting ? `“${deleting.label}” will be removed.` : ''}
+            {deleting ? `“${deleting.label}” akan dihapus.` : ''}
           </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleting(null)}>
-              Cancel
+              Batal
             </Button>
             <Button
               variant="destructive"
@@ -214,7 +214,7 @@ function AddressBook() {
                 deleting && remove.mutate(deleting.id, { onSuccess: () => setDeleting(null) })
               }
             >
-              Delete
+              Hapus
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -3,13 +3,13 @@ import type { BellCategory, BellNotification, BellPriority } from '@/lib/notific
 /** Pure view helpers for the notification bell/drawer (unit-testable sans React). */
 
 export const BELL_FILTERS: Array<{ key: string; label: string; category?: BellCategory; unread?: boolean }> = [
-  { key: 'all', label: 'All' },
-  { key: 'unread', label: 'Unread', unread: true },
-  { key: 'orders', label: 'Orders', category: 'ORDER' },
-  { key: 'payments', label: 'Payments', category: 'PAYMENT' },
-  { key: 'inventory', label: 'Inventory', category: 'INVENTORY' },
-  { key: 'system', label: 'System', category: 'SYSTEM' },
-  { key: 'security', label: 'Security', category: 'SECURITY' },
+  { key: 'all', label: 'Semua' },
+  { key: 'unread', label: 'Belum dibaca', unread: true },
+  { key: 'orders', label: 'Pesanan', category: 'ORDER' },
+  { key: 'payments', label: 'Pembayaran', category: 'PAYMENT' },
+  { key: 'inventory', label: 'Stok', category: 'INVENTORY' },
+  { key: 'system', label: 'Sistem', category: 'SYSTEM' },
+  { key: 'security', label: 'Keamanan', category: 'SECURITY' },
   { key: 'audit', label: 'Audit', category: 'AUDIT' },
 ];
 
@@ -20,31 +20,31 @@ export const PRIORITY_DOT: Record<BellPriority, string> = {
   LOW: 'bg-gray-300',
 };
 
-/** "just now", "5m ago", "3h ago", "2d ago", else a local date. */
+/** "baru saja", "5 mnt lalu", "3 jam lalu", "2 hari lalu", else a local date. */
 export function relativeTime(iso: string, now = new Date()): string {
   const s = Math.max(0, Math.floor((now.getTime() - new Date(iso).getTime()) / 1000));
-  if (s < 60) return 'just now';
+  if (s < 60) return 'baru saja';
   const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ago`;
+  if (m < 60) return `${m} mnt lalu`;
   const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
+  if (h < 24) return `${h} jam lalu`;
   const d = Math.floor(h / 24);
-  if (d < 7) return `${d}d ago`;
+  if (d < 7) return `${d} hari lalu`;
   return new Date(iso).toLocaleDateString('id-ID');
 }
 
-export type DayGroup = { label: 'Today' | 'Yesterday' | 'Older'; items: BellNotification[] };
+export type DayGroup = { label: 'Hari ini' | 'Kemarin' | 'Lebih lama'; items: BellNotification[] };
 
-/** Group by Today / Yesterday / Older, preserving newest-first order. */
+/** Group by Hari ini / Kemarin / Lebih lama (today / yesterday / older), preserving newest-first order. */
 export function groupByDay(items: BellNotification[], now = new Date()): DayGroup[] {
   const todayStart = new Date(now);
   todayStart.setHours(0, 0, 0, 0);
   const yesterdayStart = new Date(todayStart.getTime() - 86_400_000);
 
   const groups: DayGroup[] = [
-    { label: 'Today', items: [] },
-    { label: 'Yesterday', items: [] },
-    { label: 'Older', items: [] },
+    { label: 'Hari ini', items: [] },
+    { label: 'Kemarin', items: [] },
+    { label: 'Lebih lama', items: [] },
   ];
   for (const item of items) {
     const t = new Date(item.createdAt).getTime();

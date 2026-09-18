@@ -75,7 +75,7 @@ export function NotificationBell() {
         invalidateList();
         try {
           const draft = JSON.parse((e as MessageEvent).data) as { title?: string; message?: string };
-          void toast.fire({ icon: 'info', title: draft.title ?? 'Notification', text: draft.message ?? '' });
+          void toast.fire({ icon: 'info', title: draft.title ?? 'Notifikasi', text: draft.message ?? '' });
         } catch {
           // toast is best-effort
         }
@@ -142,8 +142,8 @@ export function NotificationBell() {
 
   const markAll = () =>
     runWithFeedback({
-      loading: 'Marking all as read…',
-      success: 'All notifications marked as read',
+      loading: 'Menandai semua sudah dibaca…',
+      success: 'Semua notifikasi ditandai sudah dibaca',
       action: async () => {
         await markAllNotificationsRead();
         setUnread(0); // idempotent with the SSE 'all' echo
@@ -158,7 +158,7 @@ export function NotificationBell() {
     <div ref={containerRef} className="relative">
       <button
         onClick={() => setOpen((o) => !o)}
-        title="Notifications"
+        title="Notifikasi"
         className="relative flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 text-gray-500 hover:bg-gray-50"
       >
         <Bell className="h-4 w-4" />
@@ -172,13 +172,13 @@ export function NotificationBell() {
       {open ? (
         <div className="absolute right-0 z-50 mt-2 w-[380px] rounded-2xl border border-gray-200 bg-white shadow-xl">
           <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
-            <p className="font-semibold text-gray-900">Notifications</p>
+            <p className="font-semibold text-gray-900">Notifikasi</p>
             <span className="flex items-center gap-3">
               {connection !== 'live' ? (
                 <span className="flex items-center gap-1 text-xs text-amber-600"><WifiOff className="h-3 w-3" /> {connection === 'offline' ? 'reconnecting…' : 'connecting…'}</span>
               ) : null}
-              <button onClick={markAll} title="Mark all read" className="inline-flex items-center gap-1 text-xs font-medium text-[#465fff] hover:underline">
-                <CheckCheck className="h-3.5 w-3.5" /> Mark all read
+              <button onClick={markAll} title="Tandai semua dibaca" className="inline-flex items-center gap-1 text-xs font-medium text-[#465fff] hover:underline">
+                <CheckCheck className="h-3.5 w-3.5" /> Tandai semua dibaca
               </button>
             </span>
           </div>
@@ -195,9 +195,9 @@ export function NotificationBell() {
             {list.isLoading ? (
               <div className="space-y-2 p-4">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-12 w-full animate-pulse rounded-lg bg-gray-100" />)}</div>
             ) : list.isError ? (
-              <p className="p-6 text-center text-sm text-red-600">Unable to load notifications.</p>
+              <p className="p-6 text-center text-sm text-red-600">Gagal memuat notifikasi.</p>
             ) : groups.length === 0 ? (
-              <p className="p-8 text-center text-sm text-gray-500">You&apos;re all caught up.</p>
+              <p className="p-8 text-center text-sm text-gray-500">Tidak ada notifikasi baru.</p>
             ) : (
               groups.map((g) => (
                 <div key={g.label}>
@@ -220,7 +220,7 @@ export function NotificationBell() {
 
           <div className="border-t border-gray-100 p-2 text-center">
             <button onClick={() => { setOpen(false); router.push('/notifications'); }} className="text-sm font-medium text-[#465fff] hover:underline">
-              View all notifications
+              Lihat semua notifikasi
             </button>
           </div>
         </div>

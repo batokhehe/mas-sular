@@ -48,14 +48,14 @@ export function RegionChainSelect({ value, onChange }: Props) {
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <label className="space-y-2 text-sm text-gray-700">
-        <span>Province *</span>
+        <span>Provinsi *</span>
         <select
           value={value.provinceId}
           onChange={(e) => onChange({ provinceId: e.target.value, cityId: '', districtId: '', villageId: '' })}
           className={selectClass}
           required
         >
-          <option value="">{provinces.isLoading ? 'Loading…' : 'Select province'}</option>
+          <option value="">{provinces.isLoading ? 'Memuat…' : 'Pilih provinsi'}</option>
           {(provinces.data ?? []).map((p) => (
             <option key={p.id} value={p.id}>
               {p.name}
@@ -65,7 +65,7 @@ export function RegionChainSelect({ value, onChange }: Props) {
       </label>
 
       <label className="space-y-2 text-sm text-gray-700">
-        <span>City / Regency *</span>
+        <span>Kota / Kabupaten *</span>
         <select
           value={value.cityId}
           onChange={(e) => onChange({ ...value, cityId: e.target.value, districtId: '', villageId: '' })}
@@ -73,7 +73,7 @@ export function RegionChainSelect({ value, onChange }: Props) {
           disabled={!value.provinceId}
           required
         >
-          <option value="">{cities.isFetching ? 'Loading…' : 'Select city/regency'}</option>
+          <option value="">{cities.isFetching ? 'Memuat…' : 'Pilih kota/kabupaten'}</option>
           {(cities.data ?? []).map((c) => (
             <option key={c.id} value={c.id}>
               {c.name}
@@ -90,7 +90,7 @@ export function RegionChainSelect({ value, onChange }: Props) {
           className={selectClass}
           disabled={!value.cityId}
         >
-          <option value="">{districts.isFetching ? 'Loading…' : 'All districts'}</option>
+          <option value="">{districts.isFetching ? 'Memuat…' : 'Semua kecamatan'}</option>
           {(districts.data ?? []).map((d) => (
             <option key={d.id} value={d.id}>
               {d.name}
@@ -107,7 +107,7 @@ export function RegionChainSelect({ value, onChange }: Props) {
           className={selectClass}
           disabled={!value.districtId}
         >
-          <option value="">{villages.isFetching ? 'Loading…' : 'All villages'}</option>
+          <option value="">{villages.isFetching ? 'Memuat…' : 'Semua kelurahan'}</option>
           {(villages.data ?? []).map((v) => (
             <option key={v.id} value={v.id}>
               {v.name}

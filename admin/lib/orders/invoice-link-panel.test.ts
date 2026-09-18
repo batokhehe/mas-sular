@@ -22,7 +22,7 @@ test('17. Order Detail shows the invoice panel instead of printing the Admin pag
   assert.match(PAGE, /<InvoiceLinkPanel orderId=\{order\.id\} recipientPhone=\{order\.address\?\.phone \?\? order\.user\?\.phone \?\? null\} \/>/);
   // 21. the rest of the Quick Actions are untouched. (P3 replaced the whole-page
   // "Print Packing Slip" action with the Packing Slip document - see packing-slip-view.test.ts.)
-  for (const kept of ['Verify Payment', 'Reject Payment', 'Retry Shipment', 'Cancel Order', 'Download Receipt', 'Open Tracking']) {
+  for (const kept of ['Verifikasi Pembayaran', 'Tolak Pembayaran', 'Coba Ulang Pengiriman', 'Batalkan Pesanan', 'Unduh Bukti Pembayaran', 'Buka Pelacakan']) {
     assert.ok(PAGE.includes(kept), `kept: ${kept}`);
   }
 });
@@ -40,13 +40,13 @@ test('18. generate / copy / open / print all use the link the backend just retur
   assert.match(PANEL, /window\.open\(print \? `\$\{link\.invoiceUrl\}\?print=1` : link\.invoiceUrl, '_blank', 'noopener,noreferrer'\)/);
   assert.equal(/window\.print\(/.test(PANEL), false);
   // A new link replaces an active one only after an explicit confirmation.
-  assert.match(PANEL, /confirm: active \|\| link \? \(\) => confirmApprove\(\{ title: 'Create a new invoice link\?', text: 'The current invoice link will stop working\.' \}\) : undefined/);
+  assert.match(PANEL, /confirm: active \|\| link \? \(\) => confirmApprove\(\{ title: 'Buat tautan invoice baru\?', text: 'Tautan invoice saat ini akan berhenti berfungsi\.' \}\) : undefined/);
 });
 
 test('19/20. WhatsApp: confirmed, sent through the backend, success means "queued", failures are shown', () => {
   assert.match(PANEL, /const res = await sendInvoiceLinkWhatsApp\(orderId\)/);
-  assert.match(PANEL, /WhatsApp message queued \(\$\{res\.notification\.status\}\)\. Delivery status appears in Notification History\./);
-  assert.match(PANEL, /runWithFeedback\(\{\s*confirm: \(\) =>\s*confirmApprove\(\{\s*title: 'Send invoice via WhatsApp\?'/);
+  assert.match(PANEL, /Pesan WhatsApp diantrekan \(\$\{res\.notification\.status\}\)\. Status pengiriman tampil di Riwayat Notifikasi\./);
+  assert.match(PANEL, /runWithFeedback\(\{\s*confirm: \(\) =>\s*confirmApprove\(\{\s*title: 'Kirim invoice via WhatsApp\?'/);
   // runWithFeedback shows the backend error (e.g. "WHATSAPP manual sends are not configured") on failure.
   assert.match(read('lib/admin-alert.ts'), /void showError\(caught\)/);
   // Notification History refreshes so the queued row appears.

@@ -33,7 +33,7 @@ export function feeRuleLabel(rule: ServiceFeeRuleSnapshot | null | undefined): s
     rule.type === 'FIXED' ? rupiah(rule.fixedAmount)
       : rule.type === 'PERCENTAGE' ? percent(rule.rateBps)
         : rule.type === 'PERCENTAGE_PLUS_FIXED' ? `${percent(rule.rateBps)} + ${rupiah(rule.fixedAmount)}`
-          : 'No fee';
+          : 'Tanpa biaya';
   return `${amount} (${rule.vatIncluded ? 'incl. VAT' : 'excl. VAT'})`;
 }
 
@@ -45,7 +45,7 @@ export function feeRuleLabel(rule: ServiceFeeRuleSnapshot | null | undefined): s
 export function feeModeLabel(enabled: boolean | null | undefined, rule: ServiceFeeRuleSnapshot | null | undefined): string {
   if (enabled == null) return '—'; // recorded before the fee breakdown existed
   const variable = rule?.setting?.variable ?? 'PAYMENT_SERVICE_FEE_ENABLED';
-  if (!enabled) return `Merchant absorbs (${variable}=false)`;
-  if (rule?.passThrough === 'PROHIBITED') return 'Merchant absorbs (pass-through prohibited for this channel)';
-  return `Customer pays (${variable}=true)`;
+  if (!enabled) return `Ditanggung merchant (${variable}=false)`;
+  if (rule?.passThrough === 'PROHIBITED') return 'Ditanggung merchant (tidak boleh dibebankan ke pelanggan untuk kanal ini)';
+  return `Dibayar pelanggan (${variable}=true)`;
 }

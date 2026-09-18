@@ -9,10 +9,10 @@ const n = (id: string, iso: string, over: Record<string, unknown> = {}) => ({
 });
 
 test('relative time: just now / minutes / hours / days / date fallback', () => {
-  assert.equal(relativeTime('2026-07-09T11:59:30Z', NOW), 'just now');
-  assert.equal(relativeTime('2026-07-09T11:55:00Z', NOW), '5m ago');
-  assert.equal(relativeTime('2026-07-09T09:00:00Z', NOW), '3h ago');
-  assert.equal(relativeTime('2026-07-07T12:00:00Z', NOW), '2d ago');
+  assert.equal(relativeTime('2026-07-09T11:59:30Z', NOW), 'baru saja');
+  assert.equal(relativeTime('2026-07-09T11:55:00Z', NOW), '5 mnt lalu');
+  assert.equal(relativeTime('2026-07-09T09:00:00Z', NOW), '3 jam lalu');
+  assert.equal(relativeTime('2026-07-07T12:00:00Z', NOW), '2 hari lalu');
   assert.match(relativeTime('2026-06-01T00:00:00Z', NOW), /2026|06|6/);
 });
 
@@ -21,10 +21,10 @@ test('drawer grouping: Today / Yesterday / Older, empty groups dropped', () => {
     [n('a', '2026-07-09T10:00:00Z'), n('b', '2026-07-08T10:00:00Z'), n('c', '2026-07-01T10:00:00Z')] as never[],
     NOW,
   );
-  assert.deepEqual(groups.map((g) => g.label), ['Today', 'Yesterday', 'Older']);
+  assert.deepEqual(groups.map((g) => g.label), ['Hari ini', 'Kemarin', 'Lebih lama']);
   assert.equal(groups[0].items[0].id, 'a');
   const onlyToday = groupByDay([n('a', '2026-07-09T10:00:00Z')] as never[], NOW);
-  assert.deepEqual(onlyToday.map((g) => g.label), ['Today']);
+  assert.deepEqual(onlyToday.map((g) => g.label), ['Hari ini']);
 });
 
 test('counter reducer: created increments, read decrements, read-all zeroes (multi-tab sync)', () => {
@@ -42,6 +42,6 @@ test('bell badge: hidden at zero, capped at 99+', () => {
 });
 
 test('filters cover the spec categories; priorities all have dots', () => {
-  assert.deepEqual(BELL_FILTERS.map((f) => f.label), ['All', 'Unread', 'Orders', 'Payments', 'Inventory', 'System', 'Security', 'Audit']);
+  assert.deepEqual(BELL_FILTERS.map((f) => f.label), ['Semua', 'Belum dibaca', 'Pesanan', 'Pembayaran', 'Stok', 'Sistem', 'Keamanan', 'Audit']);
   for (const p of ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const) assert.ok(PRIORITY_DOT[p]);
 });

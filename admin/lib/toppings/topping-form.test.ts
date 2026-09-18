@@ -46,8 +46,8 @@ test('invalid input is refused with a message per field, matching the API rules'
 });
 
 test('status label', () => {
-  assert.deepEqual(toppingStatusLabel({ isActive: true }), { label: 'Active', tone: 'active' });
-  assert.deepEqual(toppingStatusLabel({ isActive: false }), { label: 'Inactive', tone: 'inactive' });
+  assert.deepEqual(toppingStatusLabel({ isActive: true }), { label: 'Aktif', tone: 'active' });
+  assert.deepEqual(toppingStatusLabel({ isActive: false }), { label: 'Nonaktif', tone: 'inactive' });
 });
 
 test('permissions reuse Product.* - the same names the API decorators require', () => {
@@ -68,7 +68,7 @@ test('permissions reuse Product.* - the same names the API decorators require', 
 });
 
 test('the Toppings menu item is registered under the read permission, with its icon', () => {
-  assert.match(read('lib/navigation.ts'), /\{ href: '\/toppings', label: 'Toppings', icon: 'toppings', permissions: ROUTE_PERMISSIONS\.toppings \}/);
+  assert.match(read('lib/navigation.ts'), /\{ href: '\/toppings', label: 'Topping', icon: 'toppings', permissions: ROUTE_PERMISSIONS\.toppings \}/);
   assert.match(read('components/layout/sidebar.tsx'), /toppings: Soup,/);
 });
 
@@ -77,7 +77,7 @@ test('pages are guarded: list = read, new = create, edit = update; mutations onl
   assert.match(list, /<AdminShell requiredPermissions=\{ROUTE_PERMISSIONS\.toppings\}>/);
   assert.match(list, /<PermissionGate permissions=\{ROUTE_PERMISSIONS\.toppingCreate\}> <Link href="\/toppings\/new">/);
   // Edit + activate/deactivate sit behind the update permission; others see "View only".
-  assert.match(list, /<PermissionGate permissions=\{ROUTE_PERMISSIONS\.toppingUpdate\} fallback=\{<span className="text-xs text-gray-400">View only<\/span>\} >/);
+  assert.match(list, /<PermissionGate permissions=\{ROUTE_PERMISSIONS\.toppingUpdate\} fallback=\{<span className="text-xs text-gray-400">Hanya lihat<\/span>\} >/);
   assert.match(list, /updateAdminTopping\(id, \{ isActive \}\)/);
   // The list shows name, price and status for every topping the API returns.
   assert.match(list, /formatRupiahExact\(topping\.price\)/);

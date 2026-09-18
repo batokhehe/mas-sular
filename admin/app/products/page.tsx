@@ -6,6 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import { AdminShell } from '@/components/layout/admin-shell';
 import { PermissionGate } from '@/components/auth/permission-gate';
 import { Badge } from '@/components/ui/badge';
+import { productStatusLabel } from '@/lib/status-labels';
 import { Button } from '@/components/ui/button';
 import { Card, CardTitle } from '@/components/ui/card';
 import { ROUTE_PERMISSIONS } from '@/lib/access';
@@ -14,10 +15,10 @@ import { fetchAdminProducts, AdminProduct } from '@/lib/admin';
 const PAGE_SIZE = 10;
 const statusOptions = ['ALL', 'ACTIVE', 'DRAFT', 'ARCHIVED'] as const;
 const sortOptions = [
-  { label: 'Newest', value: 'createdAt' },
-  { label: 'Name A → Z', value: 'nameAsc' },
-  { label: 'Stock Low → High', value: 'stockAsc' },
-  { label: 'Stock High → Low', value: 'stockDesc' },
+  { label: 'Terbaru', value: 'createdAt' },
+  { label: 'Nama A → Z', value: 'nameAsc' },
+  { label: 'Stok Rendah → Tinggi', value: 'stockAsc' },
+  { label: 'Stok Tinggi → Rendah', value: 'stockDesc' },
 ];
 
 export default function ProductsPage() {
@@ -59,12 +60,12 @@ export default function ProductsPage() {
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.products}>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold text-gray-900">Product Management</h2>
-          <p className="mt-1 text-sm text-gray-500">Catalog, stock, pricing, and product visibility.</p>
+          <h2 className="text-xl font-semibold text-gray-900">Manajemen Produk</h2>
+          <p className="mt-1 text-sm text-gray-500">Katalog, stok, harga, dan visibilitas produk.</p>
         </div>
         <PermissionGate permissions={ROUTE_PERMISSIONS.productCreate}>
           <Link href="/products/new">
-            <Button type="button">Add Product</Button>
+            <Button type="button">Tambah Produk</Button>
           </Link>
         </PermissionGate>
       </div>
@@ -78,7 +79,7 @@ export default function ProductsPage() {
                 setSearch(event.target.value);
                 setPage(1);
               }}
-              placeholder="Search products by name or category"
+              placeholder="Cari produk berdasarkan nama atau kategori"
               className="h-11 rounded-xl border border-gray-200 bg-gray-50 px-4 text-sm outline-none focus:border-[#465fff] focus:bg-white"
             />
             <select
@@ -91,13 +92,13 @@ export default function ProductsPage() {
             >
               {statusOptions.map((option) => (
                 <option key={option} value={option}>
-                  {option}
+                  {option === 'ALL' ? 'Semua' : productStatusLabel(option)}
                 </option>
               ))}
             </select>
           </div>
           <div className="flex items-center gap-3">
-            <span className="text-sm text-gray-500">Sort by</span>
+            <span className="text-sm text-gray-500">Urutkan</span>
             <select
               value={sort}
               onChange={(event) => setSort(event.target.value)}
@@ -112,23 +113,23 @@ export default function ProductsPage() {
           </div>
         </div>
 
-        <CardTitle>Products</CardTitle>
+        <CardTitle>Produk</CardTitle>
         <div className="mt-4 overflow-x-auto">
           {isLoading ? (
-            <p className="p-6 text-sm text-gray-500">Loading products…</p>
+            <p className="p-6 text-sm text-gray-500">Memuat produk…</p>
           ) : isError ? (
-            <p className="p-6 text-sm text-red-600">Unable to load products. Please reauthenticate.</p>
+            <p className="p-6 text-sm text-red-600">Gagal memuat produk. Silakan masuk ulang.</p>
           ) : pageProducts.length === 0 ? (
-            <p className="p-6 text-sm text-gray-500">No products match your filters.</p>
+            <p className="p-6 text-sm text-gray-500">Tidak ada produk yang cocok dengan filter.</p>
           ) : (
             <table className="w-full min-w-[760px] text-left text-sm">
               <thead>
                 <tr className="border-b border-gray-100 text-xs uppercase text-gray-400">
-                  <th className="py-3 font-medium">Name</th>
-                  <th className="py-3 font-medium">Category</th>
-                  <th className="py-3 font-medium">Stock</th>
+                  <th className="py-3 font-medium">Nama</th>
+                  <th className="py-3 font-medium">Kategori</th>
+                  <th className="py-3 font-medium">Stok</th>
                   <th className="py-3 font-medium">Status</th>
-                  <th className="py-3 font-medium">Actions</th>
+                  <th className="py-3 font-medium">Aksi</th>
                 </tr>
               </thead>
               <tbody>
@@ -138,7 +139,7 @@ export default function ProductsPage() {
                       {product.name}
                       {product.isPromoSpecial ? (
                         <Badge tone="brand" className="ml-2">
-                          Promo Special
+                          Promo Spesial
                         </Badge>
                       ) : null}
                       {product.isTrialPack ? (
@@ -150,11 +151,11 @@ export default function ProductsPage() {
                     <td className="py-4 text-gray-500">{product.categoryId}</td>
                     <td className="py-4 text-gray-500">{product.stock}</td>
                     <td className="py-4">
-                      <Badge tone={product.status === 'ACTIVE' ? 'success' : 'neutral'}>{product.status}</Badge>
+                      <Badge tone={product.status === 'ACTIVE' ? 'success' : 'neutral'}>{productStatusLabel(product.status)}</Badge>
                     </td>
                     <td className="py-4">
                       <Link href={`/products/${product.id}`} className="text-sm font-medium text-[#465fff] hover:text-indigo-700">
-                        View
+                        Lihat
                       </Link>
                     </td>
                   </tr>
@@ -167,14 +168,14 @@ export default function ProductsPage() {
         {!isLoading && !isError && products.length > PAGE_SIZE && (
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-gray-600">
             <p>
-              Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, products.length)} of {products.length} products
+              Menampilkan {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, products.length)} dari {products.length} produk
             </p>
             <div className="flex items-center gap-2">
               <Button type="button" className="bg-white text-gray-700 hover:bg-gray-50" onClick={() => setPage(Math.max(1, page - 1))}>
-                Previous
+                Sebelumnya
               </Button>
               <Button type="button" className="bg-white text-gray-700 hover:bg-gray-50" onClick={() => setPage(Math.min(pageCount, page + 1))}>
-                Next
+                Berikutnya
               </Button>
             </div>
           </div>

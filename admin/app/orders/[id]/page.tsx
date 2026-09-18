@@ -29,6 +29,7 @@ import { packingSlipPath } from '@/lib/orders/packing-slip-view';
 import {
   ADMIN_LOADING_MESSAGES, ADMIN_SUCCESS_MESSAGES, confirmApprove, confirmReject, runWithFeedback,
 } from '@/lib/admin-alert';
+import { orderStatusLabel, paymentMethodLabel, paymentStatusLabel, reservationStatusLabel, shipmentStatusLabel } from '@/lib/status-labels';
 
 const rp = formatRupiah;
 const dt = (iso?: string | null) => (iso ? new Date(iso).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }) : '—');
@@ -42,7 +43,7 @@ export default function OrderDetailPage() {
 
   const orderQ = useQuery({
     queryKey: ['admin-order', orderId],
-    queryFn: () => (orderId ? fetchAdminOrder(orderId) : Promise.reject(new Error('Missing order ID'))),
+    queryFn: () => (orderId ? fetchAdminOrder(orderId) : Promise.reject(new Error('ID pesanan tidak ada'))),
     enabled: Boolean(orderId),
     retry: false,
   });
@@ -87,7 +88,7 @@ export default function OrderDetailPage() {
   if (orderQ.isError || !orderQ.data) {
     return (
       <AdminShell requiredPermissions={ROUTE_PERMISSIONS.orders}>
-        <Card><p className="p-6 text-sm text-red-600">Unable to load order details. Please try again later.</p></Card>
+        <Card><p className="p-6 text-sm text-red-600">Gagal memuat detail pesanan. Silakan coba lagi nanti.</p></Card>
       </AdminShell>
     );
   }
@@ -108,45 +109,45 @@ export default function OrderDetailPage() {
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.orders}>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold text-gray-900">Order {order.orderNumber}</h2>
-          <p className="mt-1 text-sm text-gray-500">Placed {dt(order.createdAt)}</p>
+          <h2 className="text-xl font-semibold text-gray-900">Pesanan {order.orderNumber}</h2>
+          <p className="mt-1 text-sm text-gray-500">Dibuat {dt(order.createdAt)}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Badge tone={order.status === 'CANCELLED' ? 'danger' : order.status === 'DELIVERED' ? 'success' : 'brand'}>{order.status}</Badge>
-          <Badge tone={payment?.status === 'PAID' ? 'success' : payment?.status === 'FAILED' ? 'danger' : 'brand'}>Payment: {payment?.status ?? '—'}</Badge>
-          {order.shipment ? <Badge tone={order.shipment.status === 'FAILED' ? 'danger' : order.shipment.status === 'DELIVERED' ? 'success' : 'brand'}>Ship: {order.shipment.status}</Badge> : null}
+          <Badge tone={order.status === 'CANCELLED' ? 'danger' : order.status === 'DELIVERED' ? 'success' : 'brand'}>{orderStatusLabel(order.status)}</Badge>
+          <Badge tone={payment?.status === 'PAID' ? 'success' : payment?.status === 'FAILED' ? 'danger' : 'brand'}>Pembayaran: {paymentStatusLabel(payment?.status)}</Badge>
+          {order.shipment ? <Badge tone={order.shipment.status === 'FAILED' ? 'danger' : order.shipment.status === 'DELIVERED' ? 'success' : 'brand'}>Pengiriman: {shipmentStatusLabel(order.shipment.status)}</Badge> : null}
         </div>
       </div>
 
       {/* SECTION 9 — Quick Actions (only valid ones) */}
       <Card className="mb-5">
-        <CardTitle>Quick Actions</CardTitle>
+        <CardTitle>Aksi Cepat</CardTitle>
         <div className="mt-4 flex flex-wrap gap-2">
           {actions?.verifyPayment && payment ? (
             <PermissionGate permissions={ROUTE_PERMISSIONS.paymentVerify}>
-              <Button onClick={() => runWithFeedback({ confirm: () => confirmApprove({ title: 'Verify Payment?', text: 'Marks the payment PAID and moves the order to PROCESSING.' }), loading: ADMIN_LOADING_MESSAGES.verify, success: ADMIN_SUCCESS_MESSAGES.paymentVerified, action: () => verifyM.mutateAsync(payment.id) })} disabled={verifyM.isPending}>Verify Payment</Button>
+              <Button onClick={() => runWithFeedback({ confirm: () => confirmApprove({ title: 'Verifikasi pembayaran?', text: 'Menandai pembayaran Lunas dan memindahkan pesanan ke status Diproses.' }), loading: ADMIN_LOADING_MESSAGES.verify, success: ADMIN_SUCCESS_MESSAGES.paymentVerified, action: () => verifyM.mutateAsync(payment.id) })} disabled={verifyM.isPending}>Verifikasi Pembayaran</Button>
             </PermissionGate>
           ) : null}
           {actions?.rejectPayment && payment ? (
             <PermissionGate permissions={ROUTE_PERMISSIONS.paymentReject}>
-              <ActionButton onClick={() => runWithFeedback({ confirm: () => confirmReject({ title: 'Reject Payment?', text: 'Rejects the payment and restores inventory.' }), loading: ADMIN_LOADING_MESSAGES.reject, success: ADMIN_SUCCESS_MESSAGES.paymentRejected, action: () => rejectM.mutateAsync(payment.id) })} disabled={rejectM.isPending}>Reject Payment</ActionButton>
+              <ActionButton onClick={() => runWithFeedback({ confirm: () => confirmReject({ title: 'Tolak pembayaran?', text: 'Menolak pembayaran dan mengembalikan stok.' }), loading: ADMIN_LOADING_MESSAGES.reject, success: ADMIN_SUCCESS_MESSAGES.paymentRejected, action: () => rejectM.mutateAsync(payment.id) })} disabled={rejectM.isPending}>Tolak Pembayaran</ActionButton>
             </PermissionGate>
           ) : null}
           {actions?.retryShipment ? (
             <PermissionGate permissions={ROUTE_PERMISSIONS.shipmentCreate}>
-              <ActionButton icon={RefreshCw} onClick={() => runWithFeedback({ loading: 'Creating shipment...', success: 'Shipment retry completed', action: () => retryM.mutateAsync() })} disabled={retryM.isPending}>Retry Shipment</ActionButton>
+              <ActionButton icon={RefreshCw} onClick={() => runWithFeedback({ loading: 'Membuat pengiriman...', success: 'Percobaan ulang pengiriman selesai', action: () => retryM.mutateAsync() })} disabled={retryM.isPending}>Coba Ulang Pengiriman</ActionButton>
             </PermissionGate>
           ) : null}
           {actions?.cancelOrder ? (
             <PermissionGate permissions={ROUTE_PERMISSIONS.orderUpdate}>
-              <ActionButton icon={XCircle} onClick={() => runWithFeedback({ confirm: () => confirmReject({ title: 'Cancel Order?', text: 'Cancels the order and restores reserved inventory.' }), loading: ADMIN_LOADING_MESSAGES.statusUpdate, success: ADMIN_SUCCESS_MESSAGES.orderStatusUpdated, action: () => cancelM.mutateAsync() })} disabled={cancelM.isPending}>Cancel Order</ActionButton>
+              <ActionButton icon={XCircle} onClick={() => runWithFeedback({ confirm: () => confirmReject({ title: 'Batalkan pesanan?', text: 'Membatalkan pesanan dan mengembalikan stok yang direservasi.' }), loading: ADMIN_LOADING_MESSAGES.statusUpdate, success: ADMIN_SUCCESS_MESSAGES.orderStatusUpdated, action: () => cancelM.mutateAsync() })} disabled={cancelM.isPending}>Batalkan Pesanan</ActionButton>
           </PermissionGate>
           ) : null}
           {actions?.downloadReceipt && payment?.manualReceiptUrl ? (
-            <a href={payment.manualReceiptUrl} target="_blank" rel="noreferrer"><ActionButton icon={Download}>Download Receipt</ActionButton></a>
+            <a href={payment.manualReceiptUrl} target="_blank" rel="noreferrer"><ActionButton icon={Download}>Unduh Bukti Pembayaran</ActionButton></a>
           ) : null}
           {actions?.openTracking && order.shipment?.trackingUrl ? (
-            <a href={order.shipment.trackingUrl} target="_blank" rel="noreferrer"><ActionButton icon={ExternalLink}>Open Tracking</ActionButton></a>
+            <a href={order.shipment.trackingUrl} target="_blank" rel="noreferrer"><ActionButton icon={ExternalLink}>Buka Pelacakan</ActionButton></a>
           ) : null}
         </div>
       </Card>
@@ -157,32 +158,32 @@ export default function OrderDetailPage() {
       <div className="grid gap-5 xl:grid-cols-[1.35fr_0.65fr]">
         <div className="space-y-5">
           {/* SECTION 1 — Order Summary */}
-          <Section title="Order Summary" icon={ClipboardList}>
+          <Section title="Ringkasan Pesanan" icon={ClipboardList}>
             {/* P3: the printable packing slip, in its own tab (read-only). */}
             <div className="mb-4 flex justify-end">
               <ActionButton icon={Printer} onClick={() => window.open(packingSlipPath(order.id), '_blank', 'noopener,noreferrer')}>Packing Slip</ActionButton>
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Order Number" value={order.orderNumber} />
-              <Field label="Order Status" value={order.status} />
-              <Field label="Payment Status" value={payment?.status ?? '—'} />
-              <Field label="Shipment Status" value={order.shipment?.status ?? '—'} />
-              <Field label="Customer" value={order.user?.name ?? 'Guest'} />
-              <Field label="Created At" value={dt(order.createdAt)} />
-              <Field label="Business Total" value={rp(businessTotal)} />
-              <Field label="Transfer Amount" value={rp(transferAmount)} strong />
-              <Field label="Unique Code" value={uniqueCode != null ? String(uniqueCode) : '—'} />
-              <Field label="Payment Method" value={payment?.method ?? order.paymentMethod} />
+              <Field label="Nomor Pesanan" value={order.orderNumber} />
+              <Field label="Status Pesanan" value={orderStatusLabel(order.status)} />
+              <Field label="Status Pembayaran" value={paymentStatusLabel(payment?.status)} />
+              <Field label="Status Pengiriman" value={shipmentStatusLabel(order.shipment?.status)} />
+              <Field label="Pelanggan" value={order.user?.name ?? 'Tamu'} />
+              <Field label="Dibuat" value={dt(order.createdAt)} />
+              <Field label="Total Pesanan" value={rp(businessTotal)} />
+              <Field label="Nominal Transfer" value={rp(transferAmount)} strong />
+              <Field label="Kode Unik" value={uniqueCode != null ? String(uniqueCode) : '—'} />
+              <Field label="Metode Pembayaran" value={paymentMethodLabel(payment?.method ?? order.paymentMethod)} />
               <Field label="Voucher" value={order.voucherCode ?? '—'} />
-              <Field label="Discount" value={rp(order.voucherDiscountAmount ?? 0)} />
-              <Field label="Shipping" value={rp(order.shippingCost ?? order.deliveryFee ?? 0)} />
-              {isGateway ? <Field label="Biaya Layanan (customer)" value={rp(order.paymentServiceFee ?? 0)} /> : null}
+              <Field label="Diskon" value={rp(order.voucherDiscountAmount ?? 0)} />
+              <Field label="Ongkos Kirim" value={rp(order.shippingCost ?? order.deliveryFee ?? 0)} />
+              {isGateway ? <Field label="Biaya Layanan (pelanggan)" value={rp(order.paymentServiceFee ?? 0)} /> : null}
               <Field label="Outlet" value={order.reservations?.[0]?.outlet?.name ?? order.outletId ?? '—'} />
             </div>
           </Section>
 
           {/* SECTION 3 — Ordered Items */}
-          <Section title="Ordered Items" icon={ShoppingCart}>
+          <Section title="Item Pesanan" icon={ShoppingCart}>
             <div className="space-y-3">
               {order.items.map((item) => {
                 const reservation = order.reservations?.find((r) => r.product?.id === item.productId);
@@ -201,7 +202,7 @@ export default function OrderDetailPage() {
                       <p className="mt-1 text-sm text-gray-500">Qty {item.quantity} × {rp(item.unitPrice)}</p>
                       {pricing.toppings.length > 0 ? (
                         <div className="mt-1 max-w-xs text-xs text-gray-500">
-                          <ul aria-label="Toppings">
+                          <ul aria-label="Topping">
                             {pricing.toppings.map((t) => (
                               <li key={t.key} className="flex justify-between gap-4">
                                 <span>+ {t.name}</span>
@@ -210,13 +211,13 @@ export default function OrderDetailPage() {
                             ))}
                           </ul>
                           <p className="mt-0.5 flex justify-between gap-4 border-t border-gray-100 pt-0.5 font-medium text-gray-700">
-                            <span>Per item incl. toppings</span>
+                            <span>Per item termasuk topping</span>
                             <span>{rp(pricing.unitTotal)}</span>
                           </p>
                         </div>
                       ) : null}
                       {reservation ? (
-                        <p className="mt-1 text-xs text-indigo-600">Reserved {reservation.reservedQty} @ {reservation.outlet?.name ?? 'outlet'} ({reservation.status})</p>
+                        <p className="mt-1 text-xs text-indigo-600">Direservasi {reservation.reservedQty} @ {reservation.outlet?.name ?? 'outlet'} ({reservationStatusLabel(reservation.status)})</p>
                       ) : null}
                     </div>
                     <p className="text-sm font-semibold text-gray-900">{rp(pricing.lineTotal)}</p>
@@ -227,16 +228,16 @@ export default function OrderDetailPage() {
           </Section>
 
           {/* SECTION 4 — Payment */}
-          <Section title="Payment" icon={CreditCard}>
+          <Section title="Pembayaran" icon={CreditCard}>
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Payment Status" value={payment?.status ?? '—'} />
-              <Field label="Transfer Amount" value={rp(transferAmount)} strong />
-              <Field label="Business Total" value={rp(businessTotal)} />
-              <Field label="Unique Code" value={uniqueCode != null ? String(uniqueCode) : '—'} />
-              <Field label="Payment Account" value={ops?.paymentAccount ? `${ops.paymentAccount.bankName} · ${ops.paymentAccount.accountNumber}` : '—'} />
-              <Field label="Transfer Date" value={dt(payment?.transactions?.find((t) => t.status === 'WAITING_VERIFICATION')?.createdAt)} />
-              <Field label="Verified At" value={dt(payment?.verifiedAt)} />
-              <Field label="Verified By" value={payment?.verifiedByUserId ?? auditActor(ops, 'payment.verified') ?? '—'} />
+              <Field label="Status Pembayaran" value={paymentStatusLabel(payment?.status)} />
+              <Field label="Nominal Transfer" value={rp(transferAmount)} strong />
+              <Field label="Total Pesanan" value={rp(businessTotal)} />
+              <Field label="Kode Unik" value={uniqueCode != null ? String(uniqueCode) : '—'} />
+              <Field label="Rekening Pembayaran" value={ops?.paymentAccount ? `${ops.paymentAccount.bankName} · ${ops.paymentAccount.accountNumber}` : '—'} />
+              <Field label="Tanggal Transfer" value={dt(payment?.transactions?.find((t) => t.status === 'WAITING_VERIFICATION')?.createdAt)} />
+              <Field label="Diverifikasi pada" value={dt(payment?.verifiedAt)} />
+              <Field label="Diverifikasi oleh" value={payment?.verifiedByUserId ?? auditActor(ops, 'payment.verified') ?? '—'} />
             </div>
 
             {/* Phase 4 — gateway attempt (READ-ONLY: no retry, no resend, no webhook). */}
@@ -244,16 +245,16 @@ export default function OrderDetailPage() {
               <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-4">
                 <p className="mb-3 text-xs uppercase text-gray-400">Payment Gateway</p>
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <Field label="Payment Method" value={order.paymentMethod ?? "—"} />
-                  <Field label="Payment Channel" value={gateway.channelCode} />
-                  <Field label="Gateway Provider" value={gateway.provider} />
-                  <Field label="Provider Status" value={gateway.status} />
-                  <Field label="Gateway Transaction ID" value={gateway.providerTransactionId ?? gateway.providerReference ?? '—'} />
-                  <Field label="Expires At" value={dt(gateway.expiryAt)} />
+                  <Field label="Metode Pembayaran" value={paymentMethodLabel(order.paymentMethod)} />
+                  <Field label="Kanal Pembayaran" value={gateway.channelCode} />
+                  <Field label="Penyedia Gateway" value={gateway.provider} />
+                  <Field label="Status Penyedia" value={gateway.status} />
+                  <Field label="ID Transaksi Gateway" value={gateway.providerTransactionId ?? gateway.providerReference ?? '—'} />
+                  <Field label="Kedaluwarsa pada" value={dt(gateway.expiryAt)} />
                   {gateway.vaNumber ? <Field label="Virtual Account" value={gateway.vaNumber} /> : null}
-                  {gateway.failureReason ? <Field label="Failure Reason" value={gateway.failureReason} /> : null}
-                  {gateway.grossAmount != null ? <Field label="Attempt Amount (charged)" value={rp(gateway.grossAmount)} strong /> : null}
-                  {gateway.baseAmount != null ? <Field label="Attempt Base (excl. fee)" value={rp(gateway.baseAmount)} /> : null}
+                  {gateway.failureReason ? <Field label="Alasan Gagal" value={gateway.failureReason} /> : null}
+                  {gateway.grossAmount != null ? <Field label="Nominal Percobaan (ditagih)" value={rp(gateway.grossAmount)} strong /> : null}
+                  {gateway.baseAmount != null ? <Field label="Nominal Dasar (tanpa biaya)" value={rp(gateway.baseAmount)} /> : null}
                 </div>
               </div>
             ) : null}
@@ -261,30 +262,30 @@ export default function OrderDetailPage() {
             {/* Payment service fee - the recorded snapshot, in both fee modes (read-only). */}
             {isGateway ? (
               <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-4">
-                <p className="mb-3 text-xs uppercase text-gray-400">Payment Service Fee</p>
+                <p className="mb-3 text-xs uppercase text-gray-400">Biaya Layanan Pembayaran</p>
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <Field label="Fee Mode" value={feeModeLabel(order.paymentServiceFeeEnabled, order.paymentServiceFeeRule)} />
-                  <Field label="Fee Channel" value={order.paymentServiceFeeChannel ?? '—'} />
-                  <Field label="Applicable Fee (calculated)" value={rp(order.paymentServiceFeeCalculated ?? 0)} />
-                  <Field label="Biaya Layanan (customer paid)" value={rp(order.paymentServiceFee ?? 0)} strong />
-                  <Field label="Merchant-Absorbed Fee" value={rp(order.paymentServiceFeeAbsorbed ?? 0)} />
-                  <Field label="Fee Rule" value={feeRuleLabel(order.paymentServiceFeeRule)} />
+                  <Field label="Mode Biaya" value={feeModeLabel(order.paymentServiceFeeEnabled, order.paymentServiceFeeRule)} />
+                  <Field label="Kanal Biaya" value={order.paymentServiceFeeChannel ?? '—'} />
+                  <Field label="Biaya Berlaku (dihitung)" value={rp(order.paymentServiceFeeCalculated ?? 0)} />
+                  <Field label="Biaya Layanan (dibayar pelanggan)" value={rp(order.paymentServiceFee ?? 0)} strong />
+                  <Field label="Biaya Ditanggung Merchant" value={rp(order.paymentServiceFeeAbsorbed ?? 0)} />
+                  <Field label="Aturan Biaya" value={feeRuleLabel(order.paymentServiceFeeRule)} />
                   {order.paymentServiceFeeRule ? <Field label="Pass-through" value={order.paymentServiceFeeRule.passThrough} /> : null}
-                  {order.paymentServiceFeeRule ? <Field label="Rule Version" value={order.paymentServiceFeeRule.version} /> : null}
+                  {order.paymentServiceFeeRule ? <Field label="Versi Aturan" value={order.paymentServiceFeeRule.version} /> : null}
                 </div>
               </div>
             ) : null}
             {payment?.manualReceiptUrl ? (
               <div className="mt-4">
-                <p className="mb-2 text-xs uppercase text-gray-400">Receipt</p>
+                <p className="mb-2 text-xs uppercase text-gray-400">Bukti pembayaran</p>
                 <div className="flex items-center gap-3">
                   <a href={payment.manualReceiptUrl} target="_blank" rel="noreferrer" className="block h-24 w-24 overflow-hidden rounded-lg border border-gray-200">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={payment.manualReceiptUrl} alt="Receipt" className="h-full w-full object-cover" />
+                    <img src={payment.manualReceiptUrl} alt="Bukti pembayaran" className="h-full w-full object-cover" />
                   </a>
                   <div className="flex flex-col gap-2">
-                    <a href={payment.manualReceiptUrl} target="_blank" rel="noreferrer"><ActionButton icon={ExternalLink}>Preview</ActionButton></a>
-                    <a href={payment.manualReceiptUrl} download><ActionButton icon={Download}>Download</ActionButton></a>
+                    <a href={payment.manualReceiptUrl} target="_blank" rel="noreferrer"><ActionButton icon={ExternalLink}>Pratinjau</ActionButton></a>
+                    <a href={payment.manualReceiptUrl} download><ActionButton icon={Download}>Unduh</ActionButton></a>
                   </div>
                 </div>
               </div>
@@ -293,12 +294,12 @@ export default function OrderDetailPage() {
 
           {/* SECTION 5 — Shipment */}
           {order.shipment ? (
-            <Section title="Shipment" icon={Truck}>
+            <Section title="Pengiriman" icon={Truck}>
               <div className="grid gap-3 sm:grid-cols-2">
-                <Field label="Courier" value={order.shipment.provider} />
-                <Field label="Service" value={order.shippingServiceName ?? order.shipment.service} />
-                <Field label="Tracking Number" value={order.shipment.trackingNumber ?? 'Not assigned'} />
-                <Field label="Shipment Status" value={order.shipment.status} />
+                <Field label="Kurir" value={order.shipment.provider} />
+                <Field label="Layanan" value={order.shippingServiceName ?? order.shipment.service} />
+                <Field label="Nomor Resi" value={order.shipment.trackingNumber ?? 'Belum ditetapkan'} />
+                <Field label="Status Pengiriman" value={shipmentStatusLabel(order.shipment.status)} />
               </div>
               <div className="mt-3">
                 <ShipmentTimeline currentStatus={order.shipment.status} history={order.shipment.history} />
@@ -307,11 +308,11 @@ export default function OrderDetailPage() {
           ) : null}
 
           {/* SECTION 6 — Unified Timeline */}
-          <Section title="Timeline" icon={Circle}>
+          <Section title="Riwayat" icon={Circle}>
             {opsQ.isLoading ? (
-              <p className="text-sm text-gray-500">Loading timeline…</p>
+              <p className="text-sm text-gray-500">Memuat riwayat…</p>
             ) : !ops || ops.timeline.length === 0 ? (
-              <p className="text-sm text-gray-500">No timeline events yet.</p>
+              <p className="text-sm text-gray-500">Belum ada riwayat.</p>
             ) : (
               <ol className="relative space-y-4 border-l border-gray-200 pl-6">
                 {ops.timeline.map((e, i) => (
@@ -331,30 +332,30 @@ export default function OrderDetailPage() {
 
         <div className="space-y-5">
           {/* SECTION 2 — Customer Information */}
-          <Section title="Customer" icon={Phone}>
+          <Section title="Pelanggan" icon={Phone}>
             <div className="space-y-2 text-sm">
-              <p className="font-medium text-gray-900">{order.user?.name ?? 'Guest'}</p>
+              <p className="font-medium text-gray-900">{order.user?.name ?? 'Tamu'}</p>
               <p className="flex items-center gap-2 text-gray-500"><Phone className="h-3.5 w-3.5" /> {order.address?.phone ?? order.user?.phone ?? '—'}</p>
               <p className="flex items-center gap-2 text-gray-500"><Mail className="h-3.5 w-3.5" /> {order.user?.email ?? '—'}</p>
               {order.address ? (
                 <div className="rounded-xl bg-gray-50 p-3">
                   <p className="font-medium text-gray-800">{order.address.recipientName}</p>
                   <p className="text-gray-500">{formatAdminAddressLine(order.address)}</p>
-                  <p className="text-gray-500">Postal: {order.address.postalCode ?? '—'}</p>
+                  <p className="text-gray-500">Kode pos: {order.address.postalCode ?? '—'}</p>
                   {mapsQuery ? (
                     <a href={`https://www.google.com/maps/search/?api=1&query=${mapsQuery}`} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-[#465fff]">
-                      <MapPin className="h-3.5 w-3.5" /> Open in Google Maps
+                      <MapPin className="h-3.5 w-3.5" /> Buka di Google Maps
                     </a>
                   ) : null}
                 </div>
               ) : null}
               <div className="mt-2 grid grid-cols-2 gap-2">
                 <div className="rounded-xl border border-gray-100 p-3">
-                  <p className="text-xs text-gray-400">Total Orders</p>
+                  <p className="text-xs text-gray-400">Total Pesanan</p>
                   <p className="text-lg font-semibold text-gray-900">{ops?.customerHistory.totalOrders ?? '—'}</p>
                 </div>
                 <div className="rounded-xl border border-gray-100 p-3">
-                  <p className="text-xs text-gray-400">Lifetime Revenue</p>
+                  <p className="text-xs text-gray-400">Total Pendapatan</p>
                   <p className="text-lg font-semibold text-gray-900">{ops ? rp(ops.customerHistory.lifetimeRevenue) : '—'}</p>
                 </div>
               </div>
@@ -362,11 +363,11 @@ export default function OrderDetailPage() {
           </Section>
 
           {/* SECTION 10 — Internal Notes */}
-          <Section title="Internal Notes" icon={MessageSquare}>
-            <PermissionGate permissions={ROUTE_PERMISSIONS.orderUpdate} fallback={<p className="text-sm text-gray-500">View only.</p>}>
+          <Section title="Catatan Internal" icon={MessageSquare}>
+            <PermissionGate permissions={ROUTE_PERMISSIONS.orderUpdate} fallback={<p className="text-sm text-gray-500">Hanya lihat.</p>}>
               <div className="mb-3">
-                <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={2} placeholder="Add an internal note (visible to admins only)…" className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none focus:border-[#465fff]" />
-                <Button className="mt-2" disabled={!draft.trim() || addNoteM.isPending} onClick={() => addNoteM.mutate(draft.trim())}>Add Note</Button>
+                <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={2} placeholder="Tambahkan catatan internal (hanya terlihat oleh admin)…" className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none focus:border-[#465fff]" />
+                <Button className="mt-2" disabled={!draft.trim() || addNoteM.isPending} onClick={() => addNoteM.mutate(draft.trim())}>Tambah Catatan</Button>
               </div>
             </PermissionGate>
             <div className="space-y-2">
@@ -376,8 +377,8 @@ export default function OrderDetailPage() {
                     <div>
                       <textarea value={editing.body} onChange={(e) => setEditing({ id: n.id, body: e.target.value })} rows={2} className="w-full rounded-lg border border-gray-200 px-2 py-1.5 text-sm" />
                       <div className="mt-2 flex gap-2">
-                        <Button className="h-8" disabled={editNoteM.isPending} onClick={() => editNoteM.mutate({ id: n.id, body: editing.body.trim() })}>Save</Button>
-                        <button className="text-xs text-gray-500" onClick={() => setEditing(null)}>Cancel</button>
+                        <Button className="h-8" disabled={editNoteM.isPending} onClick={() => editNoteM.mutate({ id: n.id, body: editing.body.trim() })}>Simpan</Button>
+                        <button className="text-xs text-gray-500" onClick={() => setEditing(null)}>Batal</button>
                       </div>
                     </div>
                   ) : (
@@ -388,27 +389,27 @@ export default function OrderDetailPage() {
                         {n.adminId === adminId ? (
                           <span className="flex gap-2">
                             <button className="text-gray-400 hover:text-gray-700" onClick={() => setEditing({ id: n.id, body: n.body })}><Pencil className="h-3.5 w-3.5" /></button>
-                            <button className="text-gray-400 hover:text-red-600" onClick={() => runWithFeedback({ confirm: () => confirmReject({ title: 'Delete note?', text: 'This cannot be undone.' }), loading: 'Deleting…', success: 'Note deleted', action: () => delNoteM.mutateAsync(n.id) })}><Trash2 className="h-3.5 w-3.5" /></button>
+                            <button className="text-gray-400 hover:text-red-600" onClick={() => runWithFeedback({ confirm: () => confirmReject({ title: 'Hapus catatan?', text: 'Tindakan ini tidak dapat dibatalkan.' }), loading: 'Menghapus…', success: 'Catatan dihapus', action: () => delNoteM.mutateAsync(n.id) })}><Trash2 className="h-3.5 w-3.5" /></button>
                           </span>
                         ) : null}
                       </div>
                     </>
                   )}
                 </div>
-              )) : <p className="text-sm text-gray-500">No internal notes yet.</p>}
+              )) : <p className="text-sm text-gray-500">Belum ada catatan internal.</p>}
             </div>
           </Section>
 
           {/* SECTION 7 — Activity Log */}
-          <Section title="Activity Log" icon={ClipboardList} defaultOpen={false}>
-            {opsQ.isLoading ? <p className="text-sm text-gray-500">Loading…</p> : !ops || ops.auditLogs.length === 0 ? (
-              <p className="text-sm text-gray-500">No audit records.</p>
+          <Section title="Log Aktivitas" icon={ClipboardList} defaultOpen={false}>
+            {opsQ.isLoading ? <p className="text-sm text-gray-500">Memuat…</p> : !ops || ops.auditLogs.length === 0 ? (
+              <p className="text-sm text-gray-500">Tidak ada catatan audit.</p>
             ) : (
               <ul className="space-y-2 text-sm">
                 {ops.auditLogs.map((a) => (
                   <li key={a.id} className="rounded-lg bg-gray-50 p-2.5">
                     <p className="font-medium text-gray-800">{a.action}</p>
-                    <p className="text-xs text-gray-400">{a.entity} · {a.ipAddress ?? 'system'} · {dt(a.createdAt)}</p>
+                    <p className="text-xs text-gray-400">{a.entity} · {a.ipAddress ?? 'sistem'} · {dt(a.createdAt)}</p>
                   </li>
                 ))}
               </ul>
@@ -416,16 +417,16 @@ export default function OrderDetailPage() {
           </Section>
 
           {/* SECTION 8 — Notification History */}
-          <Section title="Notification History" icon={Mail} defaultOpen={false}>
-            {opsQ.isLoading ? <p className="text-sm text-gray-500">Loading…</p> : !ops || ops.notifications.length === 0 ? (
-              <p className="text-sm text-gray-500">No notifications sent.</p>
+          <Section title="Riwayat Notifikasi" icon={Mail} defaultOpen={false}>
+            {opsQ.isLoading ? <p className="text-sm text-gray-500">Memuat…</p> : !ops || ops.notifications.length === 0 ? (
+              <p className="text-sm text-gray-500">Belum ada notifikasi terkirim.</p>
             ) : (
               <ul className="space-y-2 text-sm">
                 {ops.notifications.map((n) => (
                   <li key={n.id} className="flex items-center justify-between rounded-lg bg-gray-50 p-2.5">
                     <div>
                       <p className="font-medium text-gray-800">{n.channel} · {n.template}</p>
-                      <p className="text-xs text-gray-400">{n.sentAt ? `Sent ${dt(n.sentAt)}` : `Created ${dt(n.createdAt)}`} · retries {n.attempts}</p>
+                      <p className="text-xs text-gray-400">{n.sentAt ? `Terkirim ${dt(n.sentAt)}` : `Dibuat ${dt(n.createdAt)}`} · percobaan ulang {n.attempts}</p>
                     </div>
                     <Badge tone={n.status === 'SENT' ? 'success' : n.status === 'FAILED' ? 'danger' : 'brand'}>{n.status}</Badge>
                   </li>

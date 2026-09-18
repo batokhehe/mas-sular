@@ -21,17 +21,17 @@ export type SummaryRow = { key: string; label: string; value: number }
 export function checkoutSummaryRows(summary: CheckoutSummary): SummaryRow[] {
   const rows: SummaryRow[] = [
     { key: 'subtotal', label: 'Subtotal', value: summary.subtotal },
-    { key: 'shipping', label: 'Shipping', value: summary.shipping_cost },
+    { key: 'shipping', label: 'Ongkos kirim', value: summary.shipping_cost },
   ]
   if (summary.discount > 0) {
-    rows.push({ key: 'discount', label: 'Discount', value: -summary.discount })
+    rows.push({ key: 'discount', label: 'Diskon', value: -summary.discount })
   }
   // Gateway payments always show "Biaya Layanan" — Rp0 when the merchant absorbs
   // the fee. Older responses without the flag fall back to "shown when charged".
   if (summary.payment_service_fee_applies ?? summary.payment_service_fee > 0) {
     rows.push({ key: 'payment_service_fee', label: 'Biaya Layanan', value: summary.payment_service_fee })
   }
-  rows.push({ key: 'grand_total', label: 'Grand total', value: summary.grand_total })
+  rows.push({ key: 'grand_total', label: 'Total pembayaran', value: summary.grand_total })
   return rows
 }
 
@@ -94,16 +94,16 @@ export function paymentBreakdownRows(input: PaymentBreakdownInput): PaymentBreak
   const rows: PaymentBreakdownRow[] = []
   if (input.itemization) {
     rows.push({ key: 'subtotal', label: 'Subtotal', value: input.itemization.subtotal, kind: 'line' })
-    rows.push({ key: 'shipping', label: 'Shipping', value: input.itemization.shipping, kind: 'line' })
+    rows.push({ key: 'shipping', label: 'Ongkos kirim', value: input.itemization.shipping, kind: 'line' })
     if (input.itemization.discount > 0) {
-      rows.push({ key: 'discount', label: 'Voucher Discount', value: input.itemization.discount, kind: 'discount' })
+      rows.push({ key: 'discount', label: 'Diskon voucher', value: input.itemization.discount, kind: 'discount' })
     }
   }
-  rows.push({ key: 'business_total', label: 'Business Total', value: input.businessTotal, kind: 'business' })
+  rows.push({ key: 'business_total', label: 'Total pesanan', value: input.businessTotal, kind: 'business' })
   if (input.uniqueCode != null) {
-    rows.push({ key: 'unique_code', label: 'Unique Payment Code', value: input.uniqueCode, kind: 'code' })
+    rows.push({ key: 'unique_code', label: 'Kode unik pembayaran', value: input.uniqueCode, kind: 'code' })
   }
-  rows.push({ key: 'transfer_exactly', label: 'Transfer Exactly', value: input.transferExactly, kind: 'transfer' })
+  rows.push({ key: 'transfer_exactly', label: 'Transfer tepat sebesar', value: input.transferExactly, kind: 'transfer' })
   return rows
 }
 
