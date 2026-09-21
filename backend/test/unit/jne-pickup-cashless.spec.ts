@@ -5,6 +5,7 @@ import {
   computeJneQuantity,
   computeJneWeightKg,
   formatJnePickupSlot,
+  JNE_BOOKING_COUNTRY,
   JNE_BOOKING_SERVICE_CODE,
   JNE_PICKUP_CASHLESS_FIELDS,
   JNE_ORDER_ID_MAX_LENGTH,
@@ -95,6 +96,7 @@ describe('JNE shipment booking must use REG service (business rule)', () => {
     (service) => {
       const fields = build({ service });
       expect(fields.SERVICE_CODE).toBe('REG');
+      expect([fields.SHIPPER_COUNTRY, fields.RECEIVER_COUNTRY]).toEqual(['INDONESIA', 'INDONESIA']);
       expect(Object.values(fields)).not.toContain(service.trim()); // the quoted code is sent nowhere
     },
   );
@@ -110,6 +112,27 @@ describe('JNE shipment booking must use REG service (business rule)', () => {
 
   it('a booking with no selected JNE service is still refused (validation unchanged)', () => {
     expect(refusal(() => build({ service: '  ' }))).toMatch(/the selected JNE service is missing/);
+  });
+});
+
+describe('SHIPPER_COUNTRY / RECEIVER_COUNTRY (JNE-confirmed mandatory, hardcoded)', () => {
+  it('both are exactly INDONESIA on every booking', () => {
+    expect(JNE_BOOKING_COUNTRY).toBe('INDONESIA');
+    const fields = build();
+    expect([fields.SHIPPER_COUNTRY, fields.RECEIVER_COUNTRY]).toEqual(['INDONESIA', 'INDONESIA']);
+  });
+
+  it('never derived from the address or customer input: other regions/cities do not change it', () => {
+    const fields = build({ receiver: { ...SOURCE.receiver, city: 'Singapore', province: 'Johor' } });
+    expect([fields.SHIPPER_COUNTRY, fields.RECEIVER_COUNTRY]).toEqual(['INDONESIA', 'INDONESIA']);
+    // The existing region/city mapping is untouched.
+    expect([fields.RECEIVER_CITY, fields.RECEIVER_REGION]).toEqual(['Singapore', 'Johor']);
+  });
+
+  it('sits right after each *_REGION in the documented field order', () => {
+    const order = [...JNE_PICKUP_CASHLESS_FIELDS] as string[];
+    expect(order.indexOf('SHIPPER_COUNTRY')).toBe(order.indexOf('SHIPPER_REGION') + 1);
+    expect(order.indexOf('RECEIVER_COUNTRY')).toBe(order.indexOf('RECEIVER_REGION') + 1);
   });
 });
 

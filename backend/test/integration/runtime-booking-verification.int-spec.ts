@@ -345,6 +345,9 @@ describe('61AG.3.33 runtime verification — real couriers, stubbed transport', 
           ORIGIN_CODE: 'CGK10000',
           DESTINATION_CODE: destinationCode, // the verified mapping, never the postal code
           SERVICE_CODE: service,
+          // JNE-confirmed mandatory, hardcoded (every shipment is domestic).
+          SHIPPER_COUNTRY: 'INDONESIA',
+          RECEIVER_COUNTRY: 'INDONESIA',
           WEIGHT: '1', // 1 x 800 g -> 1 kg
           QTY: '1',
           GOODS_DESC: 'Bakso Urat x1',

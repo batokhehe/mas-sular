@@ -123,13 +123,43 @@ describe('JNE /pickupcashless FINAL wire body (diagnostic)', () => {
   const body = serializeJnePickupCashless(CREDENTIALS, fields);
   const allMandatory = ['username', 'api_key', ...JNE_PICKUP_CASHLESS_FIELDS];
 
-  it('has 42 unique keys, in documented order, with no renaming, casing change or duplicate', () => {
+  it('has 44 unique keys, in documented order, with no renaming, casing change or duplicate', () => {
     const report = diagnoseWireBody(body, allMandatory, { ...fields, username: CREDENTIALS.username, api_key: CREDENTIALS.apiKey });
     expect(report.keys).toEqual(['username', 'api_key', ...JNE_PICKUP_CASHLESS_FIELDS]);
-    expect(report.keys).toHaveLength(42);
+    expect(report.keys).toHaveLength(44); // 42 + SHIPPER_COUNTRY + RECEIVER_COUNTRY
     expect(report.duplicates).toEqual([]);
     expect(report.unexpectedKeys).toEqual([]);
     expect(report.nonAsciiOrControlKeys).toEqual([]);
+  });
+
+  it('SHIPPER_COUNTRY / RECEIVER_COUNTRY = INDONESIA on the wire, right after each *_REGION; SERVICE_CODE stays REG', () => {
+    const wire = new URLSearchParams(body);
+    expect([wire.get('SHIPPER_COUNTRY'), wire.get('RECEIVER_COUNTRY'), wire.get('SERVICE_CODE')]).toEqual(['INDONESIA', 'INDONESIA', 'REG']);
+    expect(body).toContain('&SHIPPER_REGION=Jawa+Barat&SHIPPER_COUNTRY=INDONESIA&SHIPPER_CONTACT=');
+    expect(body).toContain('&RECEIVER_REGION=Jawa+Barat&RECEIVER_COUNTRY=INDONESIA&RECEIVER_CONTACT=');
+    expect(body).toContain('&ORIGIN_CODE=BDO10000&DESTINATION_CODE=BDO10060&SERVICE_CODE=REG&WEIGHT=1&QTY=1&');
+  });
+
+  it('existing booking fields are unchanged: without the two country fields the wire is exactly the previous 42 keys', () => {
+    const PREVIOUS_KEYS = [
+      'username', 'api_key',
+      'PICKUP_NAME', 'PICKUP_DATE', 'PICKUP_TIME', 'PICKUP_PIC', 'PICKUP_PIC_PHONE', 'PICKUP_ADDRESS', 'PICKUP_DISTRICT', 'PICKUP_CITY',
+      'PICKUP_SERVICE', 'PICKUP_VEHICLE', 'BRANCH', 'CUST_ID', 'ORDER_ID',
+      'SHIPPER_NAME', 'SHIPPER_ADDR1', 'SHIPPER_ADDR2', 'SHIPPER_CITY', 'SHIPPER_ZIP', 'SHIPPER_REGION', 'SHIPPER_CONTACT', 'SHIPPER_PHONE',
+      'RECEIVER_NAME', 'RECEIVER_ADDR1', 'RECEIVER_ADDR2', 'RECEIVER_CITY', 'RECEIVER_ZIP', 'RECEIVER_REGION', 'RECEIVER_CONTACT', 'RECEIVER_PHONE',
+      'ORIGIN_CODE', 'DESTINATION_CODE', 'SERVICE_CODE', 'WEIGHT', 'QTY', 'GOODS_DESC', 'GOODS_AMOUNT', 'INSURANCE_FLAG', 'SPECIAL_INS',
+      'MERCHANT_ID', 'TYPE',
+    ];
+    const pairs = [...new URLSearchParams(body)].filter(([key]) => key !== 'SHIPPER_COUNTRY' && key !== 'RECEIVER_COUNTRY');
+    expect(pairs.map(([key]) => key)).toEqual(PREVIOUS_KEYS);
+    // Values of the pre-existing operational fields are unchanged too.
+    expect(Object.fromEntries(pairs)).toMatchObject({
+      PICKUP_SERVICE: 'Domestic', TYPE: 'PICKUP', INSURANCE_FLAG: 'N', BRANCH: 'BDO000', WEIGHT: '1', QTY: '1', GOODS_AMOUNT: '45000',
+    });
+    // Nothing else was added: still no AWB / COD / LAT / LON / ADDR3 / RETURN_*.
+    for (const absent of ['AWB', 'COD_FLAG', 'COD_AMOUNT', 'LAT', 'LON', 'SHIPPER_ADDR3', 'RECEIVER_ADDR3', 'RETURN_NAME']) {
+      expect([absent, new URLSearchParams(body).has(absent)]).toEqual([absent, false]);
+    }
   });
 
   it('every sent field is present, non-empty and not whitespace-only ON THE WIRE', () => {
@@ -283,7 +313,7 @@ describe('quotation -> booking: the booking sends REG whatever the quote said', 
     expect(calls.some((url) => url.includes('/pickupcashless'))).toBe(false);
   });
 
-  it('booking the quoted JTR<130 sends SERVICE_CODE=REG in the one /pickupcashless request', async () => {
+  it('booking the quoted JTR<130 sends SERVICE_CODE=REG, SHIPPER_COUNTRY / RECEIVER_COUNTRY=INDONESIA in the one /pickupcashless request', async () => {
     const { quotes } = await quote();
     const quoted = quotes.find((q) => q.service === 'JTR<130')!;
     const { result, calls } = await book(quoted.service);
@@ -293,14 +323,17 @@ describe('quotation -> booking: the booking sends REG whatever the quote said', 
     expect(calls[0].url).toBe('https://jne.invalid:10202/pickupcashless');
     const wire = new URLSearchParams(String(calls[0].init.body));
     expect(wire.get('SERVICE_CODE')).toBe('REG');
+    expect(wire.get('SHIPPER_COUNTRY')).toBe('INDONESIA');
+    expect(wire.get('RECEIVER_COUNTRY')).toBe('INDONESIA');
     expect(String(calls[0].init.body)).not.toContain('JTR');
     // The quote object itself was not modified by booking.
     expect(quoted.service).toBe('JTR<130');
   });
 
-  it.each(['YES19', 'REG19', 'REG15', 'JTR250'])('booking a quoted %s also sends REG', async (service) => {
+  it.each(['YES19', 'REG19', 'REG15', 'JTR250'])('booking a quoted %s also sends REG and both countries', async (service) => {
     const { calls } = await book(service);
-    expect(new URLSearchParams(String(calls[0].init.body)).get('SERVICE_CODE')).toBe('REG');
+    const wire = new URLSearchParams(String(calls[0].init.body));
+    expect([wire.get('SERVICE_CODE'), wire.get('SHIPPER_COUNTRY'), wire.get('RECEIVER_COUNTRY')]).toEqual(['REG', 'INDONESIA', 'INDONESIA']);
   });
 
   it('every other booking field is exactly what the builder produces for this order', async () => {

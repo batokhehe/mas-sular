@@ -18,6 +18,9 @@ import { JnePickupConfig, jnePickupConfigIssues } from '../../../shipping/shippi
  *
  * Nothing beyond those two shapes is assumed.
  *
+ * SHIPPER_COUNTRY and RECEIVER_COUNTRY ARE sent (always INDONESIA): the documentation
+ * marks them optional, but JNE confirmed both are mandatory for /pickupcashless.
+ *
  * Deliberately NOT sent, because the documentation marks them optional or specific
  * to cases Mas Sular does not have: AWB (we never supply our own airwaybill), COD_*
  * (no channel offers COD), LAT/LON, and the Batam-only TAX_VALUE / ITEM_TYPE /
@@ -37,6 +40,14 @@ const JNE = 'jne';
  * shown on the order/shipment are unaffected - only the booking request uses this.
  */
 export const JNE_BOOKING_SERVICE_CODE = 'REG';
+
+/**
+ * SHIPPER_COUNTRY / RECEIVER_COUNTRY. JNE confirmed both fields are mandatory for
+ * `/pickupcashless`. Hardcoded to INDONESIA for now, intentionally: every Mas Sular
+ * shipment is domestic. Not configurable, not derived from the address, never taken
+ * from customer input.
+ */
+export const JNE_BOOKING_COUNTRY = 'INDONESIA';
 
 /** Documented field order - kept stable so serialized bodies are deterministic. */
 export const JNE_PICKUP_CASHLESS_FIELDS = [
@@ -59,6 +70,7 @@ export const JNE_PICKUP_CASHLESS_FIELDS = [
   'SHIPPER_CITY',
   'SHIPPER_ZIP',
   'SHIPPER_REGION',
+  'SHIPPER_COUNTRY',
   'SHIPPER_CONTACT',
   'SHIPPER_PHONE',
   'RECEIVER_NAME',
@@ -67,6 +79,7 @@ export const JNE_PICKUP_CASHLESS_FIELDS = [
   'RECEIVER_CITY',
   'RECEIVER_ZIP',
   'RECEIVER_REGION',
+  'RECEIVER_COUNTRY',
   'RECEIVER_CONTACT',
   'RECEIVER_PHONE',
   'ORIGIN_CODE',
@@ -316,6 +329,8 @@ export function buildJnePickupCashlessFields(
     SHIPPER_CITY: p.shipperCity,
     SHIPPER_ZIP: p.shipperZip,
     SHIPPER_REGION: p.shipperRegion,
+    // Hardcoded (JNE requires it; every shipment is domestic) - see JNE_BOOKING_COUNTRY.
+    SHIPPER_COUNTRY: JNE_BOOKING_COUNTRY,
     SHIPPER_CONTACT: p.shipperContact,
     SHIPPER_PHONE: p.shipperPhone,
     RECEIVER_NAME: receiver.name.trim(),
@@ -324,6 +339,8 @@ export function buildJnePickupCashlessFields(
     RECEIVER_CITY: (receiver.city as string).trim(),
     RECEIVER_ZIP: receiver.postalCode.trim(),
     RECEIVER_REGION: (receiver.province as string).trim(),
+    // Hardcoded (JNE requires it; every shipment is domestic) - see JNE_BOOKING_COUNTRY.
+    RECEIVER_COUNTRY: JNE_BOOKING_COUNTRY,
     // The address model has no separate contact field: the recipient IS the contact.
     RECEIVER_CONTACT: receiver.name.trim(),
     RECEIVER_PHONE: (receiver.phone as string).trim(),
