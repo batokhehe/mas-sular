@@ -345,6 +345,7 @@ describe('61AG.3.33 runtime verification — real couriers, stubbed transport', 
           ORIGIN_CODE: 'CGK10000',
           DESTINATION_CODE: destinationCode, // the verified mapping, never the postal code
           SERVICE_CODE: service,
+          PICKUP_SERVICE: 'REG', // business requirement, not the configured JNE_PICKUP_SERVICE
           // JNE-confirmed mandatory, hardcoded (every shipment is domestic).
           SHIPPER_COUNTRY: 'INDONESIA',
           RECEIVER_COUNTRY: 'INDONESIA',

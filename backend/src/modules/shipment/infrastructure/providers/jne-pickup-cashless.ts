@@ -42,6 +42,14 @@ const JNE = 'jne';
 export const JNE_BOOKING_SERVICE_CODE = 'REG';
 
 /**
+ * PICKUP_SERVICE sent on every `/pickupcashless` booking. Confirmed business
+ * requirement: REG, not the configured JNE_PICKUP_SERVICE (Domestic | Intracity | All
+ * per the earlier documentation). The configuration key and its boot validation are
+ * left as they were; only the booking request sends this constant.
+ */
+export const JNE_BOOKING_PICKUP_SERVICE = 'REG';
+
+/**
  * SHIPPER_COUNTRY / RECEIVER_COUNTRY. JNE confirmed both fields are mandatory for
  * `/pickupcashless`. Hardcoded to INDONESIA for now, intentionally: every Mas Sular
  * shipment is domestic. Not configurable, not derived from the address, never taken
@@ -317,7 +325,8 @@ export function buildJnePickupCashlessFields(
     PICKUP_ADDRESS: p.pickupAddress,
     PICKUP_DISTRICT: p.pickupDistrict,
     PICKUP_CITY: p.pickupCity,
-    PICKUP_SERVICE: p.pickupService,
+    // Business requirement: every JNE booking sends PICKUP_SERVICE=REG (not the configured value).
+    PICKUP_SERVICE: JNE_BOOKING_PICKUP_SERVICE,
     PICKUP_VEHICLE: p.pickupVehicle,
     BRANCH: p.branch,
     CUST_ID: p.custId,

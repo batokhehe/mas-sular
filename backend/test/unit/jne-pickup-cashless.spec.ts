@@ -6,6 +6,7 @@ import {
   computeJneWeightKg,
   formatJnePickupSlot,
   JNE_BOOKING_COUNTRY,
+  JNE_BOOKING_PICKUP_SERVICE,
   JNE_BOOKING_SERVICE_CODE,
   JNE_PICKUP_CASHLESS_FIELDS,
   JNE_ORDER_ID_MAX_LENGTH,
@@ -96,6 +97,7 @@ describe('JNE shipment booking must use REG service (business rule)', () => {
     (service) => {
       const fields = build({ service });
       expect(fields.SERVICE_CODE).toBe('REG');
+      expect(fields.PICKUP_SERVICE).toBe('REG');
       expect([fields.SHIPPER_COUNTRY, fields.RECEIVER_COUNTRY]).toEqual(['INDONESIA', 'INDONESIA']);
       expect(Object.values(fields)).not.toContain(service.trim()); // the quoted code is sent nowhere
     },
@@ -106,12 +108,36 @@ describe('JNE shipment booking must use REG service (business rule)', () => {
     const { SERVICE_CODE: b, ...yes } = build({ service: 'YES19' });
     expect([a, b]).toEqual(['REG', 'REG']);
     expect(yes).toEqual(jtr);
-    // PICKUP_SERVICE is a different field (the pickup type from configuration) and is untouched.
-    expect(build({ service: 'JTR<130' }).PICKUP_SERVICE).toBe(PICKUP.pickupService);
+    // PICKUP_SERVICE is a separate field, also REG on every booking (business requirement).
+    expect(build({ service: 'JTR<130' }).PICKUP_SERVICE).toBe('REG');
   });
 
   it('a booking with no selected JNE service is still refused (validation unchanged)', () => {
     expect(refusal(() => build({ service: '  ' }))).toMatch(/the selected JNE service is missing/);
+  });
+});
+
+describe('PICKUP_SERVICE is REG on every booking (business requirement)', () => {
+  it('the booking pickup service is exactly REG', () => {
+    expect(JNE_BOOKING_PICKUP_SERVICE).toBe('REG');
+  });
+
+  it.each(['Domestic', 'Intracity', 'All'])('configured JNE_PICKUP_SERVICE=%s is still validated but not sent: PICKUP_SERVICE=REG', (pickupService) => {
+    const fields = build({}, { ...PICKUP, pickupService });
+    expect([fields.PICKUP_SERVICE, fields.SERVICE_CODE]).toEqual(['REG', 'REG']);
+  });
+
+  it('nothing else moves: TYPE, INSURANCE_FLAG, vehicle and both countries are unchanged', () => {
+    const fields = build();
+    expect(fields).toMatchObject({
+      PICKUP_SERVICE: 'REG',
+      SERVICE_CODE: 'REG',
+      TYPE: 'PICKUP',
+      INSURANCE_FLAG: 'N',
+      PICKUP_VEHICLE: PICKUP.pickupVehicle,
+      SHIPPER_COUNTRY: 'INDONESIA',
+      RECEIVER_COUNTRY: 'INDONESIA',
+    });
   });
 });
 
@@ -156,7 +182,7 @@ describe('field mapping', () => {
       PICKUP_ADDRESS: PICKUP.pickupAddress,
       PICKUP_DISTRICT: PICKUP.pickupDistrict,
       PICKUP_CITY: PICKUP.pickupCity,
-      PICKUP_SERVICE: 'Domestic',
+      PICKUP_SERVICE: 'REG', // the booking constant, not the configured 'Domestic'
       PICKUP_VEHICLE: 'Motor',
       BRANCH: PICKUP.branch,
       CUST_ID: PICKUP.custId,
@@ -447,7 +473,7 @@ describe('what the integration log would persist from this exact body', () => {
       INSURANCE_FLAG: 'N',
       PICKUP_DATE: '17-09-2026',
       PICKUP_TIME: '17:00',
-      PICKUP_SERVICE: 'Domestic',
+      PICKUP_SERVICE: 'REG',
       PICKUP_VEHICLE: 'Motor',
       RECEIVER_CITY: 'Kota Bandung',
       RECEIVER_ZIP: '40112',
