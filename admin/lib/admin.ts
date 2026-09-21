@@ -445,9 +445,11 @@ export function rejectAdminPayment(paymentId: string) {
   });
 }
 
-export function fetchAdminShipments(params: PageParams & { status?: string } = {}) {
+export function fetchAdminShipments(params: PageParams & { status?: string; scope?: 'active' } = {}) {
   const q = new URLSearchParams();
   if (params.status) q.set('status', params.status);
+  // `active` = the Admin → Shipping list rule, applied server-side (lib/shipments/shipping-list.ts).
+  if (params.scope) q.set('scope', params.scope);
   appendPage(q, params);
   const query = q.toString();
   return api<Paginated<AdminShipment>>(`/admin/shipments${query ? `?${query}` : ''}`);

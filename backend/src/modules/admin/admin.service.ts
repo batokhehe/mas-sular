@@ -45,6 +45,7 @@ import {
 import { UpdateUserDto } from './application/dto/update-user.dto';
 import { pageArgs, paginate } from '../../common/pagination/pagination';
 import { buildOrderTimeline, computeAvailableActions } from './order-operations.util';
+import { activeShippingWhere, SHIPPING_LIST_ACTIVE_SCOPE } from './shipping-list-scope';
 import { buildOutboxEvent } from '../../infrastructure/outbox/outbox-event.builder';
 
 // Payment terminal states now live with the settlement service (Phase 5D) so that
@@ -678,7 +679,11 @@ export class AdminService {
 
   async listShipments(query: ListAdminShipmentsQueryDto) {
     const { skip, take, page, limit } = pageArgs(query);
-    const where: Prisma.ShipmentWhereInput = { status: query.status };
+    // Without a scope the filter is exactly what it always was; `active` narrows it
+    // to the Admin → Shipping list (both halves apply to findMany AND count, so the
+    // pagination totals match what is shown).
+    const where: Prisma.ShipmentWhereInput =
+      query.scope === SHIPPING_LIST_ACTIVE_SCOPE ? { AND: [{ status: query.status }, activeShippingWhere()] } : { status: query.status };
     const [items, total] = await Promise.all([
       this.prisma.shipment.findMany({
         where,
