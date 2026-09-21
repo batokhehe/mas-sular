@@ -10,11 +10,15 @@ import { createHash } from 'crypto';
  *     cod_amount) that are only meaningful for DELIVERED;
  *   - `history[].date` in JNE's `YYYY-MM-DD HH:I:S` (PHP notation: 24-hour HH:MM:SS).
  *
+ * Confirmed by JNE in writing (beyond the V2 document): `order_id` is the `order_no`
+ * we sent at booking; `actual_weight` and `actual_ongkir` are STRINGS; and
+ * `history[].date` is GMT+7 (Asia/Jakarta).
+ *
  * The documentation does NOT define: a webhook authentication mechanism, the
- * time zone of `history[].date`, the meaning of individual `status_code`s, or the
- * unit of `actual_weight`. Nothing below invents any of them - see the notes at
- * each use. The shipment transition rule itself is shared with the pollers
- * (domain/shipment-transition.ts); nothing here decides transitions.
+ * meaning of individual `status_code`s, or the unit of `actual_weight`. Nothing
+ * below invents any of them - see the notes at each use. The shipment transition
+ * rule itself is shared with the pollers (domain/shipment-transition.ts); nothing
+ * here decides transitions.
  */
 
 export const JNE_SUMMARY_STATUSES = [
@@ -55,14 +59,14 @@ export const JNE_MANDATORY_FIELDS = [
 export const JNE_RECORD_ONLY_STATUSES: readonly JneSummaryStatus[] = ['FAILED PICKUP', 'SHIPMENT PROBLEM'];
 
 /**
- * `history[].date` time zone: NOT documented by JNE, and nothing in this codebase is
- * authoritative for it (BUSINESS_TIMEZONE governs our own wall clocks; Midtrans
- * documents WIB - JNE does not). So a JNE date is never converted to an instant:
- * the verbatim `YYYY-MM-DD HH:MM:SS` string is stored, and JNE dates are compared
- * only WITH EACH OTHER - zero-padded, that format sorts chronologically within the
- * one (unknown) zone they share. Instants we record (ShipmentHistory.changedAt,
- * receipt times) come from our own clock.
+ * `history[].date` time zone: GMT+7 (Asia/Jakarta), as JNE confirmed in writing.
+ * Asia/Jakarta has no daylight saving, so the offset is a fixed +07:00. Each date is
+ * kept VERBATIM (identity, ordering: zero-padded in one zone, the format sorts
+ * chronologically) and ALSO converted once, explicitly, to the instant it denotes
+ * (`at`, ISO-8601 UTC) - see jneDateToInstant(). Nothing adds hours by hand, and the
+ * process time zone is irrelevant. ShipmentHistory.changedAt stays OUR receipt time.
  */
+export const JNE_HISTORY_UTC_OFFSET = '+07:00';
 
 const JNE_DATE = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/;
 const DECIMAL = /^\d+(\.\d+)?$/;
@@ -90,8 +94,10 @@ export interface JneNumber {
 export interface JneHistoryEntry {
   /** Deterministic identity of this history event - see historyEntryKey(). */
   key: string;
-  /** Verbatim `YYYY-MM-DD HH:MM:SS` (zone undocumented; sortable, never converted). */
+  /** Verbatim `YYYY-MM-DD HH:MM:SS` as JNE sent it (GMT+7 wall clock; sortable). */
   date: string;
+  /** The instant `date` denotes, as ISO-8601 UTC (`date` read as GMT+7). */
+  at: string;
   status: string;
   statusCode: string;
   statusDesc: string;
@@ -127,9 +133,11 @@ export interface JneWebhookPayload {
   history: JneHistoryEntry[];
   /**
    * The latest history date (verbatim JNE string) = the time this webhook speaks for;
-   * null when it carried no history. Comparable only with other JNE dates.
+   * null when it carried no history. Compared with other JNE dates.
    */
   eventAt: string | null;
+  /** `eventAt` as the instant it denotes (ISO-8601 UTC); null when eventAt is null. */
+  eventInstant: string | null;
   /** Optional fields present but unusable (bad URL / number) - dropped, never stored. */
   dropped: string[];
   /** Deterministic identity of the whole webhook, for logs and tracing retries. */
@@ -146,11 +154,7 @@ function sha256(parts: unknown[]): string {
   return createHash('sha256').update(JSON.stringify(parts)).digest('hex');
 }
 
-/**
- * True when `raw` is a real calendar date-time in JNE's `YYYY-MM-DD HH:MM:SS`.
- * Validation only - the value is kept verbatim and never turned into an instant
- * (JNE does not document its zone).
- */
+/** True when `raw` is a real calendar date-time in JNE's `YYYY-MM-DD HH:MM:SS`. */
 export function isValidJneDate(raw: string): boolean {
   const m = JNE_DATE.exec(raw);
   if (!m) return false;
@@ -161,7 +165,24 @@ export function isValidJneDate(raw: string): boolean {
   return check.getUTCFullYear() === year && check.getUTCMonth() === month - 1 && check.getUTCDate() === day;
 }
 
-/** Chronological comparison of two JNE dates (same undocumented zone, sortable format). */
+/**
+ * The instant a JNE `history[].date` denotes. JNE confirmed the value is GMT+7, so
+ * the wall-clock fields are read with an explicit +07:00 offset (never the process's
+ * local zone, never UTC). Example: "2026-09-12 09:00:00" -> 2026-09-12T02:00:00.000Z.
+ * Returns null for anything that is not a valid JNE date.
+ */
+export function jneDateToInstant(raw: string): Date | null {
+  if (!isValidJneDate(raw)) return null;
+  const instant = new Date(`${raw.replace(' ', 'T')}${JNE_HISTORY_UTC_OFFSET}`);
+  return Number.isNaN(instant.getTime()) ? null : instant;
+}
+
+/** jneDateToInstant as ISO-8601 UTC (the stored form). Only for already-validated dates. */
+function jneInstantIso(raw: string): string {
+  return (jneDateToInstant(raw) as Date).toISOString();
+}
+
+/** Chronological comparison of two JNE dates (same GMT+7 zone, sortable format). */
 export function compareJneDates(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
@@ -288,7 +309,7 @@ export function parseJneWebhook(input: unknown): JneParseResult {
       }
       const fields = { date, status: text.status, statusCode: text.status_code, statusDesc: text.status_desc, locationCode: text.location_code };
       const key = historyEntryKey(fields);
-      if (!seen.has(key)) seen.set(key, { key, ...fields });
+      if (!seen.has(key)) seen.set(key, { key, ...fields, at: jneInstantIso(date) });
     }
     // Chronological by the verbatim JNE date; equal dates keep JNE's order (stable sort).
     history = [...seen.values()].sort((a, b) => compareJneDates(a.date, b.date));
@@ -355,6 +376,7 @@ export function parseJneWebhook(input: unknown): JneParseResult {
     delivery,
     history,
     eventAt,
+    eventInstant: eventAt ? jneInstantIso(eventAt) : null,
     dropped,
     fingerprint: sha256([
       `jne-webhook-${JNE_FINGERPRINT_VERSION}`,
@@ -374,8 +396,10 @@ export function parseJneWebhook(input: unknown): JneParseResult {
 /** One stored JNE history event (Shipment.metadata.jne.webhook.events[]). */
 export interface JneStoredEvent {
   key: string;
-  /** Verbatim JNE date (zone undocumented). */
+  /** Verbatim JNE date (GMT+7 wall clock). */
   date: string;
+  /** The instant `date` denotes (ISO-8601 UTC), derived from `date` read as GMT+7. */
+  at?: string;
   status: string;
   statusCode: string;
   statusDesc: string;
@@ -459,16 +483,16 @@ function compact<T extends object>(value: T): T {
  * courier figures (actual weight/ongkir, route) with older ones.
  */
 /**
- * A stored record in the current shape. A v1 record (never released: it held
- * WIB-converted instants) keeps its events and figures - every event also carries
- * the verbatim JNE `date` - but its converted time fields are discarded rather than
- * compared with verbatim dates.
+ * A stored record in the current shape. A v1 record (never released) keeps its events
+ * and figures - every event also carries the verbatim JNE `date` - but its own time
+ * fields are discarded rather than compared with verbatim dates; each event's `at`
+ * is re-derived from the verbatim date (GMT+7) instead of trusting the stored one.
  */
 export function currentJneRecord(stored: JneWebhookRecord | undefined): JneWebhookRecord | undefined {
   if (!stored) return undefined;
   if ((stored.version as number) === 2) return stored;
   const events = (stored.events ?? []).map(({ key, date, status, statusCode, statusDesc, locationCode }) => ({
-    key, date, status, statusCode, statusDesc, locationCode,
+    key, date, at: jneDateToInstant(date)?.toISOString(), status, statusCode, statusDesc, locationCode,
   }));
   const dates = events.map((e) => e.date).sort(compareJneDates);
   return {
@@ -498,6 +522,7 @@ export function mergeJneWebhook(
     events.set(h.key, {
       key: h.key,
       date: h.date,
+      at: h.at,
       status: h.status,
       statusCode: h.statusCode,
       statusDesc: h.statusDesc,
@@ -505,7 +530,12 @@ export function mergeJneWebhook(
     });
     addedEvents += 1;
   }
-  const sortedEvents = [...events.values()].sort((a, b) => compareJneDates(a.date, b.date)).slice(-MAX_STORED_EVENTS);
+  // Every stored event carries its instant; one stored before JNE confirmed GMT+7 gets
+  // it derived from its verbatim date (the one-time addition is persisted as a change).
+  const sortedEvents = [...events.values()]
+    .map((e) => (e.at ? e : compact({ ...e, at: jneDateToInstant(e.date)?.toISOString() })))
+    .sort((a, b) => compareJneDates(a.date, b.date))
+    .slice(-MAX_STORED_EVENTS);
 
   const summaries = [...(prev?.summaries ?? [])];
   if (!summaries.some((s) => s.status === payload.status && s.eventAt === eventAtIso)) {

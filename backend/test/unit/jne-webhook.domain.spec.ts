@@ -4,6 +4,7 @@ import {
   currentJneRecord,
   historyEntryKey,
   isValidJneDate,
+  jneDateToInstant,
   JNE_MANDATORY_FIELDS,
   JNE_RECORD_ONLY_STATUSES,
   JNE_SUMMARY_STATUSES,
@@ -81,6 +82,24 @@ describe('JNE V2 payload validation', () => {
     expect(reason(body({ [field]: value }))).toBe(`${field} must be a non-negative number`);
   });
 
+  it('actual_weight / actual_ongkir are STRINGS (JNE-confirmed): "1000" / "20000" accepted, raw kept exactly', () => {
+    const p = ok(body({ actual_weight: '1000', actual_ongkir: '20000' }));
+    expect(p.actualWeight).toEqual({ raw: '1000', value: 1000 });
+    expect(p.actualOngkir).toEqual({ raw: '20000', value: 20000 });
+    // Realistic string variants of the same contract: decimals, trailing zeros, padding.
+    expect(ok(body({ actual_weight: '1.5', actual_ongkir: '21000.00' })).actualOngkir).toEqual({ raw: '21000.00', value: 21000 });
+    expect(ok(body({ actual_weight: ' 2 ', actual_ongkir: '0' })).actualWeight).toEqual({ raw: '2', value: 2 });
+    const record = mergeJneWebhook(undefined, p, new Date('2026-09-12T05:00:00Z')).next;
+    expect(record.actual).toMatchObject({ weight: 1000, weightRaw: '1000', ongkir: 20000, ongkirRaw: '20000' });
+  });
+
+  it.each([
+    ['actual_weight', ''], ['actual_weight', '1,5'], ['actual_weight', '1e3'], ['actual_weight', '0x10'], ['actual_weight', '1000 gram'],
+    ['actual_ongkir', 'Rp20000'], ['actual_ongkir', '20.000,00'], ['actual_ongkir', '-20000'], ['actual_ongkir', 'NaN'],
+  ])('malformed %s %p is refused, never coerced into a valid value', (field, value) => {
+    expect(reason(body({ [field]: value }))).toMatch(new RegExp(`^${field} (is required|must be a non-negative number)$`));
+  });
+
   it('accepts numeric fields as decimal strings or JSON numbers', () => {
     const p = ok(body({ actual_weight: 1.5, actual_ongkir: '10000.00' }));
     expect(p.actualWeight).toEqual({ raw: '1.5', value: 1.5 });
@@ -101,16 +120,47 @@ describe('JNE V2 payload validation', () => {
     expect(reason(body({ history: [{ date, status: 'x', status_code: 'PU1', status_desc: 'x', location_code: '' }] }))).toMatch(/history\[0\]\.date/);
   });
 
-  it('keeps JNE dates verbatim and never derives an instant from them (their zone is undocumented)', () => {
+  it('history[].date is GMT+7 (JNE-confirmed): kept verbatim AND converted to the exact instant it denotes', () => {
     expect(isValidJneDate('2024-02-29 23:59:59')).toBe(true);
     expect(isValidJneDate('2026-02-29 00:00:00')).toBe(false);
+    // Deterministic: 09:00:00 in GMT+7 is 02:00:00 UTC - the same instant, not +7h again.
+    expect(jneDateToInstant('2026-09-12 09:00:00')!.toISOString()).toBe('2026-09-12T02:00:00.000Z');
+    expect(jneDateToInstant('2026-09-12 09:00:00')!.getTime()).toBe(Date.parse('2026-09-12T09:00:00+07:00'));
+    // Crossing midnight: 03:30 GMT+7 on the 13th is 20:30 UTC on the 12th.
+    expect(jneDateToInstant('2026-09-13 03:30:15')!.toISOString()).toBe('2026-09-12T20:30:15.000Z');
+    expect(jneDateToInstant('2026-02-30 00:00:00')).toBeNull();
+    expect(jneDateToInstant('2026-09-12T09:00:00Z')).toBeNull();
+
     const p = ok(body());
-    expect(p.history[0].date).toBe('2026-09-12 09:00:00');
-    // No ISO instant (and so no time-zone claim) anywhere in the normalized payload.
-    expect(JSON.stringify(p)).not.toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/);
+    expect(p.history[0]).toMatchObject({ date: '2026-09-12 09:00:00', at: '2026-09-12T02:00:00.000Z' });
+    expect([p.eventAt, p.eventInstant]).toEqual(['2026-09-12 09:00:00', '2026-09-12T02:00:00.000Z']);
     const record = mergeJneWebhook(undefined, p, new Date('2026-09-12T05:00:00Z')).next;
-    expect(record.events[0]).toEqual(expect.not.objectContaining({ at: expect.anything() }));
+    expect(record.events[0]).toMatchObject({ date: '2026-09-12 09:00:00', at: '2026-09-12T02:00:00.000Z' });
+    // Ordering/staleness still compare the verbatim GMT+7 strings with each other.
     expect([record.lastEventAt, record.summaries[0].eventAt]).toEqual(['2026-09-12 09:00:00', '2026-09-12 09:00:00']);
+  });
+
+  it('the conversion does not depend on the process time zone', () => {
+    const tz = process.env.TZ;
+    try {
+      for (const zone of ['UTC', 'Asia/Jakarta', 'America/New_York']) {
+        process.env.TZ = zone;
+        expect(jneDateToInstant('2026-09-12 09:00:00')!.toISOString()).toBe('2026-09-12T02:00:00.000Z');
+      }
+    } finally {
+      if (tz === undefined) delete process.env.TZ;
+      else process.env.TZ = tz;
+    }
+  });
+
+  it('a record stored before the GMT+7 confirmation gains each event instant once, then merges idempotently', () => {
+    const p = ok(body());
+    const legacy = mergeJneWebhook(undefined, p, new Date('2026-09-12T05:00:00Z')).next;
+    const withoutAt = { ...legacy, events: legacy.events.map(({ at: _at, ...rest }) => rest) } as JneWebhookRecord;
+    const first = mergeJneWebhook(withoutAt, p, new Date('2026-09-12T06:00:00Z'));
+    expect(first).toMatchObject({ addedEvents: 0, changed: true });
+    expect(first.next.events[0].at).toBe('2026-09-12T02:00:00.000Z');
+    expect(mergeJneWebhook(first.next, p, new Date('2026-09-12T07:00:00Z'))).toMatchObject({ addedEvents: 0, changed: false });
   });
 
   it('non-DELIVERED payloads without delivery-only fields are accepted; delivery fields there are ignored', () => {
@@ -239,7 +289,7 @@ describe('merge: idempotent record of everything JNE reported', () => {
     expect(r.summaries).toEqual([{ status: 'SHIPMENT PROBLEM', eventAt: '2026-09-12 09:00:00', firstReceivedAt: t0.toISOString() }]);
   });
 
-  it('a stored v1 record (WIB-converted times, never released) is upgraded: events kept, converted times dropped', () => {
+  it('a stored v1 record (never released) is upgraded: events kept, v1 time fields dropped, event instants re-derived', () => {
     const v1 = {
       version: 1,
       lastReceivedAt: '2026-09-12T05:00:00.000Z',
@@ -253,7 +303,8 @@ describe('merge: idempotent record of everything JNE reported', () => {
     } as unknown as JneWebhookRecord;
     const upgraded = currentJneRecord(v1)!;
     expect(upgraded).toMatchObject({ version: 2, lastEventAt: '2026-09-12 09:00:00', lastAppliedEventAt: null, lastAppliedStatus: 'SUCCESS PICKUP' });
-    expect(upgraded.events[0]).not.toHaveProperty('at');
+    // The event instant is re-derived from the verbatim GMT+7 date, not trusted from v1.
+    expect(upgraded.events[0].at).toBe('2026-09-12T02:00:00.000Z');
     expect(upgraded.summaries[0].eventAt).toBeNull();
     // The same event is recognised by its key; persisting the upgrade is the only change.
     const merged = mergeJneWebhook(v1, ok(body()), new Date('2026-09-12T06:00:00Z'));

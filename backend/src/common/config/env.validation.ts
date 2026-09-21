@@ -9,6 +9,7 @@ import {
   JNE_PICKUP_VEHICLES,
 } from '../../modules/shipping/shipping.config';
 import { TRUST_PROXY_MAX_HOPS } from '../http/trust-proxy';
+import { jneWebhookSourceIpIssue } from '../../modules/shipment/jne-webhook.config';
 import { ADMIN_ACCESS_TTL_MAX_MS, adminAccessTtlToMs } from '../../modules/admin-auth/admin-session.config';
 
 /** Known hardcoded development secrets that must never be used as real secrets. */
@@ -223,6 +224,9 @@ const baseSchema = z
     // Inbound JNE Webhook Status V2. OFF by default: JNE's V2 documentation defines no
     // webhook authentication, so the endpoint is only reachable once deliberately enabled.
     JNE_WEBHOOK_ENABLED: boolFlag,
+    // Extra webhook source IPs (comma-separated). Outside JNE_ENVIRONMENT=production only;
+    // the JNE-confirmed address is always allowed. See jne-webhook.config.ts.
+    JNE_WEBHOOK_EXTRA_SOURCE_IPS: z.string().optional(),
     // Inbound Paxel webhook. OFF by default and independent of PAXEL_ENABLED. When on,
     // X-Paxel-Signature is verified with PAXEL_WEBHOOK_SECRET (required, cross-field
     // below). Which secret Paxel signs with is not yet confirmed by Paxel.
@@ -352,6 +356,12 @@ export const envSchema = baseSchema.superRefine((env, ctx) => {
   if (env.PAXEL_PICKUP_TIMEZONE?.trim() && !isValidTimeZone(env.PAXEL_PICKUP_TIMEZONE)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['PAXEL_PICKUP_TIMEZONE'], message: `PAXEL_PICKUP_TIMEZONE is not a valid IANA timezone ('${env.PAXEL_PICKUP_TIMEZONE}')` });
   }
+  // JNE webhook source addresses: production trusts only JNE-confirmed IPs.
+  const jneSourceIpIssue = jneWebhookSourceIpIssue(env as NodeJS.ProcessEnv);
+  if (jneSourceIpIssue) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['JNE_WEBHOOK_EXTRA_SOURCE_IPS'], message: jneSourceIpIssue });
+  }
+
   if (env.JNE_ENABLED === 'true') {
     for (const key of ['JNE_API_KEY', 'JNE_USERNAME', 'JNE_ORIGIN_CODE'] as const) {
       if (!env[key]) {

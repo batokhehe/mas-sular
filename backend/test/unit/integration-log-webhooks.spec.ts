@@ -27,7 +27,7 @@ describe('JNE webhook', () => {
 
   it('records one INBOUND row and returns the unchanged 200 body', async () => {
     const rec = recorder();
-    const service = { handle: jest.fn().mockResolvedValue({ httpStatus: 200, body: { status: true } }) };
+    const service = { checkSource: jest.fn().mockReturnValue(null), handle: jest.fn().mockResolvedValue({ httpStatus: 200, body: { status: true } }) };
     const controller = new JneWebhookController(service as never, rec as never);
     const res = resStub();
 
@@ -52,7 +52,7 @@ describe('JNE webhook', () => {
 
   it('a refusal is recorded as REJECTED with the provider-facing reason, response unchanged', async () => {
     const rec = recorder();
-    const service = { handle: jest.fn().mockResolvedValue({ httpStatus: 404, body: { status: false, reason: 'unknown AWB' } }) };
+    const service = { checkSource: jest.fn().mockReturnValue(null), handle: jest.fn().mockResolvedValue({ httpStatus: 404, body: { status: false, reason: 'unknown AWB' } }) };
     const res = resStub();
     await expect(new JneWebhookController(service as never, rec as never).jne(BODY, 'application/json', res as never)).resolves.toEqual({
       status: false,
@@ -64,7 +64,7 @@ describe('JNE webhook', () => {
 
   it('the 415 content-type guard still short-circuits before the service, and is recorded', async () => {
     const rec = recorder();
-    const service = { handle: jest.fn() };
+    const service = { checkSource: jest.fn().mockReturnValue(null), handle: jest.fn() };
     const res = resStub();
     await new JneWebhookController(service as never, rec as never).jne(BODY, 'text/plain', res as never);
     expect(service.handle).not.toHaveBeenCalled();
@@ -73,7 +73,7 @@ describe('JNE webhook', () => {
   });
 
   it('works with no recorder wired at all', async () => {
-    const service = { handle: jest.fn().mockResolvedValue({ httpStatus: 200, body: { status: true } }) };
+    const service = { checkSource: jest.fn().mockReturnValue(null), handle: jest.fn().mockResolvedValue({ httpStatus: 200, body: { status: true } }) };
     await expect(new JneWebhookController(service as never).jne(BODY, 'application/json', resStub() as never)).resolves.toEqual({ status: true });
   });
 });
@@ -159,7 +159,7 @@ describe('exact inbound exchange (req.rawBody -> rawRequestBody, the sent JSON -
   it('JNE: the raw bytes as received and the JSON actually answered', async () => {
     const rec = recorder();
     const text = '{ "awb" : "JNE00099",\n  "receiver_phone": "6285861470308" }';
-    const service = { handle: jest.fn().mockResolvedValue({ httpStatus: 404, body: { status: false, reason: 'unknown AWB' } }) };
+    const service = { checkSource: jest.fn().mockReturnValue(null), handle: jest.fn().mockResolvedValue({ httpStatus: 404, body: { status: false, reason: 'unknown AWB' } }) };
     await new JneWebhookController(service as never, rec as never).jne(JSON.parse(text), 'application/json', resStub() as never, raw(text));
     expect(rec.entries[0].requestBody).toBe(text);
     expect(rec.entries[0].responseBody).toBe('{"status":false,"reason":"unknown AWB"}');
@@ -167,7 +167,7 @@ describe('exact inbound exchange (req.rawBody -> rawRequestBody, the sent JSON -
 
   it('JNE 415: the raw body and the rejection body are both kept', async () => {
     const rec = recorder();
-    await new JneWebhookController({ handle: jest.fn() } as never, rec as never).jne({}, 'text/plain', resStub() as never, raw('awb=JNE1'));
+    await new JneWebhookController({ checkSource: jest.fn().mockReturnValue(null), handle: jest.fn() } as never, rec as never).jne({}, 'text/plain', resStub() as never, raw('awb=JNE1'));
     expect(rec.entries[0]).toMatchObject({ requestBody: 'awb=JNE1', responseBody: '{"status":false,"reason":"Content-Type must be application/json"}' });
   });
 
@@ -196,7 +196,7 @@ describe('exact inbound exchange (req.rawBody -> rawRequestBody, the sent JSON -
 
   it('without req.rawBody nothing is reconstructed from the parsed body', async () => {
     const rec = recorder();
-    const service = { handle: jest.fn().mockResolvedValue({ httpStatus: 200, body: { status: true } }) };
+    const service = { checkSource: jest.fn().mockReturnValue(null), handle: jest.fn().mockResolvedValue({ httpStatus: 200, body: { status: true } }) };
     await new JneWebhookController(service as never, rec as never).jne({ awb: 'JNE1' }, 'application/json', resStub() as never);
     expect(rec.entries[0].requestBody).toBeNull();
   });

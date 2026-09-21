@@ -9,7 +9,8 @@ import { AddressInfo } from 'net';
 import { CsrfGuard } from '../../src/common/auth/csrf.guard';
 import { PrismaService } from '../../src/database/prisma.service';
 import { LogService } from '../../src/infrastructure/logging/log.service';
-import { JNE_WEBHOOK_CONFIG } from '../../src/modules/shipment/jne-webhook.config';
+import { JNE_WEBHOOK_CONFIG, JneWebhookConfig, loadJneWebhookConfig } from '../../src/modules/shipment/jne-webhook.config';
+import { configureTrustProxy } from '../../src/common/http/trust-proxy';
 import { JneWebhookService } from '../../src/modules/shipment/jne-webhook.service';
 import { JneWebhookController } from '../../src/modules/shipment/presentation/jne-webhook.controller';
 import { readJneWebhook } from '../../src/modules/shipment/shipment-metadata';
@@ -30,6 +31,12 @@ import { MetricsModule } from '../../src/infrastructure/metrics/metrics.module';
 const HTTP_TEST_TIMEOUT_MS = 30_000;
 const AWB = 'JNE0001';
 const ORDER_NUMBER = 'BMS-20260912-001';
+/**
+ * The test server is reached from loopback, so these tests explicitly allow it next to
+ * JNE's confirmed address (as an operator lists a Postman tester outside production).
+ * Source-IP refusal itself is covered in its own describe block below.
+ */
+const TEST_SOURCE_IPS = ['110.239.85.204', '127.0.0.1'];
 
 type Row = Record<string, any>;
 
@@ -180,7 +187,7 @@ describe('JNE Webhook Status V2 - POST /api/v1/shipments/webhook/jne', () => {
   let logWrites: jest.Mock;
   let loggerLines: unknown[];
 
-  async function boot(enabled = true) {
+  async function boot(enabled = true, config: JneWebhookConfig = { enabled, allowedSourceIps: TEST_SOURCE_IPS }, trustProxyHops = 0) {
     db = fakeDb();
     db.seed();
     cache = { del: jest.fn().mockResolvedValue(undefined), get: jest.fn(), set: jest.fn() };
@@ -199,13 +206,14 @@ describe('JNE Webhook Status V2 - POST /api/v1/shipments/webhook/jne', () => {
         ShipmentStatusMapper,
         ShipmentSyncService,
         JneWebhookService,
-        { provide: JNE_WEBHOOK_CONFIG, useValue: { enabled } },
+        { provide: JNE_WEBHOOK_CONFIG, useValue: config },
         { provide: LogService, useValue: { write: logWrites } },
         { provide: CACHE_MANAGER, useValue: cache },
       ],
     }).compile();
     app = moduleRef.createNestApplication<NestExpressApplication>({ logger: false });
     // Exactly the global HTTP setup of main.ts that this route passes through.
+    configureTrustProxy(app as NestExpressApplication, { TRUST_PROXY_HOPS: String(trustProxyHops) });
     app.setGlobalPrefix('api');
     app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
     app.useGlobalGuards(new CsrfGuard());
@@ -213,11 +221,11 @@ describe('JNE Webhook Status V2 - POST /api/v1/shipments/webhook/jne', () => {
     await app.listen(0, '127.0.0.1');
   }
 
-  async function post(body: unknown, contentType = 'application/json') {
+  async function post(body: unknown, contentType = 'application/json', headers: Record<string, string> = {}) {
     const { port } = app.getHttpServer().address() as AddressInfo;
     const res = await fetch(`http://127.0.0.1:${port}/api/v1/shipments/webhook/jne`, {
       method: 'POST',
-      headers: { 'Content-Type': contentType },
+      headers: { 'Content-Type': contentType, ...headers },
       body: typeof body === 'string' ? body : JSON.stringify(body),
     });
     return { status: res.status, body: await res.json() };
@@ -242,11 +250,13 @@ describe('JNE Webhook Status V2 - POST /api/v1/shipments/webhook/jne', () => {
     expect(db.state.history).toEqual([
       expect.objectContaining({ shipmentId: 's1', providerStatus: 'SUCCESS PICKUP', mappedStatus: ShipmentStatus.PICKED_UP }),
     ]);
-    // changedAt is OUR receipt time - JNE's date has no documented zone to convert from.
+    // changedAt is OUR receipt time (unchanged); JNE's GMT+7 date is kept as its own instant.
     const changedAt = new Date(db.state.history[0].changedAt).getTime();
     expect(changedAt).toBeGreaterThanOrEqual(before);
     expect(changedAt).toBeLessThanOrEqual(after);
     expect(record().lastAppliedEventAt).toBe('2026-09-12 09:00:00'); // verbatim JNE date
+    // history[].date is GMT+7 (JNE-confirmed): 09:00:00 WIB is stored as the instant 02:00:00Z.
+    expect(record().events[0]).toMatchObject({ date: '2026-09-12 09:00:00', at: '2026-09-12T02:00:00.000Z' });
     expect(db.state.orderEvents).toEqual([expect.objectContaining({ orderId: 'o1', status: OrderStatus.DELIVERING })]);
     expect(db.state.outbox).toHaveLength(1);
     expect(db.state.outbox[0]).toMatchObject({ template: 'shipment.status', payload: { shipmentStatus: ShipmentStatus.PICKED_UP, trackingNumber: AWB, orderNumber: ORDER_NUMBER } });
@@ -470,6 +480,76 @@ describe('JNE Webhook Status V2 - POST /api/v1/shipments/webhook/jne', () => {
     expect(loggerLines).toContainEqual(expect.objectContaining({ event: 'jne.webhook.processed', outcome: 'transitioned', transition: 'applied', from: 'CREATED', to: 'DELIVERED' }));
     expect(loggerLines).toContainEqual(expect.objectContaining({ event: 'jne.webhook.validation_failed', reason: 'goods_desc is required' }));
   }, HTTP_TEST_TIMEOUT_MS);
+
+  describe('source IP (JNE-confirmed webhook source 110.239.85.204), behind the reverse proxy', () => {
+    // Production shape: the real config loader (confirmed JNE IP only) and TRUST_PROXY_HOPS=1,
+    // so req.ip is the X-Forwarded-For entry our own proxy appended (the right-most one).
+    const productionConfig = () => loadJneWebhookConfig({ JNE_WEBHOOK_ENABLED: 'true', JNE_ENVIRONMENT: 'production' });
+    const refused = { status: 403, body: { status: false, reason: 'source not allowed' } };
+    const nothingWritten = () =>
+      expect([shipment().status, db.state.history.length, db.state.orderEvents.length, db.state.outbox.length, shipment().metadata]).toEqual([
+        ShipmentStatus.CREATED, 0, 0, 0, { jne: { pickupDatetime: '2026-09-12T10:00:00.000Z' } },
+      ]);
+
+    beforeEach(async () => {
+      await app.close();
+      await boot(true, productionConfig(), 1);
+    }, HTTP_TEST_TIMEOUT_MS);
+
+    it('the confirmed JNE address is accepted and processed', async () => {
+      expect(await post(payload(), 'application/json', { 'X-Forwarded-For': '110.239.85.204' })).toEqual({ status: 200, body: { status: true } });
+      expect(shipment().status).toBe(ShipmentStatus.PICKED_UP);
+    }, HTTP_TEST_TIMEOUT_MS);
+
+    it('an untrusted address is refused with 403 before any processing', async () => {
+      expect(await post(payload(), 'application/json', { 'X-Forwarded-For': '8.8.8.8' })).toEqual(refused);
+      nothingWritten();
+      expect(db.state.locks).toEqual([]);
+      expect(loggerLines).toContainEqual(expect.objectContaining({ event: 'jne.webhook.source_rejected', ip: '8.8.8.8' }));
+      expect(logWrites).toHaveBeenCalledWith(expect.objectContaining({ action: 'jne.source_rejected', metadata: { provider: 'jne', sourceIp: '8.8.8.8' } }));
+    }, HTTP_TEST_TIMEOUT_MS);
+
+    it('a client cannot spoof the JNE address by prepending it to X-Forwarded-For', async () => {
+      // Our proxy APPENDS the real peer: the client-written left part is not trusted.
+      expect(await post(payload(), 'application/json', { 'X-Forwarded-For': '110.239.85.204, 203.0.113.9' })).toEqual(refused);
+      nothingWritten();
+    }, HTTP_TEST_TIMEOUT_MS);
+
+    it('a direct (unproxied) caller that is not JNE is refused', async () => {
+      expect(await post(payload())).toEqual(refused);
+      nothingWritten();
+    }, HTTP_TEST_TIMEOUT_MS);
+
+    it('the source check runs first: untrusted callers learn nothing from 415/400 answers', async () => {
+      expect(await post('awb=x', 'text/plain', { 'X-Forwarded-For': '8.8.8.8' })).toEqual(refused);
+      expect(await post({ awb: AWB }, 'application/json', { 'X-Forwarded-For': '8.8.8.8' })).toEqual(refused);
+    }, HTTP_TEST_TIMEOUT_MS);
+
+    it('from the confirmed address, validation, unknown AWB and order_id checks still apply', async () => {
+      const jne = { 'X-Forwarded-For': '110.239.85.204' };
+      expect((await post(payload({ status: 'LOST' }), 'application/json', jne)).status).toBe(400);
+      expect((await post(payload({ awb: 'NOPE' }), 'application/json', jne)).status).toBe(404);
+      expect((await post(payload({ order_id: 'BMS-20260912-999' }), 'application/json', jne)).status).toBe(409);
+      nothingWritten();
+    }, HTTP_TEST_TIMEOUT_MS);
+  });
+
+  it('order_id is correlated with Order.orderNumber (the order_no sent at booking), never an internal id', async () => {
+    // The shipment's internal ids (shipment s1 / order o1) are not accepted as order_id.
+    expect((await post(payload({ order_id: 'o1' }))).status).toBe(409);
+    expect((await post(payload({ order_id: 's1' }))).status).toBe(409);
+    expect(shipment().status).toBe(ShipmentStatus.CREATED);
+    expect(await post(payload({ order_id: ORDER_NUMBER }))).toEqual({ status: 200, body: { status: true } });
+    expect(shipment().status).toBe(ShipmentStatus.PICKED_UP);
+  }, HTTP_TEST_TIMEOUT_MS);
+
+  it('actual_weight "1000" / actual_ongkir "20000" arrive as JSON strings and are accepted, raw kept', async () => {
+    const body = payload({ actual_weight: '1000', actual_ongkir: '20000' });
+    expect(typeof body.actual_weight).toBe('string');
+    expect(await post(body)).toEqual({ status: 200, body: { status: true } });
+    expect(record().actual).toMatchObject({ weight: 1000, weightRaw: '1000', ongkir: 20000, ongkirRaw: '20000' });
+    expect(shipment().cost).toBe(18000); // the charged shipping cost is untouched
+  }, HTTP_TEST_TIMEOUT_MS);
 });
 
 describe('JNE webhook disabled (the default)', () => {
@@ -487,7 +567,7 @@ describe('JNE webhook disabled (the default)', () => {
         ShipmentStatusMapper,
         ShipmentSyncService,
         JneWebhookService,
-        { provide: JNE_WEBHOOK_CONFIG, useValue: { enabled: false } },
+        { provide: JNE_WEBHOOK_CONFIG, useValue: { enabled: false, allowedSourceIps: TEST_SOURCE_IPS } },
       ],
     }).compile();
     app = moduleRef.createNestApplication({ logger: false });
@@ -526,7 +606,7 @@ describe('ShipmentModule wiring (the real module, as main.ts boots it)', () => {
 
     const moduleRef = await Test.createTestingModule({ imports: [GlobalStubs, MetricsModule, ShipmentModule] })
       .overrideProvider(JNE_WEBHOOK_CONFIG)
-      .useValue({ enabled: true })
+      .useValue({ enabled: true, allowedSourceIps: TEST_SOURCE_IPS })
       .compile();
     expect(moduleRef.get(JneWebhookService)).toBeInstanceOf(JneWebhookService);
     app = moduleRef.createNestApplication({ logger: false });

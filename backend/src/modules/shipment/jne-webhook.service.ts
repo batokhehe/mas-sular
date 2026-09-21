@@ -12,7 +12,7 @@ import {
   parseJneWebhook,
 } from './domain/jne-webhook';
 import { decideShipmentTransition, ShipmentTransitionDecision } from './domain/shipment-transition';
-import { JNE_WEBHOOK_CONFIG, JneWebhookConfig, loadJneWebhookConfig } from './jne-webhook.config';
+import { isAllowedJneSource, JNE_WEBHOOK_CONFIG, JneWebhookConfig, loadJneWebhookConfig, normalizeIp } from './jne-webhook.config';
 import { readJneWebhook, withJneWebhook } from './shipment-metadata';
 import { lockShipmentRow } from './shipment-row-lock';
 import { lookupProviderStatus } from './shipment-status.mapper';
@@ -70,8 +70,10 @@ const OK: JneWebhookResponse = { httpStatus: 200, body: { status: true } };
  *     shared rule in domain/shipment-transition.ts, also used by the pollers), so a
  *     retry is a no-op: no second history row, order event or notification.
  *
- * JNE's `history[].date` has no documented time zone: it is stored verbatim and
- * compared only with other JNE dates. ShipmentHistory.changedAt is OUR receipt time.
+ * Correlation: JNE confirmed `order_id` is the `order_no` we sent at booking, i.e.
+ * Order.orderNumber - never an internal id. `history[].date` is GMT+7 (confirmed):
+ * each event is stored verbatim AND as the instant it denotes (UTC ISO).
+ * ShipmentHistory.changedAt stays OUR receipt time.
  */
 @Injectable()
 export class JneWebhookService {
@@ -86,6 +88,26 @@ export class JneWebhookService {
     @Optional() @Inject(CACHE_MANAGER) private readonly cache?: Cache,
   ) {
     this.config = config ?? loadJneWebhookConfig();
+  }
+
+  /**
+   * Source-address check (JNE confirmed its webhook source IP in writing). Runs before
+   * anything else in the controller. `clientIp` is req.ip, which honours
+   * TRUST_PROXY_HOPS - never the raw, client-controlled X-Forwarded-For. Returns the
+   * documented refusal body, or null when the source is allowed.
+   */
+  checkSource(clientIp: string | null | undefined): JneWebhookResponse | null {
+    if (isAllowedJneSource(this.config, clientIp)) return null;
+    const ip = normalizeIp(clientIp) ?? 'unknown';
+    this.logger.warn({ event: 'jne.webhook.source_rejected', ip });
+    this.logs?.write({
+      level: 'WARN',
+      module: 'shipment.webhook',
+      action: 'jne.source_rejected',
+      message: `JNE webhook refused: source ${ip} is not an allowed JNE address`,
+      metadata: { provider: JNE_PROVIDER, sourceIp: ip },
+    });
+    return { httpStatus: 403, body: { status: false, reason: 'source not allowed' } };
   }
 
   async handle(body: unknown): Promise<JneWebhookResponse> {
@@ -232,8 +254,16 @@ export class JneWebhookService {
           payload.status,
           // Latest-status snapshot, as the poller stores: identifiers only. The full
           // JNE detail lives in metadata.jne.webhook.
-          { source: 'jne.webhook', awb: payload.awb, status: payload.status, jneEventDate: payload.eventAt, fingerprint: payload.fingerprint },
-          // Our own receipt time: JNE's date has no documented zone to convert from.
+          {
+            source: 'jne.webhook',
+            awb: payload.awb,
+            status: payload.status,
+            jneEventDate: payload.eventAt,
+            // The instant that GMT+7 date denotes (JNE confirmed the zone).
+            jneEventAt: payload.eventInstant,
+            fingerprint: payload.fingerprint,
+          },
+          // Our own receipt time, as for every provider (kept unchanged).
           receivedAt,
         );
         if (transitioned) {

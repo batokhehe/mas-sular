@@ -3,6 +3,18 @@
 Status of the implementation: **done and deployed OFF** (`JNE_WEBHOOK_ENABLED=false`).
 This runbook is everything needed to switch it on safely. Nothing here calls JNE.
 
+## 0. Confirmed by JNE (in writing)
+
+| Item | JNE's answer | How the application uses it |
+|---|---|---|
+| Webhook source IP | **110.239.85.204** | The only address the application trusts (section 4); production may trust nothing else |
+| `order_id` | The `order_no` Mas Sular sent at booking | Must equal `Order.orderNumber` of the AWB's shipment, else 409 — never an internal id |
+| `actual_weight`, `actual_ongkir` | **Strings** | Parsed from strings (e.g. `"1000"`, `"20000"`); the raw string is stored next to the number |
+| `history[].date` | **GMT+7** | Read as `+07:00` (Asia/Jakarta, no DST): stored verbatim **and** as the UTC instant (`at`) |
+| Retries | **Maximum 3 retries** | Nothing more is known — see section 3 E |
+| Staging / testing | JNE tests by **pushing a dummy payload via Postman** | Section 7 |
+| Production registration | Share our **production webhook endpoint** and **live credentials** with the JNE team | Operational step — section 5; credentials never go into the repository |
+
 ## 1. Endpoint to register with JNE
 
 | | |
@@ -10,7 +22,7 @@ This runbook is everything needed to switch it on safely. Nothing here calls JNE
 | Method | `POST` |
 | Content-Type | `application/json` (anything else is refused with HTTP 415) |
 | URL | `<APP_URL>/api/v1/shipments/webhook/jne` — the **public** production API origin (`APP_URL` in `production.env`). Never localhost or an internal address. |
-| Authentication | **None.** JNE's V2 documentation defines none, and none is invented. Protection is the reverse-proxy IP restriction (section 4) plus application checks. |
+| Authentication | **None in the payload.** JNE's V2 documentation defines none, and none is invented. Protection is the source-IP check (JNE-confirmed `110.239.85.204`, enforced by the application **and** the reverse proxy — section 4) plus application checks. |
 
 ### Responses (JNE's documented bodies; HTTP codes are ours)
 
@@ -18,6 +30,7 @@ This runbook is everything needed to switch it on safely. Nothing here calls JNE
 |---|---|---|
 | 200 | `{"status": true}` | Accepted: processed, recorded without a transition, or an already-processed duplicate |
 | 400 | `{"status": false, "reason": "..."}` | Invalid payload (missing mandatory field, undocumented status, bad `history[].date`, non-numeric weight/ongkir) |
+| 403 | `{"status": false, "reason": "source not allowed"}` | The caller is not an allowed source address (checked first, before anything else) |
 | 404 | `{"status": false, "reason": "unknown awb: ..."}` | No JNE shipment has this AWB — nothing is created |
 | 409 | `{"status": false, "reason": "order_id does not match ..."}` | `order_id` is not the order number of the AWB's shipment |
 | 415 | `{"status": false, "reason": "Content-Type must be application/json"}` | Not JSON |
@@ -40,8 +53,16 @@ JNE's. A legitimate JNE push never hits these.
 **DELIVERED only:** `signature`, `photo`, `receiver_name`, `receiver_relation`, `cod_amount`.
 Absent on other statuses is normal; if sent on other statuses they are ignored.
 
-**`history[]` entries:** `date` (`YYYY-MM-DD HH:MM:SS`, required per entry), `status`,
-`status_code`, `status_desc`, `location_code`.
+**`history[]` entries:** `date` (`YYYY-MM-DD HH:MM:SS` in **GMT+7**, required per entry), `status`,
+`status_code`, `status_desc`, `location_code`. Example: `"2026-09-12 09:00:00"` is stored as
+`date: "2026-09-12 09:00:00"` and `at: "2026-09-12T02:00:00.000Z"` — the same instant. Ordering and
+staleness compare the verbatim GMT+7 strings; `ShipmentHistory.changedAt` stays our receipt time.
+
+**`actual_weight`, `actual_ongkir`** are **strings** (JNE-confirmed). Accepted: plain dot-decimal
+digits (`"1000"`, `"1.5"`, `"21000.00"`); a JSON number is tolerated too. Refused with 400, never
+coerced: empty, negative, comma decimals (`"1,5"`), units or currency (`"1000 gram"`, `"Rp20000"`),
+exponents. The raw string is kept in `metadata.jne.webhook.actual.weightRaw` / `ongkirRaw`.
+`actual_ongkir` is courier information only: it never changes `Shipment.cost` or any price.
 
 **`status`** — exactly one of the six documented summary statuses:
 `SUCCESS PICKUP`, `FAILED PICKUP`, `SHIPPED`, `DELIVERED`, `SHIPMENT PROBLEM`, `RETURN TO SHIPPER`.
@@ -67,17 +88,15 @@ Absent on other statuses is normal; if sent on other statuses they are ignored.
 
 Transitions are forward-only; an older or duplicate push never regresses or repeats anything.
 
-## 3. JNE confirmation items — must be answered from a real JNE test push
+## 3. JNE confirmation items
 
-None of these can be derived from the documentation. **Do not assume an answer.**
-
-| # | Question | How to verify | If the answer differs |
-|---|---|---|---|
-| A | Does JNE send back our booking `order_no` as `order_id`? | Test push for a shipment we booked; response 200, not 409 | Every push would be refused (409); the matching rule must change before go-live |
-| B | Exact format of `actual_weight`, `actual_ongkir`, `cod_amount` | Inspect the stored `metadata.jne.webhook.actual` / `.delivery` (raw strings are kept) | We accept dot-decimals only (`1.2`, `21000`, `21000.00`). A comma decimal (`1,5`) is refused (400); an Indonesian thousands separator (`10.000`) would be read as 10 |
-| C | Time zone of `history[].date` | Compare a push's dates with JNE's tracking page / known event times | Dates are stored verbatim and only compared with each other; only the meaning shown to operators is affected |
-| D | Exact tracking `pod_status` values for failed pickup, shipment problem, returned, delivered, other terminal failures | JNE tracking-API documentation or sandbox captures | The tracking **poller** still maps generic `FAILED`/`RETURNED`/`UNDELIVERED` to terminal FAILED; only with these values can it match the webhook's record-only FAILED PICKUP (see `shipment-status.mapper.ts`) |
-| E | JNE retry behaviour on 200 `{"status":true}`, 4xx and 5xx | Ask JNE; observe retries on a deliberate 404/409 | A 4xx is permanent for us (bad data); a 500 is safe to retry. If JNE never retries, a 500 loses that push — the poller remains the backstop |
+| # | Question | Status |
+|---|---|---|
+| A | Does JNE send back our booking `order_no` as `order_id`? | **Confirmed by JNE: yes.** Still verify on the first real push (200, not 409). |
+| B | Format of `actual_weight`, `actual_ongkir` | **Confirmed by JNE: strings.** Their exact number format is not specified: we accept dot-decimals (`1.2`, `21000`, `21000.00`); a comma decimal (`1,5`) is refused (400); an Indonesian thousands separator (`10.000`) would be read as 10. Check the stored raw strings on the first real push. `cod_amount`'s format is not confirmed. |
+| C | Time zone of `history[].date` | **Confirmed by JNE: GMT+7.** Implemented (section 2). |
+| D | Exact tracking `pod_status` values for failed pickup, shipment problem, returned, delivered, other terminal failures | **Open.** The tracking **poller** still maps generic `FAILED`/`RETURNED`/`UNDELIVERED` to terminal FAILED; only with these values can it match the webhook's record-only FAILED PICKUP (see `shipment-status.mapper.ts`) |
+| E | Retry behaviour | **Confirmed by JNE: a maximum of 3 retries.** JNE did **not** specify whether 4xx and/or 5xx responses are retried, the retry interval, or whether the 3 include the first attempt — do not assume any of these. Our answers are unchanged: 200 for accepted (including duplicates), 4xx for requests we will never accept as sent, 500 only when nothing was written (a repeat of the same push is safe). The tracking poller remains the backstop for a push that is never accepted. |
 
 ## 4. Reverse proxy / network (production action)
 
@@ -85,14 +104,28 @@ The versioned reverse-proxy configuration is `ops/nginx/mas-sular.conf` (install
 `/opt/mas-sular/nginx/conf.d/`). The backend publishes no host port and is reachable only through the proxy
 on the `edge` network.
 
-**Current state (staging, 2026-09-13): CLOSED.** No JNE source-IP list has been verified, so
-`JNE_WEBHOOK_ENABLED=false` (the application answers 503) **and** nginx answers 403 for
-`location = /api/v1/shipments/webhook/jne`. Both must change together to enable it.
+**Current state: CLOSED.** `JNE_WEBHOOK_ENABLED=false` (the application answers 503) **and** nginx
+answers 403 for `location = /api/v1/shipments/webhook/jne`. Both must change together to enable it.
 
-When JNE provides its source IP addresses (in writing), configure the proxy to:
+**Application-level source check (always on).** JNE confirmed its webhook source IP:
+**110.239.85.204**. The application refuses any other caller with 403 *before* the enabled flag,
+content type or payload are looked at. The caller address is `req.ip`, i.e. the entry our own proxy
+appended to `X-Forwarded-For` (`TRUST_PROXY_HOPS=1`) — a client-written `X-Forwarded-For` cannot spoof it.
 
-1. Allow `POST /api/v1/shipments/webhook/jne` **only** from the JNE-provided addresses; refuse everyone else
-   for that path. Do not add addresses JNE has not provided in writing.
+| Setting | Effect |
+|---|---|
+| (default) | Only `110.239.85.204` is allowed — in every environment |
+| `JNE_WEBHOOK_EXTRA_SOURCE_IPS=203.0.113.7,…` with `JNE_ENVIRONMENT` ≠ `production` | Also allows these exact addresses (e.g. the public IP of whoever sends the agreed Postman test push). No wildcards or ranges |
+| `JNE_WEBHOOK_EXTRA_SOURCE_IPS` with an unconfirmed address and `JNE_ENVIRONMENT=production` | **Boot fails** — production trusts only JNE-confirmed addresses |
+
+Refusals are logged (`jne.source_rejected`, with the refused address) and recorded in the
+Integration Logs as REJECTED.
+
+**Reverse proxy (defense in depth).** Configure the proxy to:
+
+1. Allow `POST /api/v1/shipments/webhook/jne` **only** from `110.239.85.204` (plus, on a non-production
+   host only, the same explicit test addresses as the application); refuse everyone else for that path.
+   Do not add addresses JNE has not provided in writing.
 2. Keep forwarding the client address by **appending** `X-Forwarded-For` (production runs
    `TRUST_PROXY_HOPS=1`), so the application's per-IP rate limit (600/min on this route) keys on JNE's
    address, not the proxy's.
@@ -102,8 +135,7 @@ Concretely, in `ops/nginx/mas-sular.conf`, replace the webhook location's `retur
 
 ```nginx
 location = /api/v1/shipments/webhook/jne {
-    allow <JNE-IP-1>;          # one line per address JNE supplied in writing
-    allow <JNE-IP-2>;
+    allow 110.239.85.204;      # JNE-confirmed webhook source (in writing)
     deny  all;
     proxy_pass http://backend:3001;
     proxy_http_version 1.1;
@@ -124,8 +156,10 @@ validation, AWB + `order_id` matching and forward-only transitions do not depend
 
 1. Deploy the backend with the webhook implementation.
 2. Keep `JNE_WEBHOOK_ENABLED=false`.
-3. When JNE provides source IPs, configure the reverse-proxy restriction (section 4).
-4. Register `<APP_URL>/api/v1/shipments/webhook/jne` with JNE.
+3. Configure the reverse-proxy restriction to `110.239.85.204` (section 4).
+4. Production registration (operational, done with the JNE team — not by the application): share our
+   **production webhook endpoint** `<APP_URL>/api/v1/shipments/webhook/jne` and the **live credentials**
+   with JNE through the agreed channel. Never put live credentials in the repository, tests, tickets or logs.
 5. Ask JNE for a sandbox/test push. **With the flag off, production answers 503 by design**, so run the
    test where the flag is on:
    - preferably a **staging** deployment with `JNE_WEBHOOK_ENABLED=true` and JNE sandbox bookings
@@ -162,3 +196,54 @@ transition). Container logs: `docker compose ... logs backend | grep jne.webhook
 
 Note: the log search box matches messages and ids, not the AWB; filter by module and open the entry.
 Poller refusals of stale answers are kept in `Shipment.metadata.tracking.rejected`.
+
+## 7. Staging test with a dummy payload (Postman) — inbound only
+
+JNE confirmed that staging/testing is done by pushing a dummy payload via Postman. This touches only our
+endpoint: no JNE API is called, nothing is booked, no pickup is requested.
+
+Prerequisites on the **staging** host (never production):
+
+1. `JNE_WEBHOOK_ENABLED=true`, `JNE_ENVIRONMENT=sandbox`, and the tester's public IP in
+   `JNE_WEBHOOK_EXTRA_SOURCE_IPS` (unless the push comes from `110.239.85.204` itself); recreate the backend.
+2. The reverse proxy must let that address through for this path (it answers 403 while closed).
+3. A **dedicated internal test order** with a JNE shipment whose AWB is known (a transition queues a
+   customer WhatsApp; staging forces the notification allowlist).
+
+Request:
+
+```
+POST <STAGING_API_ORIGIN>/api/v1/shipments/webhook/jne
+Content-Type: application/json
+```
+
+Body (dummy values — replace `awb` / `order_id` with the test shipment's AWB and order number):
+
+```json
+{
+  "awb": "TESTAWB0000001",
+  "order_id": "BMS-20260918-TEST0001",
+  "status": "SUCCESS PICKUP",
+  "actual_weight": "1000",
+  "actual_ongkir": "20000",
+  "service": "REG",
+  "actual_sender_name": "Dummy Sender",
+  "actual_sender_address": "Jl. Contoh No. 1",
+  "goods_desc": "Dummy goods",
+  "origin_code": "BDO10000",
+  "dest_code": "CGK10000",
+  "actual_receiver_address": "Jl. Contoh Penerima No. 2",
+  "actual_receiver_city_name": "JAKARTA",
+  "actual_receiver_city_code": "CGK10000",
+  "history": [
+    { "date": "2026-09-18 09:00:00", "status": "PICKED UP", "status_code": "PU1", "status_desc": "PICKED UP BY COURIER", "location_code": "BDO" }
+  ]
+}
+```
+
+Expected: `200 {"status": true}`; the shipment becomes PICKED_UP; `metadata.jne.webhook.events[0]` has
+`date: "2026-09-18 09:00:00"` and `at: "2026-09-18T02:00:00.000Z"`; `actual.weightRaw`/`ongkirRaw` are
+`"1000"`/`"20000"`. Sending the same body again returns 200 with no new history or notification. Follow
+with `"status": "SHIPPED"` then `"DELIVERED"` (append history entries with later GMT+7 dates) to walk the
+lifecycle. Negative checks: another source address → 403; `order_id` of a different order → 409; an unknown
+AWB → 404; a missing mandatory field → 400. No header carries a credential: none is defined for this webhook.

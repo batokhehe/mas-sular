@@ -38,7 +38,7 @@ beforeAll(async () => {
       ShipmentStatusMapper,
       ShipmentSyncService,
       JneWebhookService,
-      { provide: JNE_WEBHOOK_CONFIG, useValue: { enabled: true } },
+      { provide: JNE_WEBHOOK_CONFIG, useValue: { enabled: true, allowedSourceIps: ['110.239.85.204', '127.0.0.1'] } },
     ],
   }).compile()
   app = moduleRef.createNestApplication({ logger: false })
@@ -122,7 +122,7 @@ describe('JNE webhook: full lifecycle on real PostgreSQL', () => {
       ['SHIPPED', ShipmentStatus.IN_TRANSIT],
       ['DELIVERED', ShipmentStatus.DELIVERED],
     ])
-    // changedAt is OUR receipt time (JNE's date has no documented zone); in receipt order.
+    // changedAt is OUR receipt time (unchanged); JNE's GMT+7 dates are stored as their own instants.
     for (const h of s.history) {
       expect(h.changedAt.getTime()).toBeGreaterThanOrEqual(before.getTime())
       expect(h.changedAt.getTime()).toBeLessThanOrEqual(after.getTime())
@@ -138,6 +138,14 @@ describe('JNE webhook: full lifecycle on real PostgreSQL', () => {
       lastEventAt: '2026-09-13 10:30:00',
     })
     expect(s.record!.events.map((e) => e.statusCode)).toEqual(['PU1', 'OP1', 'D01'])
+    // history[].date is GMT+7 (JNE-confirmed): persisted verbatim AND as the same instant in UTC.
+    expect(s.record!.events.map((e) => [e.date, e.at])).toEqual([
+      ['2026-09-12 09:00:00', '2026-09-12T02:00:00.000Z'],
+      ['2026-09-12 12:00:00', '2026-09-12T05:00:00.000Z'],
+      ['2026-09-13 10:30:00', '2026-09-13T03:30:00.000Z'],
+    ])
+    // actual_weight / actual_ongkir arrived as strings; the raw strings are persisted too.
+    expect(s.record!.actual).toMatchObject({ weightRaw: '1.2', ongkirRaw: '21000' })
     expect((s.shipment.metadata as { jne: { pickupDatetime: string } }).jne.pickupDatetime).toBe('2026-09-12T10:00:00.000Z')
   })
 })

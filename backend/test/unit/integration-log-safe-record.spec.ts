@@ -153,7 +153,7 @@ describe('a throwing recorder changes nothing (the five call sites)', () => {
   });
 
   it('the JNE webhook still answers exactly as before', async () => {
-    const service = { handle: jest.fn().mockResolvedValue({ httpStatus: 200, body: { status: true } }) };
+    const service = { checkSource: jest.fn().mockReturnValue(null), handle: jest.fn().mockResolvedValue({ httpStatus: 200, body: { status: true } }) };
     const res200 = { statusCode: 0, status(code: number) { this.statusCode = code; return this; } };
     await expect(
       new JneWebhookController(service as never, THROWING as never).jne({ awb: 'JNE1' }, 'application/json', res200 as never),
