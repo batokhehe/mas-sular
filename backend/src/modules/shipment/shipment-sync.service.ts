@@ -9,7 +9,7 @@ import type { RawTrackingResult, ShipmentProvider } from './domain/shipment-prov
 import { decideShipmentTransition } from './domain/shipment-transition';
 import { recordRejectedObservation } from './shipment-observation.recorder';
 import { ShipmentProviderFactory } from './shipment-provider.factory';
-import { SHIPMENT_TRACKING_CONFIG, ShipmentTrackingConfig } from './shipment-tracking.config';
+import { JNE_TRACKING_PROVIDER, SHIPMENT_TRACKING_CONFIG, ShipmentTrackingConfig } from './shipment-tracking.config';
 import { ShipmentStatusMapper } from './shipment-status.mapper';
 
 /** Fallback when the tracking config is not injected (unit tests). 2 hours. */
@@ -101,10 +101,22 @@ export class ShipmentSyncService {
     return JSON.parse(JSON.stringify(value ?? {})) as Prisma.InputJsonValue;
   }
 
-  /** Poll & reconcile up to `limit` non-terminal shipments. Returns rows changed. */
+  /**
+   * Poll & reconcile up to `limit` non-terminal shipments. Returns rows changed.
+   *
+   * JNE webhook-only mode: unless JNE_TRACKING_POLL_ENABLED=true, JNE shipments are not
+   * selected at all, so JNE is never asked (their status comes from the JNE webhook).
+   * Without an injected config (direct construction in unit tests) every courier is
+   * polled, exactly as before; the application always injects the config.
+   */
   async syncAll(limit = 50): Promise<number> {
+    const skipJne = this.config ? !this.config.jnePollingEnabled : false;
     const shipments = await this.prisma.shipment.findMany({
-      where: { status: { in: POLLABLE }, trackingNumber: { not: null } },
+      where: {
+        status: { in: POLLABLE },
+        trackingNumber: { not: null },
+        ...(skipJne ? { NOT: { provider: { equals: JNE_TRACKING_PROVIDER, mode: 'insensitive' as const } } } : {}),
+      },
       include: {
         order: {
           select: {

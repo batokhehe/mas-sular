@@ -26,7 +26,12 @@ export class ShipmentTrackingWorker implements OnApplicationBootstrap, OnModuleD
       this.logger.log('Shipment tracking disabled (SHIPMENT_TRACKING_ENABLED=false)');
       return;
     }
-    this.logger.log(`Shipment tracking enabled; polling every ${this.config.pollIntervalMs}ms`);
+    this.logger.log(
+      `Shipment tracking enabled; polling every ${this.config.pollIntervalMs}ms; ` +
+        (this.config.jnePollingEnabled
+          ? 'JNE polling enabled (JNE_TRACKING_POLL_ENABLED=true)'
+          : 'JNE polling disabled - JNE status comes from the JNE webhook (JNE_TRACKING_POLL_ENABLED is not "true")'),
+    );
     this.schedule();
   }
 
