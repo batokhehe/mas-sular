@@ -5,6 +5,7 @@ import {
   computeJneQuantity,
   computeJneWeightKg,
   formatJnePickupSlot,
+  JNE_BOOKING_SERVICE_CODE,
   JNE_PICKUP_CASHLESS_FIELDS,
   JNE_ORDER_ID_MAX_LENGTH,
   JNE_SPECIAL_INSTRUCTION,
@@ -84,6 +85,34 @@ const refusal = (fn: () => unknown): string => {
   throw new Error('expected a refusal');
 };
 
+describe('JNE shipment booking must use REG service (business rule)', () => {
+  it('the booking service code is exactly REG', () => {
+    expect(JNE_BOOKING_SERVICE_CODE).toBe('REG');
+  });
+
+  it.each(['JTR<130', 'JTR250', 'JTR>250', 'YES19', 'REG19', 'REG15', 'OKE', 'CTC', ' reg ', 'SOMETHING_NEW'])(
+    'quoted service %p -> SERVICE_CODE is REG (never the quoted code)',
+    (service) => {
+      const fields = build({ service });
+      expect(fields.SERVICE_CODE).toBe('REG');
+      expect(Object.values(fields)).not.toContain(service.trim()); // the quoted code is sent nowhere
+    },
+  );
+
+  it('the rest of the booking payload is identical whatever service was quoted', () => {
+    const { SERVICE_CODE: a, ...jtr } = build({ service: 'JTR<130' });
+    const { SERVICE_CODE: b, ...yes } = build({ service: 'YES19' });
+    expect([a, b]).toEqual(['REG', 'REG']);
+    expect(yes).toEqual(jtr);
+    // PICKUP_SERVICE is a different field (the pickup type from configuration) and is untouched.
+    expect(build({ service: 'JTR<130' }).PICKUP_SERVICE).toBe(PICKUP.pickupService);
+  });
+
+  it('a booking with no selected JNE service is still refused (validation unchanged)', () => {
+    expect(refusal(() => build({ service: '  ' }))).toMatch(/the selected JNE service is missing/);
+  });
+});
+
 describe('field mapping', () => {
   const fields = build();
 
@@ -140,10 +169,11 @@ describe('field mapping', () => {
     });
   });
 
-  it('routing: JNE origin code, the resolved JNE destination code, the selected service', () => {
+  it('routing: JNE origin code, the resolved JNE destination code, and REG (never the quoted service)', () => {
     expect(fields.ORIGIN_CODE).toBe('BDO10000');
     expect(fields.DESTINATION_CODE).toBe('BDO10060');
-    expect(fields.SERVICE_CODE).toBe('JTR<130');
+    expect(SOURCE.service).toBe('JTR<130'); // what the customer was quoted and bought
+    expect(fields.SERVICE_CODE).toBe('REG'); // what the booking sends (business rule)
   });
 
   it('goods: weight, quantity, description, merchandise amount, insurance', () => {
@@ -314,19 +344,21 @@ describe('serialization — application/x-www-form-urlencoded', () => {
       receiver: {
         ...SOURCE.receiver,
         name: 'Siti "Ani" Rahmawati',
-        addressDetail: 'Jl. Merdeka No. 12/B, RT 01/RW 02 & Gg. Mawar #3 (belakang masjid) 100%',
+        addressDetail: 'Jl. Merdeka No. 12/B, RT 01/RW 02 & Gg. Mawar #3 (belakang masjid) 100% <depan>',
       },
     });
     const body = serializeJnePickupCashless(credentials, tricky);
     // Encoded on the wire...
-    expect(body).toContain('SERVICE_CODE=JTR%3C130');
+    expect(body).toContain('SERVICE_CODE=REG&');
+    expect(body).toContain('%3Cdepan%3E'); // `<` / `>` are percent-encoded
+    expect(body).not.toContain('JTR');
     expect(body).not.toContain('& Gg.');
     expect(body).not.toContain('#3');
     // ...and decoded back exactly.
     const decoded = Object.fromEntries(new URLSearchParams(body));
-    expect(decoded.SERVICE_CODE).toBe('JTR<130');
+    expect(decoded.SERVICE_CODE).toBe('REG');
     expect(decoded.RECEIVER_NAME).toBe('Siti "Ani" Rahmawati');
-    expect(decoded.RECEIVER_ADDR1).toBe('Jl. Merdeka No. 12/B, RT 01/RW 02 & Gg. Mawar #3 (belakang masjid) 100%');
+    expect(decoded.RECEIVER_ADDR1).toBe('Jl. Merdeka No. 12/B, RT 01/RW 02 & Gg. Mawar #3 (belakang masjid) 100% <depan>');
     expect(decoded.username).toBe('user-test');
   });
 
@@ -385,7 +417,7 @@ describe('what the integration log would persist from this exact body', () => {
       SPECIAL_INS: 'NO SPECIAL INSTRUCTION',
       ORIGIN_CODE: 'BDO10000',
       DESTINATION_CODE: 'BDO10060',
-      SERVICE_CODE: 'JTR<130',
+      SERVICE_CODE: 'REG',
       WEIGHT: '1',
       QTY: '3',
       GOODS_AMOUNT: '85000',

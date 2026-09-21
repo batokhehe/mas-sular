@@ -6,6 +6,7 @@ import {
   serializeJnePickupCashless,
 } from '../../src/modules/shipment/infrastructure/providers/jne-pickup-cashless';
 import { JneShipmentProvider } from '../../src/modules/shipment/infrastructure/providers/jne-shipment.provider';
+import { JneProvider } from '../../src/modules/shipping/infrastructure/providers/jne.provider';
 import { ShippingConfig, JnePickupConfig } from '../../src/modules/shipping/shipping.config';
 import { ShippingHttpClient, ShippingHttpRequest } from '../../src/modules/shipping/infrastructure/http/shipping-http-client';
 
@@ -165,14 +166,15 @@ describe('JNE /pickupcashless FINAL wire body (diagnostic)', () => {
       MERCHANT_ID: 'MASSULAR',
       ORIGIN_CODE: 'BDO10000',
       DESTINATION_CODE: 'BDO10060',
-      SERVICE_CODE: 'JTR<130',
+      SERVICE_CODE: 'REG', // JNE shipment booking must use REG (SOURCE.service is JTR<130)
       TYPE: 'PICKUP',
     });
   });
 
-  it('URL encoding round-trips losslessly (space -> +, < -> %3C, : -> %3A)', () => {
+  it('URL encoding round-trips losslessly (space -> +, : -> %3A); SERVICE_CODE is REG, never the quoted JTR<130', () => {
     expect(diagnoseWireBody(body, [], fields).encodingMismatches).toEqual([]);
-    expect(body).toContain('SERVICE_CODE=JTR%3C130');
+    expect(body).toContain('SERVICE_CODE=REG&');
+    expect(body).not.toContain('JTR');
     expect(body).toContain('SPECIAL_INS=NO+SPECIAL+INSTRUCTION');
     expect(body).toContain('PICKUP_TIME=17%3A00');
     expect(body).not.toMatch(/^\s*[{[]/); // not JSON
@@ -215,5 +217,94 @@ describe('JNE /pickupcashless FINAL wire body (diagnostic)', () => {
       kind: 'provider_error',
       reason: 'Please do not let paramaters empty.',
     });
+  });
+});
+
+describe('quotation -> booking: the booking sends REG whatever the quote said', () => {
+  // Real quotation provider (JNE pricedev) and real booking provider, both with a mocked
+  // transport - no network. The quotation answers JTR<130; the customer "buys" it.
+  const PRICEDEV_BODY = JSON.stringify({
+    price: [
+      { origin_name: 'BANDUNG', destination_name: 'BANDUNG', service_display: 'JTR<130', service_code: 'JTR<130', goods_type: 'Paket', currency: 'IDR', price: '50000', etd_from: '3', etd_thru: '4', times: 'D' },
+      { origin_name: 'BANDUNG', destination_name: 'BANDUNG', service_display: 'YES', service_code: 'YES19', goods_type: 'Document/Paket', currency: 'IDR', price: '15000', etd_from: null, etd_thru: null, times: 'D' },
+    ],
+  });
+  const response = (status: number, text: string) => ({ status, text: async () => text, headers: { get: () => null } });
+  const resolver = { resolve: async () => 'BDO10060' } as never;
+
+  async function quote() {
+    const calls: string[] = [];
+    const quotation = new JneProvider(shippingConfig(), resolver);
+    (quotation as unknown as { http: ShippingHttpClient }).http = async (url) => {
+      calls.push(url);
+      return response(200, PRICEDEV_BODY);
+    };
+    const quotes = await quotation.getRates({ originPostalCode: '40111', destinationPostalCode: '40112', weightGram: 250, destinationDistrictId: 'dist-1' });
+    return { quotes, calls };
+  }
+
+  async function book(service: string) {
+    const calls: Array<{ url: string; init: ShippingHttpRequest }> = [];
+    const booking = new JneShipmentProvider(shippingConfig(), undefined, resolver);
+    (booking as unknown as { http: ShippingHttpClient }).http = async (url, init) => {
+      calls.push({ url, init });
+      return response(200, '{"detail":[{"status":"success","cnote_no":"0109401600067399"}]}');
+    };
+    const result = await booking.createShipment({
+      orderId: 'order-1',
+      orderNumber: SOURCE.orderNumber,
+      service,
+      weightGram: 250,
+      origin: { name: 'Outlet', postalCode: '40111' },
+      destination: {
+        name: SOURCE.receiver.name,
+        phone: SOURCE.receiver.phone,
+        addressDetail: SOURCE.receiver.addressDetail,
+        village: SOURCE.receiver.village,
+        district: SOURCE.receiver.district,
+        city: SOURCE.receiver.city,
+        postalCode: SOURCE.receiver.postalCode,
+        province: SOURCE.receiver.province,
+      },
+      goodsAmount: SOURCE.goodsAmount,
+      destinationDistrictId: 'dist-1',
+      recordedPickupAtIso: SOURCE.pickupAtIso,
+      items: [{ code: 'P1', name: 'Keju Nyakrek', category: 'Food', quantity: 1, unitPrice: 45_000, weightGram: 250, lengthCm: null, widthCm: null, heightCm: null }],
+    } as never);
+    return { result, calls };
+  }
+
+  it('the quotation is unchanged (JTR<130 returned verbatim) and makes no booking request', async () => {
+    const { quotes, calls } = await quote();
+    expect(quotes.map((q) => q.service)).toEqual(['JTR<130', 'YES19']);
+    expect(quotes.find((q) => q.service === 'JTR<130')?.shippingCost).toBe(50_000);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toBe('https://jne.invalid:10202/tracing/api/pricedev');
+    expect(calls.some((url) => url.includes('/pickupcashless'))).toBe(false);
+  });
+
+  it('booking the quoted JTR<130 sends SERVICE_CODE=REG in the one /pickupcashless request', async () => {
+    const { quotes } = await quote();
+    const quoted = quotes.find((q) => q.service === 'JTR<130')!;
+    const { result, calls } = await book(quoted.service);
+
+    expect(result.trackingNumber).toBe('0109401600067399');
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe('https://jne.invalid:10202/pickupcashless');
+    const wire = new URLSearchParams(String(calls[0].init.body));
+    expect(wire.get('SERVICE_CODE')).toBe('REG');
+    expect(String(calls[0].init.body)).not.toContain('JTR');
+    // The quote object itself was not modified by booking.
+    expect(quoted.service).toBe('JTR<130');
+  });
+
+  it.each(['YES19', 'REG19', 'REG15', 'JTR250'])('booking a quoted %s also sends REG', async (service) => {
+    const { calls } = await book(service);
+    expect(new URLSearchParams(String(calls[0].init.body)).get('SERVICE_CODE')).toBe('REG');
+  });
+
+  it('every other booking field is exactly what the builder produces for this order', async () => {
+    const { calls } = await book('JTR<130');
+    expect(calls[0].init.body).toBe(serializeJnePickupCashless(CREDENTIALS, buildJnePickupCashlessFields({ ...SOURCE, service: 'JTR<130' }, PICKUP, 'BDO10000')));
   });
 });

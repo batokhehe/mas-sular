@@ -30,6 +30,14 @@ import { JnePickupConfig, jnePickupConfigIssues } from '../../../shipping/shippi
 /** The owning courier name, for PermanentError. */
 const JNE = 'jne';
 
+/**
+ * JNE shipment booking must use REG service. Business requirement: every
+ * `/pickupcashless` booking sends SERVICE_CODE=REG, whatever service the customer was
+ * quoted and bought (e.g. `JTR<130`). Quotation, the price charged and the service
+ * shown on the order/shipment are unaffected - only the booking request uses this.
+ */
+export const JNE_BOOKING_SERVICE_CODE = 'REG';
+
 /** Documented field order - kept stable so serialized bodies are deterministic. */
 export const JNE_PICKUP_CASHLESS_FIELDS = [
   'PICKUP_NAME',
@@ -90,7 +98,10 @@ export interface JnePickupItem {
 /** Everything order-specific the request needs, already loaded by the caller. */
 export interface JnePickupCashlessSource {
   orderNumber: string;
-  /** The service the customer bought (e.g. `JTR<130`). */
+  /**
+   * The service the customer bought (e.g. `JTR<130`). Must be present (it marks a real
+   * JNE selection) but is NOT sent: the booking always uses JNE_BOOKING_SERVICE_CODE.
+   */
   service: string;
   /** Merchandise value: Order.subtotal (goods + toppings; no delivery/service fee, no voucher). */
   goodsAmount: number | undefined;
@@ -318,7 +329,9 @@ export function buildJnePickupCashlessFields(
     RECEIVER_PHONE: (receiver.phone as string).trim(),
     ORIGIN_CODE: (originCode as string).trim(),
     DESTINATION_CODE: (source.destinationCode as string).trim(),
-    SERVICE_CODE: source.service.trim(),
+    // JNE shipment booking must use REG service (business requirement), regardless of
+    // the quoted/selected service in source.service.
+    SERVICE_CODE: JNE_BOOKING_SERVICE_CODE,
     WEIGHT: String(weightKg),
     QTY: String(computeJneQuantity(source.items)),
     GOODS_DESC: buildJneGoodsDesc(source.items),
