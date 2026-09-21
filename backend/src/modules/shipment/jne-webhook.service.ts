@@ -8,6 +8,7 @@ import {
   currentJneRecord,
   JNE_RECORD_ONLY_STATUSES,
   JneWebhookPayload,
+  jneWebhookOrderIdMatches,
   mergeJneWebhook,
   parseJneWebhook,
 } from './domain/jne-webhook';
@@ -187,9 +188,10 @@ export class JneWebhookService {
     if (candidates.length > 1) {
       throw new JneWebhookRejection(409, 'awb matches more than one shipment', 'ambiguous_awb');
     }
-    // We book JNE with order_no = our order number, so JNE's order_id must echo it.
-    // A mismatch is never "corrected": it could be another order's shipment.
-    if (candidates[0].order.orderNumber !== payload.orderId) {
+    // JNE echoes the ORDER_ID we booked with (toJneOrderId of our order number), so
+    // order_id must be exactly that value - or the full order number - for THIS AWB's
+    // order. A mismatch is never "corrected": it could be another order's shipment.
+    if (!jneWebhookOrderIdMatches(candidates[0].order.orderNumber, payload.orderId)) {
       throw new JneWebhookRejection(409, 'order_id does not match the shipment for this awb', 'order_mismatch');
     }
     const shipmentId = candidates[0].id;
@@ -225,7 +227,7 @@ export class JneWebhookService {
         !shipment ||
         shipment.trackingNumber !== payload.awb ||
         shipment.provider.toLowerCase() !== JNE_PROVIDER ||
-        shipment.order.orderNumber !== payload.orderId
+        !jneWebhookOrderIdMatches(shipment.order.orderNumber, payload.orderId)
       ) {
         throw new JneWebhookRejection(409, 'shipment changed while processing; retry', 'shipment_changed');
       }

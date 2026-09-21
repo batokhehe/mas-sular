@@ -4,6 +4,7 @@ import {
   currentJneRecord,
   historyEntryKey,
   isValidJneDate,
+  jneWebhookOrderIdMatches,
   jneDateToInstant,
   JNE_MANDATORY_FIELDS,
   JNE_RECORD_ONLY_STATUSES,
@@ -15,6 +16,7 @@ import {
   sanitizeMediaUrl,
 } from '../../src/modules/shipment/domain/jne-webhook';
 import { lookupProviderStatus } from '../../src/modules/shipment/shipment-status.mapper';
+import { buildJnePickupCashlessFields, toJneOrderId } from '../../src/modules/shipment/infrastructure/providers/jne-pickup-cashless';
 import { readJneWebhook, withJneWebhook, withoutCourierInternals } from '../../src/modules/shipment/shipment-metadata';
 
 /** A complete, documented JNE V2 body (non-DELIVERED). */
@@ -44,6 +46,66 @@ const reason = (input: unknown): string => {
   if (result.ok) throw new Error('expected a rejection');
   return result.reason;
 };
+
+describe('order_id correlation: booking ORDER_ID and webhook order_id are the same value', () => {
+  // The real staging shipment: AWB 010116260018481, booked with ORDER_ID=BMS20260921EMCG9C1.
+  const STAGING_ORDER = 'BMS-20260921-EMCG9C1C';
+  const STAGING_ORDER_ID = 'BMS20260921EMCG9C1';
+
+  it('the booking derives ORDER_ID from the order number (hyphens removed, last character removed)', () => {
+    expect(toJneOrderId(STAGING_ORDER)).toBe(STAGING_ORDER_ID);
+  });
+
+  it('the existing staging shipment correlates: order_id BMS20260921EMCG9C1 -> BMS-20260921-EMCG9C1C', () => {
+    expect(jneWebhookOrderIdMatches(STAGING_ORDER, STAGING_ORDER_ID)).toBe(true);
+  });
+
+  it('whatever ORDER_ID the booking builder sends for an order is accepted back for that order', () => {
+    for (const orderNumber of [STAGING_ORDER, 'BMS-20260916-F5YMXSND', 'BMS-20261231-ZZZZZZZ9']) {
+      const sent = buildJnePickupCashlessFields(
+        {
+          orderNumber,
+          service: 'REG',
+          goodsAmount: 10_000,
+          destinationCode: 'BDO10060',
+          pickupAtIso: '2026-09-21T10:00:00.000Z',
+          receiver: { name: 'R', phone: '0812', addressDetail: 'Jl. A', village: 'V', district: 'D', city: 'C', postalCode: '40112', province: 'P' },
+          items: [{ name: 'Bakso', quantity: 1, weightGram: 500 }],
+        },
+        {
+          pickupName: 'n', pickupPic: 'p', pickupPicPhone: '0812', pickupAddress: 'a', pickupDistrict: 'd', pickupCity: 'c',
+          pickupService: 'Domestic', pickupVehicle: 'Motor', branch: 'b', custId: 'c', merchantId: 'm',
+          shipperName: 's', shipperAddr1: 'a1', shipperAddr2: 'a2', shipperCity: 'c', shipperZip: '40286', shipperRegion: 'r',
+          shipperContact: 'c', shipperPhone: '0812', type: 'PICKUP',
+        },
+        'BDO10000',
+      ).ORDER_ID;
+      expect([orderNumber, sent, jneWebhookOrderIdMatches(orderNumber, sent)]).toEqual([orderNumber, toJneOrderId(orderNumber), true]);
+    }
+  });
+
+  it('the full order number is still accepted, exactly (the earlier contract sent it as order_no)', () => {
+    expect(jneWebhookOrderIdMatches(STAGING_ORDER, STAGING_ORDER)).toBe(true);
+  });
+
+  it.each([
+    ['another order (booking form)', 'BMS20260921ABCDEFG'],
+    ['another order (full form)', 'BMS-20260921-ABCDEFGH'],
+    ['hyphens removed but last character kept', 'BMS20260921EMCG9C1C'],
+    ['a shorter prefix', 'BMS20260921EMCG9C'],
+    ['a longer string containing it', 'BMS20260921EMCG9C1X'],
+    ['different case', 'bms20260921emcg9c1'],
+    ['padded', ' BMS20260921EMCG9C1 '],
+    ['empty', ''],
+  ])('refuses %s: %p', (_label, orderId) => {
+    expect(jneWebhookOrderIdMatches(STAGING_ORDER, orderId)).toBe(false);
+  });
+
+  it('an order number the booking rule refuses never matches its (impossible) derived form', () => {
+    expect(jneWebhookOrderIdMatches('', 'x')).toBe(false);
+    expect(jneWebhookOrderIdMatches('A'.repeat(30), 'A'.repeat(29))).toBe(false);
+  });
+});
 
 describe('JNE V2 payload validation', () => {
   it('accepts the documented payload and normalizes it', () => {

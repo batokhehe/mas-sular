@@ -13,6 +13,7 @@ import { JNE_WEBHOOK_CONFIG, JneWebhookConfig, loadJneWebhookConfig } from '../.
 import { configureTrustProxy } from '../../src/common/http/trust-proxy';
 import { JneWebhookService } from '../../src/modules/shipment/jne-webhook.service';
 import { JneWebhookController } from '../../src/modules/shipment/presentation/jne-webhook.controller';
+import { toJneOrderId } from '../../src/modules/shipment/infrastructure/providers/jne-pickup-cashless';
 import { readJneWebhook } from '../../src/modules/shipment/shipment-metadata';
 import { ShipmentProviderFactory } from '../../src/modules/shipment/shipment-provider.factory';
 import { ShipmentStatusMapper } from '../../src/modules/shipment/shipment-status.mapper';
@@ -550,6 +551,27 @@ describe('JNE Webhook Status V2 - POST /api/v1/shipments/webhook/jne', () => {
     expect(record().actual).toMatchObject({ weight: 1000, weightRaw: '1000', ongkir: 20000, ongkirRaw: '20000' });
     expect(shipment().cost).toBe(18000); // the charged shipping cost is untouched
   }, HTTP_TEST_TIMEOUT_MS);
+
+  describe('order_id correlation (JNE echoes the ORDER_ID we booked with)', () => {
+    const bookedOrderId = () => toJneOrderId(ORDER_NUMBER); // what the booking sends
+
+    it('the booking ORDER_ID is accepted for this AWB: 200, the shipment moves, once', async () => {
+      expect(bookedOrderId()).not.toBe(ORDER_NUMBER);
+      expect(await post(payload({ order_id: bookedOrderId() }))).toEqual({ status: 200, body: { status: true } });
+      expect(shipment().status).toBe(ShipmentStatus.PICKED_UP);
+      // A retry of the same push is idempotent: no second history row or notification.
+      expect(await post(payload({ order_id: bookedOrderId() }))).toEqual({ status: 200, body: { status: true } });
+      expect([db.state.history.length, db.state.outbox.length]).toEqual([1, 1]);
+    }, HTTP_TEST_TIMEOUT_MS);
+
+    it('another order\'s booking ORDER_ID (or full number) for this AWB -> 409, nothing written', async () => {
+      for (const other of [toJneOrderId('BMS-20260912-ZZZZZZZZ'), 'BMS-20260912-ZZZZZZZZ', `${bookedOrderId()}X`, bookedOrderId().slice(0, -1)]) {
+        const res = await post(payload({ order_id: other }));
+        expect([other, res.status, res.body]).toEqual([other, 409, { status: false, reason: 'order_id does not match the shipment for this awb' }]);
+      }
+      expect([shipment().status, db.state.history.length, db.state.outbox.length]).toEqual([ShipmentStatus.CREATED, 0, 0]);
+    }, HTTP_TEST_TIMEOUT_MS);
+  });
 });
 
 describe('JNE webhook disabled (the default)', () => {

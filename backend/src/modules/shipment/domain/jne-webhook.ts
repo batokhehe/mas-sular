@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import { toJneOrderId } from '../infrastructure/providers/jne-pickup-cashless';
 
 /**
  * JNE Webhook Status V2 - PURE domain logic (no I/O, no DB, no logging).
@@ -142,6 +143,28 @@ export interface JneWebhookPayload {
   dropped: string[];
   /** Deterministic identity of the whole webhook, for logs and tracing retries. */
   fingerprint: string;
+}
+
+/**
+ * Does a webhook `order_id` belong to this shipment's order?
+ *
+ * JNE confirmed that `order_id` is exactly the ORDER_ID we sent at booking, and the
+ * booking sends `toJneOrderId(Order.orderNumber)` (hyphens removed, last character
+ * removed; JNE's ORDER_ID is limited to 20 characters). So the expected value is
+ * derived from the AWB's OWN order with that same function. The full order number is
+ * also accepted, exactly, because the earlier contract sent it as order_no.
+ *
+ * Exact equality only - no case folding, trimming, prefix or substring matching - and
+ * only against the order the AWB already resolved to, so an order_id derived from any
+ * other order is refused.
+ */
+export function jneWebhookOrderIdMatches(orderNumber: string, orderId: string): boolean {
+  if (orderId === orderNumber) return true;
+  try {
+    return orderId === toJneOrderId(orderNumber);
+  } catch {
+    return false; // an order number the booking rule refuses can never have been sent
+  }
 }
 
 export type JneParseResult =

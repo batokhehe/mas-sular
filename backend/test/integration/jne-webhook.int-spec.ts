@@ -98,6 +98,62 @@ async function state(shipmentId: string, orderId: string) {
   }
 }
 
+/** A JNE shipment with an EXACT order number and AWB (the order is renamed after seeding). */
+async function jneShipmentWith(orderNumber: string, awb: string) {
+  const { scenario, shipment } = await jneShipment()
+  await world.prisma.order.update({ where: { id: scenario.order.id }, data: { orderNumber } })
+  await world.prisma.shipment.update({ where: { id: shipment.id }, data: { trackingNumber: awb, providerShipmentId: awb } })
+  return { scenario, shipment, awb, orderNumber }
+}
+
+describe('JNE webhook: order_id correlation on real PostgreSQL (booking ORDER_ID == webhook order_id)', () => {
+  it('the existing staging shipment: AWB 010116260018481 + order_id BMS20260921EMCG9C1 -> BMS-20260921-EMCG9C1C; idempotent; forward-only', async () => {
+    const { scenario, shipment, awb } = await jneShipmentWith('BMS-20260921-EMCG9C1C', '010116260018481')
+    const push = (over: Record<string, unknown> = {}) => payload(awb, 'BMS20260921EMCG9C1', over)
+
+    expect(await post(push())).toEqual({ status: 200, body: { status: true } })
+    let s = await state(shipment.id, scenario.order.id)
+    expect(s.shipment.status).toBe(ShipmentStatus.PICKED_UP)
+    expect(s.history).toHaveLength(1)
+
+    // The same push again: idempotent.
+    expect(await post(push())).toEqual({ status: 200, body: { status: true } })
+    s = await state(shipment.id, scenario.order.id)
+    expect([s.history.length, s.outbox.length]).toEqual([1, 1])
+
+    // Later status moves forward; a late, older SUCCESS PICKUP never moves it back.
+    expect(await post(push({ status: 'SHIPPED', history: [H.pickup, H.transit] }))).toEqual({ status: 200, body: { status: true } })
+    expect(await post(push())).toEqual({ status: 200, body: { status: true } })
+    s = await state(shipment.id, scenario.order.id)
+    expect(s.shipment.status).toBe(ShipmentStatus.IN_TRANSIT)
+    expect(s.history.map((h) => h.mappedStatus)).toEqual([ShipmentStatus.PICKED_UP, ShipmentStatus.IN_TRANSIT])
+    expect(s.outbox).toHaveLength(2)
+  })
+
+  it('a wrong order_id -> 409; an unknown AWB with a real order_id -> 404; nothing is written', async () => {
+    const { scenario, shipment, awb } = await jneShipmentWith('BMS-20260921-WRONG0AB', `JNE${randomUUID().slice(0, 8)}`)
+    const wrong = await post(payload(awb, 'BMS20260921OTHER01'))
+    expect(wrong).toEqual({ status: 409, body: { status: false, reason: 'order_id does not match the shipment for this awb' } })
+    const unknown = await post(payload('NOSUCHAWB0000001', 'BMS20260921WRONG0A'))
+    expect(unknown.status).toBe(404)
+    const s = await state(shipment.id, scenario.order.id)
+    expect([s.shipment.status, s.history.length, s.outbox.length, s.record]).toEqual([ShipmentStatus.CREATED, 0, 0, undefined])
+  })
+
+  it('two orders whose booking ORDER_IDs collide: each AWB updates only its own shipment', async () => {
+    // BMS-20260922-COLLIDEA and ...COLLIDEB both book as ORDER_ID=BMS20260922COLLIDE.
+    const a = await jneShipmentWith('BMS-20260922-COLLIDEA', `JNE${randomUUID().slice(0, 8)}`)
+    const b = await jneShipmentWith('BMS-20260922-COLLIDEB', `JNE${randomUUID().slice(0, 8)}`)
+    expect(await post(payload(b.awb, 'BMS20260922COLLIDE'))).toEqual({ status: 200, body: { status: true } })
+    const sa = await state(a.shipment.id, a.scenario.order.id)
+    const sb = await state(b.shipment.id, b.scenario.order.id)
+    expect([sa.shipment.status, sa.history.length]).toEqual([ShipmentStatus.CREATED, 0]) // untouched
+    expect([sb.shipment.status, sb.history.length]).toEqual([ShipmentStatus.PICKED_UP, 1])
+    // A's AWB with an order_id derived from an unrelated order is refused.
+    expect((await post(payload(a.awb, 'BMS20260922UNRELAT'))).status).toBe(409)
+  })
+})
+
 describe('JNE webhook: full lifecycle on real PostgreSQL', () => {
   it('SUCCESS PICKUP → SHIPPED → DELIVERED: shipment, order, history, events and notifications', async () => {
     const { shipment, scenario, awb, orderNumber } = await jneShipment()
