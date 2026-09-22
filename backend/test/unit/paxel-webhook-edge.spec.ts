@@ -19,6 +19,9 @@ const SERVICE = readFileSync(join(__dirname, '../../src/modules/shipment/paxel-w
 
 const PAXEL_NON_PRODUCTION_IP = '34.85.159.153';
 const PAXEL_PRODUCTION_IP = '34.126.76.148';
+/** This staging VPS's own public IP: controlled internal E2E webhook tests only. */
+const STAGING_VPS_IP = '187.53.139.88';
+const JNE_CONFIRMED_IP = '110.239.85.204';
 const PAXEL_PATH = '/api/v1/shipments/webhook/paxel';
 
 const withoutComments = (conf: string) => conf.replace(/#.*$/gm, '');
@@ -81,6 +84,7 @@ describe('this VPS nginx: Paxel webhook allowlist (TEMPORARY: staging + producti
   it.each([
     [PAXEL_NON_PRODUCTION_IP, true],
     [PAXEL_PRODUCTION_IP, true],
+    [STAGING_VPS_IP, true],
     ['127.0.0.1', false],
     ['8.8.8.8', false],
   ])('%s -> %s (first match wins)', (ip, allowed) => {
@@ -89,16 +93,17 @@ describe('this VPS nginx: Paxel webhook allowlist (TEMPORARY: staging + producti
 
   it('any other address is denied (neighbours of the Paxel IPs, private, Docker, this VPS)', () => {
     const location = paxelLocations(api[0])[0];
-    for (const ip of ['34.85.159.152', '34.85.159.154', '34.126.76.147', '34.126.76.149', '1.2.3.4', '10.0.0.1', '172.18.0.1', '192.168.1.10', '187.53.139.88', '255.255.255.255', '0.0.0.0']) {
+    for (const ip of ['34.85.159.152', '34.85.159.154', '34.126.76.147', '34.126.76.149', '187.53.139.87', '187.53.139.89', '1.2.3.4', '10.0.0.1', '172.18.0.1', '192.168.1.10', '110.239.85.204', '255.255.255.255', '0.0.0.0']) {
       expect([ip, nginxAllows(location, ip)]).toEqual([ip, false]);
     }
   });
 
-  it('the only rules are the two exact Paxel allows followed by deny all (no CIDR, no allow all)', () => {
+  it('the only rules are the two exact Paxel allows, the staging VPS, then deny all (no CIDR, no allow all)', () => {
     const location = paxelLocations(api[0])[0];
     expect([...location.matchAll(/\b(allow|deny)\s+([^;]+);/g)].map((m) => `${m[1]} ${m[2].trim()}`)).toEqual([
       `allow ${PAXEL_NON_PRODUCTION_IP}`,
       `allow ${PAXEL_PRODUCTION_IP}`,
+      `allow ${STAGING_VPS_IP}`,
       'deny all',
     ]);
   });
@@ -122,8 +127,44 @@ describe('this VPS nginx: Paxel webhook allowlist (TEMPORARY: staging + producti
     expect(location).not.toMatch(/X-Paxel-Signature|proxy_set_body|proxy_pass_request_(headers|body)\s+off/i);
   });
 
-  it('the JNE webhook edge closure is untouched', () => {
-    expect(blocks(api[0], /location\s*=\s*\/api\/v1\/shipments\/webhook\/jne\s*\{/)[0].replace(/\s+/g, ' ').trim()).toBe('return 403;');
+  describe('JNE webhook edge allowlist', () => {
+    const jne = () => {
+      const found = blocks(api[0], /location\s*=\s*\/api\/v1\/shipments\/webhook\/jne\s*\{/);
+      expect(found).toHaveLength(1);
+      return found[0];
+    };
+
+    it('exactly JNE\'s confirmed source and the staging VPS, then deny all (no CIDR, no allow all)', () => {
+      expect([...jne().matchAll(/\b(allow|deny)\s+([^;]+);/g)].map((m) => `${m[1]} ${m[2].trim()}`)).toEqual([
+        `allow ${JNE_CONFIRMED_IP}`,
+        `allow ${STAGING_VPS_IP}`,
+        'deny all',
+      ]);
+    });
+
+    it.each([
+      [JNE_CONFIRMED_IP, true],
+      [STAGING_VPS_IP, true],
+      ['110.239.85.203', false],
+      ['110.239.85.205', false],
+      ['187.53.139.87', false],
+      [PAXEL_PRODUCTION_IP, false],
+      ['127.0.0.1', false],
+      ['172.18.0.1', false],
+      ['8.8.8.8', false],
+    ])('%s -> %s', (ip, allowed) => {
+      expect(nginxAllows(jne(), ip)).toBe(allowed);
+    });
+
+    it('proxies exactly like the API catch-all location (headers and body untouched)', () => {
+      const catchAll = blocks(api[0], /location\s+\/\s*\{/)[0];
+      const directives = (b: string) =>
+        withoutComments(b)
+          .split(';')
+          .map((d) => d.trim().replace(/\s+/g, ' '))
+          .filter((d) => d && !/^(allow|deny) /.test(d));
+      expect(directives(jne())).toEqual(directives(catchAll));
+    });
   });
 });
 

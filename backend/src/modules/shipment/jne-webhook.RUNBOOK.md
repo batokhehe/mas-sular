@@ -104,8 +104,12 @@ The versioned reverse-proxy configuration is `ops/nginx/mas-sular.conf` (install
 `/opt/mas-sular/nginx/conf.d/`). The backend publishes no host port and is reachable only through the proxy
 on the `edge` network.
 
-**Current state: CLOSED.** `JNE_WEBHOOK_ENABLED=false` (the application answers 503) **and** nginx
-answers 403 for `location = /api/v1/shipments/webhook/jne`. Both must change together to enable it.
+**Current state (staging VPS): OPEN to allowlisted sources only.** nginx allows
+`110.239.85.204` (JNE, confirmed) and `187.53.139.88` (this staging VPS's own public IP, for
+controlled internal E2E webhook tests), then `deny all`. The application enforces the same list on
+`req.ip`: the confirmed JNE address plus `JNE_WEBHOOK_EXTRA_SOURCE_IPS=187.53.139.88` in the staging
+`production.env` (refused at boot when `JNE_ENVIRONMENT=production`). A real production host must list
+`110.239.85.204` only.
 
 **Application-level source check (always on).** JNE confirmed its webhook source IP:
 **110.239.85.204**. The application refuses any other caller with 403 *before* the enabled flag,

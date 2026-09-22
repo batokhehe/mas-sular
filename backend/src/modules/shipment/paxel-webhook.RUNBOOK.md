@@ -163,6 +163,7 @@ nginx's `403` and never reaches the backend or the integration log.
 location = /api/v1/shipments/webhook/paxel {
     allow 34.85.159.153;   # TEMPORARY: non-production (remove when staging is retired)
     allow 34.126.76.148;   # production
+    allow 187.53.139.88;   # this staging VPS: controlled internal E2E tests (X-Paxel-Signature still required)
     deny all;
     # ... proxy to backend:3001 as the other API locations
 }
