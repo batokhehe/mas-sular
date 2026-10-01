@@ -134,13 +134,20 @@ describe('DTO validation (global ValidationPipe settings)', () => {
 type Image = { id: string; url: string; sortOrder: number };
 
 function world(current: { imageUrl: string; images: Image[] } | null = { imageUrl: '/products/baso-keju.jpg', images: [{ id: 'i0', url: '/products/baso-keju.jpg', sortOrder: 0 }] }) {
+  // createProduct inserts inside a transaction (it reads MAX(sequence) there), so the
+  // SAME create mock is reachable through both clients; the update paths keep their own
+  // mocks apart, because the specs below distinguish the transactional update from the
+  // single one.
+  const create = jest.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'p1', ...data }));
+  const aggregate = jest.fn().mockResolvedValue({ _max: { sequence: 0 } });
   const tx = {
     productImage: { deleteMany: jest.fn().mockResolvedValue({}), createMany: jest.fn().mockResolvedValue({}), upsert: jest.fn().mockResolvedValue({}) },
-    product: { update: jest.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'p1', ...data })) },
+    product: { create, aggregate, update: jest.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'p1', ...data })) },
   };
   const prisma = {
     product: {
-      create: jest.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'p1', ...data })),
+      create,
+      aggregate,
       update: jest.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'p1', ...data })),
       findUnique: jest.fn().mockResolvedValue(current ? { id: 'p1', deletedAt: null, ...current } : null),
     },

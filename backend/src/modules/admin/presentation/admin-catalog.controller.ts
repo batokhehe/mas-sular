@@ -1,5 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
+import { AdminUser, CurrentAdmin } from '../../../common/decorators/current-admin.decorator';
 import { AdminGuard } from '../../../common/guards/admin.guard';
 import { PermissionGuard } from '../../../common/guards/permission.guard';
 import { Permissions } from '../../../common/decorators/permissions.decorator';
@@ -8,6 +9,7 @@ import { CreateCategoryDto } from '../application/dto/create-category.dto';
 import { CreateProductDto } from '../application/dto/create-product.dto';
 import { CreatePromoDto } from '../application/dto/create-promo.dto';
 import { CreateToppingDto } from '../application/dto/create-topping.dto';
+import { ReorderProductsDto } from '../application/dto/reorder-products.dto';
 import { UpdateCategoryDto } from '../application/dto/update-category.dto';
 import { UpdateProductDto } from '../application/dto/update-product.dto';
 import { UpdatePromoDto } from '../application/dto/update-promo.dto';
@@ -35,6 +37,17 @@ export class AdminCatalogController {
   @Get('products/:id')
   getProduct(@Param('id') id: string) {
     return this.adminService.getProduct(id);
+  }
+
+  /**
+   * Catalogue order (Admin -> Produk drag & drop). Declared BEFORE `products/:id` so
+   * the literal path is matched first and never swallowed as an id. Reuses
+   * Product.update: whoever may edit a product may order the catalogue.
+   */
+  @Permissions('Product.update')
+  @Patch('products/reorder')
+  reorderProducts(@Body() dto: ReorderProductsDto, @CurrentAdmin() admin: AdminUser) {
+    return this.adminService.reorderProducts(dto.items, admin?.sub);
   }
 
   @Permissions('Product.update')

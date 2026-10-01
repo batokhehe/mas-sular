@@ -21,13 +21,17 @@ const uniqueViolation = (target: unknown) =>
 const DTO = { slug: 'baso-urat-jumbo', name: 'Baso Urat Jumbo', description: 'x', price: 30000, imageUrl: '/x.png', categoryId: 'c1' };
 
 function adminWith(create: jest.Mock, update: jest.Mock = jest.fn().mockResolvedValue({})) {
-  const prisma = {
+  const client = {
     product: {
       create,
       update,
       findUnique: jest.fn().mockResolvedValue({ id: 'p1', deletedAt: null }),
+      // createProduct appends the new product at MAX(sequence) + 1, read inside the
+      // same transaction as the insert (see product-sequence.spec.ts).
+      aggregate: jest.fn().mockResolvedValue({ _max: { sequence: 0 } }),
     },
   };
+  const prisma = { ...client, $transaction: (fn: (tx: typeof client) => unknown) => fn(client) };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return new AdminService(prisma as any, {} as any);
 }
@@ -101,7 +105,10 @@ describe('AdminService.createProduct', () => {
     const create = jest.fn().mockResolvedValue({});
     await adminWith(create).createProduct({ ...DTO, sku: 'HAND-SET-1' } as CreateProductDto);
     // P2: the cover also becomes the product's first gallery image, in the same create.
-    expect(create).toHaveBeenCalledWith({ data: { ...DTO, sku: 'HAND-SET-1', images: { create: [{ url: DTO.imageUrl, sortOrder: 0 }] } } });
+    // `sequence` is assigned by the create path itself (MAX + 1 = 1 in this empty fake).
+    expect(create).toHaveBeenCalledWith({
+      data: { ...DTO, sku: 'HAND-SET-1', sequence: 1, images: { create: [{ url: DTO.imageUrl, sortOrder: 0 }] } },
+    });
   });
 
   it('moves to BASE_2 when the derived SKU is already taken by another product', async () => {

@@ -59,11 +59,20 @@ export type AdminProduct = {
   isFragile?: boolean | null;
   /** P2 gallery (admin detail only; the list does not load it). sortOrder 0 = cover = imageUrl. */
   images?: { id: string; url: string; sortOrder: number }[];
+  /**
+   * Canonical catalogue position (1-based). Read-only here: it is set by dragging rows
+   * in the product list, never by the product form - see reorderAdminProducts.
+   */
+  sequence: number;
   createdAt: string;
 };
 
-/** Create/update body: the product fields plus the ordered gallery as urls (images[0] = cover). */
-export type AdminProductInput = Omit<Partial<AdminProduct>, 'images'> & { images?: string[] };
+/**
+ * Create/update body: the product fields plus the ordered gallery as urls (images[0] =
+ * cover). `sequence` is excluded on purpose - the API rejects unknown fields, and the
+ * order is changed only through the reorder endpoint.
+ */
+export type AdminProductInput = Omit<Partial<AdminProduct>, 'images' | 'sequence'> & { images?: string[] };
 
 export type AdminPromo = {
   id: string;
@@ -702,6 +711,18 @@ export function updateAdminProduct(id: string, input: AdminProductInput) {
 export function deleteAdminProduct(id: string) {
   return api<void>(`/admin/catalog/products/${id}`, {
     method: 'DELETE',
+  });
+}
+
+/**
+ * Rewrite the catalogue order. The body is the COMPLETE list of non-deleted products in
+ * its new order, numbered 1..N (see lib/products/product-sequence.reorderPayload); the
+ * server refuses a stale or partial snapshot with 409. Returns the stored order.
+ */
+export function reorderAdminProducts(items: { id: string; sequence: number }[]) {
+  return api<AdminProduct[]>('/admin/catalog/products/reorder', {
+    method: 'PATCH',
+    body: JSON.stringify({ items }),
   });
 }
 

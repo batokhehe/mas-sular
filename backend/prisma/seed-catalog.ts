@@ -55,7 +55,8 @@ async function main(): Promise<void> {
     (await prisma.category.findMany()).map((c) => [c.slug, c.id]),
   );
 
-  for (const p of products) {
+  // The seeded catalogue order IS the list order (Product.sequence, 1-based).
+  for (const [index, p] of products.entries()) {
     const [
       slug,
       name,
@@ -91,6 +92,7 @@ async function main(): Promise<void> {
         isPromoSpecial: (promoSpecialSlugs as readonly string[]).includes(slug),
         isTrialPack: (trialPackSlugs as readonly string[]).includes(slug),
         stock,
+        sequence: index + 1,
         status: ProductStatus.ACTIVE,
       },
     });

@@ -2,7 +2,8 @@
 
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { GripVertical } from 'lucide-react';
 import { AdminShell } from '@/components/layout/admin-shell';
 import { PermissionGate } from '@/components/auth/permission-gate';
 import { Badge } from '@/components/ui/badge';
@@ -10,22 +11,33 @@ import { productStatusLabel } from '@/lib/status-labels';
 import { Button } from '@/components/ui/button';
 import { Card, CardTitle } from '@/components/ui/card';
 import { ROUTE_PERMISSIONS } from '@/lib/access';
-import { fetchAdminProducts, AdminProduct } from '@/lib/admin';
-
-const PAGE_SIZE = 10;
-const statusOptions = ['ALL', 'ACTIVE', 'DRAFT', 'ARCHIVED'] as const;
-const sortOptions = [
-  { label: 'Terbaru', value: 'createdAt' },
-  { label: 'Nama A → Z', value: 'nameAsc' },
-  { label: 'Stok Rendah → Tinggi', value: 'stockAsc' },
-  { label: 'Stok Tinggi → Rendah', value: 'stockDesc' },
-];
+import { useAdminPermissions } from '@/lib/auth';
+import { hasAllPermissions } from '@/lib/permissions';
+import { showError, showSuccess } from '@/lib/admin-alert';
+import { fetchAdminProducts, reorderAdminProducts, AdminProduct } from '@/lib/admin';
+import {
+  applyDrag,
+  DEFAULT_PRODUCT_SORT,
+  isReorderable,
+  moveProduct,
+  PRODUCT_SORT_OPTIONS,
+  PRODUCT_STATUS_FILTER_OPTIONS,
+  REORDER_DISABLED_HINT,
+  reorderPayload,
+  sameOrder,
+  sortProducts,
+  type ProductSortValue,
+  type ProductStatusFilter,
+} from '@/lib/products/product-sequence';
 
 export default function ProductsPage() {
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<typeof statusOptions[number]>('ALL');
-  const [sort, setSort] = useState(sortOptions[0].value);
-  const [page, setPage] = useState(1);
+  const [statusFilter, setStatusFilter] = useState<ProductStatusFilter>('ALL');
+  const [sort, setSort] = useState<ProductSortValue>(DEFAULT_PRODUCT_SORT);
+  // The order being dragged, before the server confirms it. Null = show the server's order.
+  const [draft, setDraft] = useState<AdminProduct[] | null>(null);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['admin-products'],
@@ -33,28 +45,57 @@ export default function ProductsPage() {
     retry: false,
   });
 
+  // The whole list is shown (no pagination): the catalogue order is only meaningful
+  // when every product is on screen at once.
   const products = useMemo(() => {
     if (!data) return [];
 
-    return data
-      .filter((product) => {
-        // SKU is internal and never shown (P2 #5), so it is not searchable either.
-        const matchesSearch = [product.name, product.categoryId].some((field) =>
-          field.toLowerCase().includes(search.toLowerCase()),
-        );
-        const matchesStatus = statusFilter === 'ALL' || product.status === statusFilter;
-        return matchesSearch && matchesStatus;
-      })
-      .sort((a, b) => {
-        if (sort === 'nameAsc') return a.name.localeCompare(b.name);
-        if (sort === 'stockAsc') return a.stock - b.stock;
-        if (sort === 'stockDesc') return b.stock - a.stock;
-        return b.createdAt.localeCompare(a.createdAt);
-      });
+    const matching = data.filter((product) => {
+      // SKU is internal and never shown (P2 #5), so it is not searchable either.
+      const matchesSearch = [product.name, product.categoryId].some((field) =>
+        field.toLowerCase().includes(search.toLowerCase()),
+      );
+      const matchesStatus = statusFilter === 'ALL' || product.status === statusFilter;
+      return matchesSearch && matchesStatus;
+    });
+
+    return sortProducts(matching, sort);
   }, [data, search, statusFilter, sort]);
 
-  const pageCount = Math.max(1, Math.ceil(products.length / PAGE_SIZE));
-  const pageProducts = products.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const permissions = useAdminPermissions();
+  const mayReorder = hasAllPermissions(permissions, ROUTE_PERMISSIONS.productUpdate);
+  // Dragging only means something on the complete list in canonical order.
+  const reorderable = isReorderable({ sort, search, statusFilter });
+  const dragEnabled = mayReorder && reorderable;
+  const rows = draft ?? products;
+
+  const reorderMutation = useMutation({
+    mutationFn: reorderAdminProducts,
+    onSuccess: async () => {
+      setDraft(null);
+      await queryClient.invalidateQueries({ queryKey: ['admin-products'] });
+      showSuccess('Urutan produk berhasil disimpan');
+    },
+    onError: (error) => {
+      setDraft(null); // the stored order is the truth; drop the local attempt
+      void showError(error);
+    },
+  });
+
+  /** Persist a new local order. Never called when dragging is disabled. */
+  const save = (next: AdminProduct[]) => {
+    if (!dragEnabled || sameOrder(rows, next)) return;
+    setDraft(next);
+    reorderMutation.mutate(reorderPayload(next).items);
+  };
+
+  const onDrop = (to: number) => {
+    if (dragIndex === null) return;
+    save(applyDrag(rows, dragIndex, to));
+    setDragIndex(null);
+  };
+
+  const resetDraft = () => setDraft(null);
 
   return (
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.products}>
@@ -77,7 +118,7 @@ export default function ProductsPage() {
               value={search}
               onChange={(event) => {
                 setSearch(event.target.value);
-                setPage(1);
+                resetDraft();
               }}
               placeholder="Cari produk berdasarkan nama atau kategori"
               className="h-11 rounded-xl border border-gray-200 bg-gray-50 px-4 text-sm outline-none focus:border-[#465fff] focus:bg-white"
@@ -85,12 +126,12 @@ export default function ProductsPage() {
             <select
               value={statusFilter}
               onChange={(event) => {
-                setStatusFilter(event.target.value as typeof statusOptions[number]);
-                setPage(1);
+                setStatusFilter(event.target.value as ProductStatusFilter);
+                resetDraft();
               }}
               className="h-11 rounded-xl border border-gray-200 bg-white px-4 text-sm outline-none focus:border-[#465fff]"
             >
-              {statusOptions.map((option) => (
+              {PRODUCT_STATUS_FILTER_OPTIONS.map((option) => (
                 <option key={option} value={option}>
                   {option === 'ALL' ? 'Semua' : productStatusLabel(option)}
                 </option>
@@ -101,10 +142,13 @@ export default function ProductsPage() {
             <span className="text-sm text-gray-500">Urutkan</span>
             <select
               value={sort}
-              onChange={(event) => setSort(event.target.value)}
+              onChange={(event) => {
+                setSort(event.target.value as ProductSortValue);
+                resetDraft();
+              }}
               className="h-11 rounded-xl border border-gray-200 bg-white px-4 text-sm outline-none focus:border-[#465fff]"
             >
-              {sortOptions.map((option) => (
+              {PRODUCT_SORT_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
@@ -114,17 +158,25 @@ export default function ProductsPage() {
         </div>
 
         <CardTitle>Produk</CardTitle>
+        {mayReorder ? (
+          <p className="mt-2 text-xs text-gray-500">
+            {dragEnabled
+              ? 'Tarik ikon urutan untuk mengatur urutan produk di katalog dan halaman pelanggan.'
+              : REORDER_DISABLED_HINT}
+          </p>
+        ) : null}
         <div className="mt-4 overflow-x-auto">
           {isLoading ? (
             <p className="p-6 text-sm text-gray-500">Memuat produk…</p>
           ) : isError ? (
             <p className="p-6 text-sm text-red-600">Gagal memuat produk. Silakan masuk ulang.</p>
-          ) : pageProducts.length === 0 ? (
+          ) : rows.length === 0 ? (
             <p className="p-6 text-sm text-gray-500">Tidak ada produk yang cocok dengan filter.</p>
           ) : (
             <table className="w-full min-w-[760px] text-left text-sm">
               <thead>
                 <tr className="border-b border-gray-100 text-xs uppercase text-gray-400">
+                  {mayReorder ? <th className="w-10 py-3 font-medium">Urutan</th> : null}
                   <th className="py-3 font-medium">Nama</th>
                   <th className="py-3 font-medium">Kategori</th>
                   <th className="py-3 font-medium">Stok</th>
@@ -133,8 +185,48 @@ export default function ProductsPage() {
                 </tr>
               </thead>
               <tbody>
-                {pageProducts.map((product: AdminProduct) => (
-                  <tr key={product.id} className="border-b border-gray-50 last:border-0">
+                {rows.map((product: AdminProduct, index: number) => (
+                  <tr
+                    key={product.id}
+                    draggable={dragEnabled}
+                    onDragStart={() => dragEnabled && setDragIndex(index)}
+                    onDragOver={(event) => {
+                      if (dragEnabled && dragIndex !== null) event.preventDefault();
+                    }}
+                    onDrop={(event) => {
+                      if (!dragEnabled) return;
+                      event.preventDefault();
+                      onDrop(index);
+                    }}
+                    onDragEnd={() => setDragIndex(null)}
+                    className={`border-b border-gray-50 last:border-0 ${dragIndex === index ? 'bg-gray-50' : ''}`}
+                  >
+                    {mayReorder ? (
+                      <td className="py-4">
+                        <button
+                          type="button"
+                          disabled={!dragEnabled}
+                          aria-label={`Ubah urutan ${product.name}`}
+                          title={dragEnabled ? 'Tarik untuk mengatur urutan' : REORDER_DISABLED_HINT}
+                          onKeyDown={(event) => {
+                            if (!dragEnabled) return;
+                            if (event.key === 'ArrowUp') {
+                              event.preventDefault();
+                              save(moveProduct(rows, index, -1));
+                            }
+                            if (event.key === 'ArrowDown') {
+                              event.preventDefault();
+                              save(moveProduct(rows, index, 1));
+                            }
+                          }}
+                          className={`rounded-lg p-1 text-gray-400 ${
+                            dragEnabled ? 'cursor-grab hover:bg-gray-100 hover:text-gray-600' : 'cursor-not-allowed opacity-40'
+                          }`}
+                        >
+                          <GripVertical className="size-4" />
+                        </button>
+                      </td>
+                    ) : null}
                     <td className="py-4 text-gray-600">
                       {product.name}
                       {product.isPromoSpecial ? (
@@ -165,21 +257,11 @@ export default function ProductsPage() {
           )}
         </div>
 
-        {!isLoading && !isError && products.length > PAGE_SIZE && (
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-gray-600">
-            <p>
-              Menampilkan {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, products.length)} dari {products.length} produk
-            </p>
-            <div className="flex items-center gap-2">
-              <Button type="button" className="bg-white text-gray-700 hover:bg-gray-50" onClick={() => setPage(Math.max(1, page - 1))}>
-                Sebelumnya
-              </Button>
-              <Button type="button" className="bg-white text-gray-700 hover:bg-gray-50" onClick={() => setPage(Math.min(pageCount, page + 1))}>
-                Berikutnya
-              </Button>
-            </div>
-          </div>
-        )}
+        {!isLoading && !isError && rows.length > 0 ? (
+          <p className="mt-4 text-sm text-gray-600">
+            {reorderMutation.isPending ? 'Menyimpan urutan…' : `Menampilkan ${rows.length} produk`}
+          </p>
+        ) : null}
       </Card>
     </AdminShell>
   );

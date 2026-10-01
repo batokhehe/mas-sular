@@ -86,6 +86,12 @@ export interface Product {
   isNew: boolean
   isPromoSpecial: boolean // P2 #10: homepage "Promo Spesial Produk" section
   isTrialPack: boolean // P2 #11: homepage "Trial Pack" section
+  /**
+   * Canonical catalogue position set in the Admin. The API already returns the lists in
+   * this order (sequence ASC) unless an explicit sort is requested, so nothing here
+   * sorts by it - it is part of the contract, not a client-side rule.
+   */
+  sequence: number
   status: ProductStatus
   stock: number
   categoryId: string

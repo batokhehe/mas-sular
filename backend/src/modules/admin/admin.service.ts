@@ -19,6 +19,12 @@ import {
   VerifyAdminPaymentDto,
 } from './application/dto/admin-operations.dto';
 import { OrderCancellationService } from '../orders/order-cancellation.service';
+import {
+  PRODUCT_AUDIT_ENTITY,
+  PRODUCT_REORDER_AUDIT_ACTION,
+  PRODUCT_SEQUENCE_ORDER_BY,
+  validateProductReorder,
+} from '../catalog/product-sequence';
 import { orderStatusSourcesFor } from '../orders/domain/order-status-transitions';
 import { isSkuUniqueViolation, skuCandidates, skuFromSlug } from './product-sku';
 import { assertCoverMatches, assertProductImageList, galleryRows, ORDERED_PRODUCT_IMAGES, sameGallery } from './product-images';
@@ -188,7 +194,7 @@ export class AdminService {
     const data = { ...fields, imageUrl, images: { create: galleryRows(gallery ?? [imageUrl]) } };
 
     // An explicit SKU is honoured exactly as before (P2 #5).
-    if (data.sku?.trim()) return this.prisma.product.create({ data });
+    if (data.sku?.trim()) return this.createProductRow(data);
 
     // Otherwise assign one from the unique slug. SKU stays load-bearing (it is the
     // Paxel item code), so a product must never be created without one; and a
@@ -198,7 +204,7 @@ export class AdminService {
     const { sku: _blank, ...rest } = data;
     for (const sku of skuCandidates(skuFromSlug(dto.slug))) {
       try {
-        return await this.prisma.product.create({ data: { ...rest, sku } });
+        return await this.createProductRow({ ...rest, sku });
       } catch (err) {
         if (!isSkuUniqueViolation(err)) throw err;
       }
@@ -206,8 +212,68 @@ export class AdminService {
     throw new ConflictException('Could not assign a unique SKU for this product; set one explicitly.');
   }
 
+  /**
+   * Create a product at the END of the catalogue: MAX(sequence) + 1, read inside the
+   * same transaction as the insert. Soft-deleted products are included in the MAX -
+   * they keep their position, so a new product must never reuse one. Two creates that
+   * race can still land on the same number; that is harmless, because the sequence is
+   * not unique and PRODUCT_SEQUENCE_ORDER_BY breaks the tie, and the next reorder
+   * renumbers the whole set to 1..N anyway.
+   */
+  private createProductRow(data: Prisma.ProductCreateArgs['data']) {
+    return this.prisma.$transaction(async (tx) => {
+      const { _max } = await tx.product.aggregate({ _max: { sequence: true } });
+      return tx.product.create({ data: { ...data, sequence: (_max.sequence ?? 0) + 1 } });
+    });
+  }
+
   listProducts() {
-    return this.prisma.product.findMany({ where: { deletedAt: null }, orderBy: { createdAt: 'desc' } });
+    // Canonical order: what the admin dragged into place. The Admin list offers its own
+    // explicit sorts (name, stock, newest) on top of this, client-side.
+    return this.prisma.product.findMany({ where: { deletedAt: null }, orderBy: PRODUCT_SEQUENCE_ORDER_BY });
+  }
+
+  /**
+   * Rewrite the catalogue order (Admin -> Produk drag & drop). The payload must carry
+   * the complete set of non-deleted products with a permutation of 1..N; a stale
+   * snapshot is refused with 409 rather than written in part. Every row moves in ONE
+   * transaction, so a failure leaves the previous order completely intact.
+   */
+  async reorderProducts(items: { id: string; sequence: number }[], adminId?: string) {
+    const ordered = await this.prisma.$transaction(async (tx) => {
+      const live = await tx.product.findMany({ where: { deletedAt: null }, select: { id: true, sequence: true } });
+      const validated = validateProductReorder(
+        items,
+        live.map((product) => product.id),
+      );
+      const before = Object.fromEntries(live.map((product) => [product.id, product.sequence]));
+      const changed = validated.filter((item) => before[item.id] !== item.sequence);
+      for (const item of changed) {
+        await tx.product.update({ where: { id: item.id }, data: { sequence: item.sequence } });
+      }
+      return { validated, before, changed };
+    });
+
+    // actorId NULL: AuditLog.actorId FKs to User; the admin identity goes in the payload
+    // (the same limitation every other admin-side audit write documents).
+    await this.prisma.auditLog
+      .create({
+        data: {
+          actorId: null,
+          action: PRODUCT_REORDER_AUDIT_ACTION,
+          entity: PRODUCT_AUDIT_ENTITY,
+          entityId: null,
+          before: ordered.before,
+          after: {
+            byAdminId: adminId ?? null,
+            movedCount: ordered.changed.length,
+            sequence: Object.fromEntries(ordered.validated.map((item) => [item.id, item.sequence])),
+          },
+        },
+      })
+      .catch(() => undefined);
+
+    return this.listProducts();
   }
 
   /** Admin detail (edit form): the product plus its ordered gallery. The list never loads images. */

@@ -398,6 +398,12 @@ model Product {
   isPromoSpecial Boolean               @default(false)
   // P2 #11: shown in the homepage "Trial Pack" section. Set in the Admin.
   isTrialPack   Boolean                @default(false)
+  /// Canonical catalogue position, set by dragging rows in Admin -> Produk. It is the
+  /// DEFAULT ordering of every product list (sequence ASC) unless the consumer asks for
+  /// an explicit business sort (price, rating, popularity). A reorder rewrites the whole
+  /// live set to 1..N; a soft-deleted product keeps its value and is never renumbered,
+  /// so gaps are normal. Only the reorder endpoint writes it - not product CRUD.
+  sequence      Int                    @default(0)
   status        ProductStatus          @default(ACTIVE)
   stock         Int                    @default(0)
   categoryId    String
@@ -418,6 +424,7 @@ model Product {
   @@index([isPromoSpecial])
   @@index([isTrialPack])
   @@index([deletedAt])
+  @@index([sequence])
 }
 
 /// P2 product image gallery. sortOrder is server-generated 0..N-1 (max 8); sortOrder 0

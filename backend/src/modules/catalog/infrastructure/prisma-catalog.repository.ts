@@ -3,12 +3,16 @@ import { ProductStatus } from '@prisma/client';
 import { PrismaService } from '../../../database/prisma.service';
 import { ListProductsQueryDto } from '../application/dto/catalog.dto';
 import { CatalogRepository } from '../domain/catalog.repository';
+import { PRODUCT_SEQUENCE_ORDER_BY } from '../product-sequence';
 
 @Injectable()
 export class PrismaCatalogRepository implements CatalogRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async listProducts(query: ListProductsQueryDto) {
+    // Explicit business sorts are unchanged; `popular` is still most-reviewed first.
+    // Everything else - the storefront's "Standar", the homepage sections, related
+    // products - uses the canonical sequence the admin dragged into place.
     const orderBy =
       query.sort === 'price-low'
         ? { price: 'asc' as const }
@@ -16,7 +20,9 @@ export class PrismaCatalogRepository implements CatalogRepository {
           ? { price: 'desc' as const }
           : query.sort === 'rating'
             ? { rating: 'desc' as const }
-            : { reviewCount: 'desc' as const };
+            : query.sort === 'popular'
+              ? { reviewCount: 'desc' as const }
+              : PRODUCT_SEQUENCE_ORDER_BY;
 
     return this.prisma.product.findMany({
       where: {
