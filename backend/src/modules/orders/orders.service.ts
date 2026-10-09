@@ -26,7 +26,7 @@ import { buildCheckoutGatewayPayload } from '../payments/gateway/domain/payment-
 import { DEFAULT_PAYMENT_METHOD, isSelectablePaymentMethod, selectablePaymentMethods } from '../payments/gateway/domain/payment-channel';
 import { calculatePaymentServiceFee, PaymentServiceFeeBreakdown } from '../payments/gateway/domain/payment-service-fee';
 import { toCustomerOrder } from './domain/customer-order-view';
-import { withoutCourierInternals } from '../shipment/shipment-metadata';
+import { latestPaxelStatusCode, paxelStatusDisplayLabel } from '../shipment/shipment-display-label';
 import {
   feeSettingFor,
   loadPaymentServiceFeeConfig,
@@ -1128,7 +1128,20 @@ export class OrdersService {
             },
           },
         },
-        shipment: true,
+        shipment: {
+          select: {
+            id: true,
+            orderId: true,
+            provider: true,
+            service: true,
+            status: true,
+            cost: true,
+            trackingNumber: true,
+            trackingUrl: true,
+            metadata: true,
+            history: { select: { providerStatus: true, changedAt: true }, orderBy: { changedAt: 'desc' }, take: 1 },
+          },
+        },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -1136,9 +1149,28 @@ export class OrdersService {
     // Present the latest attempt as `payment.gateway`; the relation name and its
     // array shape are an internal detail the frontend should not depend on.
     return orders.map(({ payment, shipment, ...orderRow }) => {
-      // The JNE webhook record (courier-reported ongkir, receiver details, delivery
-      // media) is courier-internal: it never reaches the customer.
-      const order = { ...orderRow, shipment: shipment ? { ...shipment, metadata: withoutCourierInternals(shipment.metadata) } : null };
+      const providerStatus = shipment
+        ? latestPaxelStatusCode(shipment.metadata, shipment.history)
+        : undefined;
+      const order = {
+        ...orderRow,
+        shipment: shipment
+          ? {
+              id: shipment.id,
+              orderId: shipment.orderId,
+              provider: shipment.provider,
+              service: shipment.service,
+              status: shipment.status,
+              cost: shipment.cost,
+              trackingNumber: shipment.trackingNumber,
+              trackingUrl: shipment.trackingUrl,
+              displayStatusLabel: paxelStatusDisplayLabel(
+                shipment.provider,
+                providerStatus,
+              ),
+            }
+          : null,
+      };
       if (!payment) return { ...toCustomerOrder(order), payment: null };
       const { gatewayTransactions, ...rest } = payment;
       const latest = gatewayTransactions[0];

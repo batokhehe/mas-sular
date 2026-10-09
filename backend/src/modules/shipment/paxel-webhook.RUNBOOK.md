@@ -79,37 +79,39 @@ example; an array of such objects is tolerated) with `address`, `city`,
   push carries it, it must match (409 otherwise). When absent it is not required (Paxel
   confirmed the value, not that it is always present).
 
-### What each status does (the shared Paxel vocabulary, unchanged)
+### What each status does (the shared Paxel vocabulary)
 
 | Paxel `latest_status` | Shipment | Order | Customer WhatsApp |
 |---|---|---|---|
-| CONFIRMED | CREATED | SHIPPED | yes |
-| RTP — *Shipment successfully created* | CREATED | SHIPPED | yes (none if already CREATED) |
+| CONFIRMED — *Shipment is created* | CREATED | SHIPPED | yes |
+| RTP — *Courier is on the way to pickup location* | CREATED | SHIPPED | yes (none if already CREATED) |
 | COL — *Courier has arrived at pickup location* | WAITING_PICKUP | SHIPPED | no |
+| RAP — *Re Attempt Pickup* | FAILED (existing mapping) | unchanged | yes (existing terminal behavior) |
+| PRJL — *Pickup cancelled by courier* | FAILED (terminal) | unchanged (never CANCELLED) | yes |
 | PAPV — *Courier has picked up your shipment* | PICKED_UP | DELIVERING | yes |
+| POL — *Package on Transit* | IN_TRANSIT | DELIVERING | yes |
 | POLXL — *Package on Origin Locker* | IN_TRANSIT | DELIVERING | yes |
-| HAPH — *Hold at Paxel Home* | IN_TRANSIT | DELIVERING | yes |
+| ODL — *Courier has arrived in Destination Locker* | OUT_FOR_DELIVERY (existing mapping) | DELIVERING | yes |
 | ODLXL — *Package on Destination Locker* | IN_TRANSIT | DELIVERING | yes |
-| POL | IN_TRANSIT | DELIVERING | yes |
+| HAPH — *Hold at Paxel Home* | IN_TRANSIT | DELIVERING | yes |
+| POD — *Courier is on the way to destination* | OUT_FOR_DELIVERY | DELIVERING | yes |
 | COD — *Courier has arrived at destination* | OUT_FOR_DELIVERY | DELIVERING | yes |
-| ODL — *On Delivery* | OUT_FOR_DELIVERY | DELIVERING | yes |
-| POD | OUT_FOR_DELIVERY | DELIVERING | yes |
-| PDO — *Delivery is Completed* | DELIVERED (terminal) | DELIVERED | yes |
-| PRJL — *Pickup cancelled by courier* | FAILED (terminal) | unchanged (never CANCELLED) | yes ("gagal dikirim") |
-| RAP, UNDLM, RTN | FAILED (terminal) | unchanged | yes ("gagal dikirim") |
-| CCS | CANCELLED (terminal) | CANCELLED | yes |
-| FAILED3PL, ONHOLD3PL, any other code | no change — recorded, warning logged (AS-IS) | unchanged | no |
+| PDO — *Delivery is completed* | DELIVERED (terminal) | DELIVERED | yes |
+| UNDLM — *Shipment Undelivered* | FAILED (terminal) | unchanged | yes |
+| RTN — *Package Returned* | FAILED (terminal) | unchanged | yes |
+| CCS — *Shipment is cancelled (this is terminal status)* | CANCELLED (terminal) | CANCELLED | yes |
+| FAILED3PL — *Driver Not Found* | no change — recorded, warning logged | unchanged | no |
+| ONHOLD3PL — *Package on hold* | no change — recorded, warning logged | unchanged | no |
 
-Descriptions in *italics* are Paxel's own definitions (API documentation, **Webhook >
-Shipment Status Mapping**). They map onto the existing lifecycle only: the locker and
-Paxel Home states hold the parcel inside Paxel's network after pickup (IN_TRANSIT — never
-DELIVERED, and not yet OUT_FOR_DELIVERY); PRJL is FAILED rather than CANCELLED because a
-courier cancelling the pickup must not cancel the customer's order (FAILED keeps it and
-leaves the shipment re-bookable). Every mapping is shared with the tracking poller
-(`shipment-status.mapper.ts`).
+Descriptions in *italics* are from the supplied Paxel status screenshots. RTP uses
+“Courier is on the way to pickup location” as the definitive Mas Sular meaning. Customer-
+facing labels use the original Paxel code, so existing internal mappings for ODL and RAP
+remain unchanged even though their labels reflect the supplied Paxel descriptions. RAP's
+terminal FAILED behavior is unchanged and remains a lifecycle limitation.
 
-**AS-IS, meaning not confirmed by Paxel:** FAILED3PL and ONHOLD3PL. They stay
-record-only; they are never mapped from their literal words (item 3.J).
+FAILED3PL and ONHOLD3PL have display labels from the screenshots, but remain record-only
+because no internal lifecycle behavior was specified. Their labels do not imply a state
+transition or notification.
 
 Order moves follow the legal order transitions (a CANCELLED/COMPLETED order is never
 revived). Transitions are forward-only; terminal shipments never change; an older or
@@ -131,7 +133,7 @@ before relying on the behaviour they describe.
 | G | Units | **Closed** (partly) | `actual_weight` = grams, `actual_price` = Rupiah. `money.collect_money` unit and the meaning of `money` remain unconfirmed (stored raw, never used for payment) |
 | H | Time zone of `delivery_datetime` / `logs.created_datetime` | **Closed** (partly) | Both **WIB / Asia/Jakarta**. Whether `logs` can be an array is unconfirmed (an array is tolerated) |
 | I | Are `photo` / `signature` / `pdo_photo` / `pdo_signature` URLs? | **Closed** | Always URLs |
-| J | Meaning of HAPH, FAILED3PL, ONHOLD3PL, ODL, ODLXL, POLXL | **Closed** for HAPH, ODL, ODLXL, POLXL (and RTP, COL, PAPV, COD, PDO, PRJL): mapped from Paxel's **Webhook > Shipment Status Mapping** definitions (section 2). **Open — AS-IS** for FAILED3PL and ONHOLD3PL | FAILED3PL and ONHOLD3PL stay recorded-only in `shipment-status.mapper.ts` (affects the poller too) until Paxel confirms their meaning. Do not invent mappings |
+| J | Internal transition behavior for FAILED3PL and ONHOLD3PL | **Open — AS-IS** | Their screenshot descriptions are displayed when available, but there is no lifecycle transition or notification mapping until business behavior is defined |
 | K | How the webhook URL is registered | **Closed** | Per **Corporate Account**, not per shipment. Production: customer information goes to Paxel's **Sales Team**, who enter it in **Paxel CMS Production** |
 
 Pricing note (not a webhook item): the Paxel **staging** account returns **dummy** rates

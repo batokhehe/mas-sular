@@ -181,7 +181,38 @@ describe('toCustomerInvoice', () => {
   });
 
   it('shipping: courier label, service, status and AWB (customer-facing, as in the WhatsApp shipped message)', () => {
-    expect(toCustomerInvoice(order()).shipping).toEqual({ courier: 'Paxel', service: 'Paxel Next Day', status: 'IN_TRANSIT', trackingNumber: 'PXL-123' });
+    expect(toCustomerInvoice(order()).shipping).toEqual({
+      courier: 'Paxel',
+      service: 'Paxel Next Day',
+      status: 'IN_TRANSIT',
+      statusLabel: 'Dalam perjalanan',
+      trackingNumber: 'PXL-123',
+    });
+  });
+
+  it.each([
+    ['COD', 'Kurir telah tiba di tujuan'],
+    ['PRJL', 'Pickup dibatalkan oleh kurir'],
+    ['RTP', 'Kurir sedang menuju lokasi pickup'],
+    ['FAILED3PL', 'Kurir tidak ditemukan'],
+    ['ONHOLD3PL', 'Paket ditahan'],
+  ])('shipping status %s uses its Indonesian Paxel label', (providerStatus, statusLabel) => {
+    const base = order();
+    const inv = toCustomerInvoice(order({
+      shipment: {
+        ...base.shipment!,
+        metadata: {
+          paxel: {
+            webhook: {
+              lastReceivedAt: '2026-10-08T10:00:00.000Z',
+              latest: { latestStatus: providerStatus },
+            },
+          },
+        },
+        history: [],
+      },
+    } as never));
+    expect(inv.shipping.statusLabel).toBe(statusLabel);
   });
 
   it('15. delivery: recipient, masked phone, readable address only', () => {
@@ -223,9 +254,10 @@ describe('toCustomerInvoice', () => {
 
   it('the database select itself asks only for those columns (no ids, no user, no email, no coordinates)', () => {
     const select = JSON.stringify(INVOICE_ORDER_SELECT);
-    for (const forbidden of ['"id"', 'userId', 'user', 'email', 'latitude', 'longitude', 'internalNotes', 'reservations', 'manualReceiptUrl', 'webhookPayload', 'shippingPayload', 'providerPayload', 'metadata', 'paymentServiceFeeAbsorbed', 'paymentServiceFeeCalculated', 'paymentServiceFeeRule']) {
+    for (const forbidden of ['"id"', 'userId', 'user', 'email', 'latitude', 'longitude', 'internalNotes', 'reservations', 'manualReceiptUrl', 'webhookPayload', 'shippingPayload', 'providerPayload', 'paymentServiceFeeAbsorbed', 'paymentServiceFeeCalculated', 'paymentServiceFeeRule']) {
       expect(select).not.toContain(forbidden);
     }
+    expect(select).toContain('"metadata"'); // queried only to derive the safe display label
   });
 });
 

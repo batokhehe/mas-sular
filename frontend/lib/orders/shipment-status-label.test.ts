@@ -57,10 +57,16 @@ test('a status this build has never seen shows as-is instead of throwing', () =>
 test('/orders reads shipment badges only through the helper', () => {
   const page = read('app/orders/page.tsx')
   assert.match(page, /const shipmentBadge = order\.shipment \? shipmentStatusLabel\(order\.shipment\.status\) : undefined/)
+  assert.match(page, /order\.shipment\.displayStatusLabel \?\? shipmentBadge\?\.label/)
   assert.doesNotMatch(page, /SHIPMENT_LABEL\[/)
   // Order and payment status maps cover their backend enums, so they cannot hit the same crash.
   const orderMeta = page.match(/const ORDER_META[^=]*= \{([^}]*(?:\}[^}]*)*?)\n\}/)
   assert.ok(orderMeta)
   for (const status of prismaEnum('OrderStatus')) assert.match(orderMeta[1], new RegExp(`\\b${status}: \\{`), `ORDER_META has ${status}`)
   for (const status of prismaEnum('PaymentStatus')) assert.match(page, new RegExp(`\\b${status}: \\{ label:`), `PAYMENT_LABEL has ${status}`)
+})
+
+test('Admin order detail prefers the Paxel description translation when available', () => {
+  const page = read('app/admin/(panel)/orders/[id]/page.tsx')
+  assert.match(page, /shipment\.displayStatusLabel \?\? shipmentStatusLabel\(shipment\.status\)/)
 })

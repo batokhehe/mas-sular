@@ -25,7 +25,7 @@ import { readPaxelWebhook, readShipmentMetadata } from '../../src/modules/shipme
 import { ShipmentProviderFactory } from '../../src/modules/shipment/shipment-provider.factory'
 import { ShipmentStatusMapper } from '../../src/modules/shipment/shipment-status.mapper'
 import { ShipmentSyncService } from '../../src/modules/shipment/shipment-sync.service'
-import { getWorld, seedScenario, type IntegrationWorld } from './world'
+import { closeWorld, getWorld, seedScenario, type IntegrationWorld } from './world'
 
 const SECRET = 'test-only-paxel-webhook-secret'
 
@@ -57,7 +57,18 @@ beforeAll(async () => {
 }, 180_000)
 
 afterAll(async () => {
-  await app?.close()
+  const errors: unknown[] = []
+  try {
+    await app?.close()
+  } catch (error) {
+    errors.push(error)
+  }
+  try {
+    await closeWorld()
+  } catch (error) {
+    errors.push(error)
+  }
+  if (errors.length > 0) throw new AggregateError(errors, 'Failed to close Paxel integration test resources')
 })
 
 async function post(body: Record<string, unknown>) {
@@ -239,18 +250,19 @@ describe('Paxel webhook: idempotency, staleness and terminal states on real Post
     expect(s.shipment.status).toBe(ShipmentStatus.DELIVERED)
   })
 
-  it('the documented Paxel lifecycle (RTP, COL, PAPV, POLXL, HAPH, ODLXL, COD, ODL, PDO) moves forward once per internal state; replaying it changes nothing', async () => {
+  it('the documented Paxel lifecycle (RTP, COL, PAPV, POLXL, HAPH, ODLXL, COD, ODL, POD, PDO) moves forward once per internal state; replaying it changes nothing', async () => {
     const { shipment, scenario, awb, orderNumber } = await paxelShipment()
     const sequence: Array<[string, string, ShipmentStatus]> = [
-      ['RTP', '2026-09-13 08:00:00', ShipmentStatus.CREATED], // Shipment successfully created (already CREATED)
+      ['RTP', '2026-09-13 08:00:00', ShipmentStatus.CREATED], // Courier is on the way to pickup (already CREATED)
       ['COL', '2026-09-13 08:30:00', ShipmentStatus.WAITING_PICKUP], // Courier has arrived at pickup location
       ['PAPV', '2026-09-13 09:00:00', ShipmentStatus.PICKED_UP], // Courier has picked up your shipment
       ['POLXL', '2026-09-13 10:00:00', ShipmentStatus.IN_TRANSIT], // Package on Origin Locker
       ['HAPH', '2026-09-13 11:00:00', ShipmentStatus.IN_TRANSIT], // Hold at Paxel Home
       ['ODLXL', '2026-09-13 12:00:00', ShipmentStatus.IN_TRANSIT], // Package on Destination Locker
       ['COD', '2026-09-13 13:00:00', ShipmentStatus.OUT_FOR_DELIVERY], // Courier has arrived at destination
-      ['ODL', '2026-09-13 14:00:00', ShipmentStatus.OUT_FOR_DELIVERY], // On Delivery
-      ['PDO', '2026-09-13 15:00:00', ShipmentStatus.DELIVERED], // Delivery is Completed
+      ['ODL', '2026-09-13 14:00:00', ShipmentStatus.OUT_FOR_DELIVERY], // Courier has arrived in Destination Locker
+      ['POD', '2026-09-13 14:30:00', ShipmentStatus.OUT_FOR_DELIVERY], // Courier is on the way to destination
+      ['PDO', '2026-09-13 15:00:00', ShipmentStatus.DELIVERED], // Delivery is completed
     ]
     for (const [code, time, expected] of sequence) {
       expect((await post(push(awb, orderNumber, code, time))).body).toEqual({ received: true })
@@ -380,10 +392,22 @@ describe('Paxel webhook data vs customers and admins (real PostgreSQL)', () => {
     await post(pdo(awb, orderNumber))
     // The real customer-facing service method behind GET /api/v1/orders/users/:userId.
     const orders = new OrdersService(world.prisma, {} as never, {} as never, {} as never)
-    const list = (await orders.listForUser(scenario.userId)) as Array<{ id: string; shipment: { status: string; metadata: Record<string, any> | null } | null }>
+    const list = (await orders.listForUser(scenario.userId)) as Array<{
+      id: string
+      shipment: {
+        status: ShipmentStatus
+        displayStatusLabel?: string
+        metadata?: unknown
+        providerPayload?: unknown
+        providerShipmentId?: unknown
+      } | null
+    }>
     const mine = list.find((o) => o.id === scenario.order.id)!
     expect(mine.shipment!.status).toBe(ShipmentStatus.DELIVERED) // the customer still sees the status
-    expect(mine.shipment!.metadata).toEqual({ paxel: { pickupDatetime: '2026-09-13T10:00:00.000Z' } })
+    expect(mine.shipment!.displayStatusLabel).toBe('Pengiriman telah selesai')
+    expect(mine.shipment).not.toHaveProperty('metadata')
+    expect(mine.shipment).not.toHaveProperty('providerPayload')
+    expect(mine.shipment).not.toHaveProperty('providerShipmentId')
     const serialized = JSON.stringify(mine)
     for (const internal of ['Richardo', 'Heri', 'Jhon Doe', 'media.paxel.example', 'Uang yang diterima', 'Muara karang', 'collectMoney', 'actualPrice']) {
       expect(serialized).not.toContain(internal)

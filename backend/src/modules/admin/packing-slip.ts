@@ -1,12 +1,13 @@
 import { Prisma, ShipmentStatus } from '@prisma/client';
 import { BUSINESS_TIMEZONE, zonedCivil } from '../../common/utils/business-time.util';
+import { latestPaxelStatusCode, paxelStatusDisplayLabel } from '../shipment/shipment-display-label';
 
 /**
  * P3 Packing Slip — the read-only document an operator prints to pack an order.
  *
  * Pure: the narrow Prisma select and the mapper to a presentation-only view. It
  * carries exactly what the slip shows - no payment, notes, events, audit or
- * provider data. No prices: a packing slip is for packing.
+ * courier payloads. No prices: a packing slip is for packing.
  */
 
 export const NOT_AVAILABLE = '—';
@@ -53,7 +54,15 @@ export const PACKING_SLIP_SELECT = {
     // Same order as the Order Detail page (OrderItem has no timestamp to sort by).
     select: { productName: true, quantity: true, toppings: { select: { name: true }, orderBy: { name: 'asc' } } },
   },
-  shipment: { select: { trackingNumber: true, status: true } },
+  shipment: {
+    select: {
+      trackingNumber: true,
+      provider: true,
+      status: true,
+      metadata: true,
+      history: { select: { providerStatus: true, changedAt: true }, orderBy: { changedAt: 'desc' }, take: 1 },
+    },
+  },
 } satisfies Prisma.OrderSelect;
 
 export type PackingSlipRow = Prisma.OrderGetPayload<{ select: typeof PACKING_SLIP_SELECT }>;
@@ -128,7 +137,12 @@ export function toPackingSlipView(order: PackingSlipRow): PackingSlipView {
       trackingNumber,
       awbLabel: trackingNumber ?? AWB_NOT_AVAILABLE,
       status,
-      statusLabel: order.shipment ? (SHIPMENT_STATUS_LABEL_ID[order.shipment.status] ?? order.shipment.status) : NO_SHIPMENT,
+      statusLabel: order.shipment
+        ? paxelStatusDisplayLabel(
+            order.shipment.provider,
+          latestPaxelStatusCode(order.shipment.metadata, order.shipment.history),
+          ) ?? SHIPMENT_STATUS_LABEL_ID[order.shipment.status]
+        : NO_SHIPMENT,
     },
   };
 }

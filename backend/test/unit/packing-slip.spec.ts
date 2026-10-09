@@ -18,7 +18,12 @@ import { AdminOperationsController } from '../../src/modules/admin/presentation/
 
 /** P3 Packing Slip — mapper, fallbacks, the narrow read and the route contract. */
 
-function row(over: Partial<PackingSlipRow> = {}): PackingSlipRow {
+function row(
+  over: Omit<Partial<PackingSlipRow>, 'shipment'> & {
+    shipment?: Partial<NonNullable<PackingSlipRow['shipment']>> | null;
+  } = {},
+): PackingSlipRow {
+  const { shipment: shipmentOverride, ...orderOverrides } = over;
   return {
     orderNumber: 'BMS-20260917-HV5CPKXA',
     createdAt: new Date('2026-09-17T03:05:00.000Z'), // 10:05 WIB
@@ -40,8 +45,16 @@ function row(over: Partial<PackingSlipRow> = {}): PackingSlipRow {
       { productName: 'Baso Urat Jumbo', quantity: 2, toppings: [{ name: 'Bihun' }, { name: 'Mie Kuning' }] },
       { productName: 'Es Teh Manis', quantity: 4, toppings: [] },
     ],
-    shipment: { trackingNumber: 'PXL-0123456789', status: ShipmentStatus.CREATED },
-    ...over,
+    ...orderOverrides,
+    shipment: shipmentOverride === null
+      ? null
+      : {
+          provider: 'paxel',
+          trackingNumber: 'PXL-0123456789',
+          status: ShipmentStatus.CREATED,
+          history: [],
+          ...shipmentOverride,
+        },
   } as PackingSlipRow;
 }
 
@@ -103,6 +116,24 @@ describe('toPackingSlipView', () => {
     expect(toPackingSlipView(row({ shipment: { trackingNumber: '  ', status: ShipmentStatus.FAILED } })).shipment.trackingNumber).toBeNull();
   });
 
+  it('uses the latest Paxel webhook code for its label without returning webhook metadata', () => {
+    const view = toPackingSlipView(row({
+      shipment: {
+        metadata: {
+          paxel: {
+            webhook: {
+              lastReceivedAt: '2026-10-08T10:00:00.000Z',
+              latest: { latestStatus: 'RTP' },
+            },
+          },
+        },
+      },
+    } as never));
+
+    expect(view.shipment.statusLabel).toBe('Kurir sedang menuju lokasi pickup');
+    expect(JSON.stringify(view)).not.toContain('lastReceivedAt');
+  });
+
   it('the AWB is passed through exactly as stored (no trimming of punctuation or case)', () => {
     const awb = 'JNE/0109401600067399-a';
     expect(toPackingSlipView(row({ shipment: { trackingNumber: awb, status: ShipmentStatus.IN_TRANSIT } })).shipment).toMatchObject({ trackingNumber: awb, awbLabel: awb });
@@ -125,9 +156,20 @@ describe('toPackingSlipView', () => {
 describe('the read: narrow select, 404, no writes', () => {
   it('selects only slip fields - no payment, events, notes, user or provider payload', () => {
     const keys = JSON.stringify(PACKING_SLIP_SELECT);
-    for (const forbidden of ['payment', 'events', 'notes', 'user', 'providerPayload', 'metadata', 'price', 'totalPrice', 'history']) {
+    for (const forbidden of ['payment', 'events', 'notes', 'user', 'providerPayload', 'price', 'totalPrice']) {
       expect([forbidden, keys.includes(`"${forbidden}"`)]).toEqual([forbidden, false]);
     }
+    expect(PACKING_SLIP_SELECT.shipment.select).toMatchObject({
+      metadata: true,
+      provider: true,
+    });
+    expect(PACKING_SLIP_SELECT.shipment).toMatchObject({
+      select: {
+        provider: true,
+        metadata: true,
+        history: { select: { providerStatus: true, changedAt: true }, take: 1 },
+      },
+    });
   });
 
   it('404 for a missing or soft-deleted order; only findUnique is ever called', async () => {

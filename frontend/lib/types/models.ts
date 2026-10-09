@@ -271,6 +271,8 @@ export interface Shipment {
   provider: string
   service: string
   status: ShipmentStatus
+  /** Server-derived Indonesian display text; preserves provider-specific detail. */
+  displayStatusLabel?: string
   cost: number
   trackingNumber?: string | null
   trackingUrl?: string | null

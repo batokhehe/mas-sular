@@ -259,7 +259,9 @@ function ShipmentSection({
       {shipment ? (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2 text-sm">
-            <Badge variant={shipmentStatusVariant(shipment.status)}>{shipmentStatusLabel(shipment.status)}</Badge>
+            <Badge variant={shipmentStatusVariant(shipment.status)}>
+              {shipment.displayStatusLabel ?? shipmentStatusLabel(shipment.status)}
+            </Badge>
             <span>
               {shipment.provider} · {shipment.service} · {formatIDR(shipment.cost)}
             </span>

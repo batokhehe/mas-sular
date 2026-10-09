@@ -128,6 +128,48 @@ describe('nothing sensitive reaches the order list', () => {
       expect(serialized).not.toContain(secret);
     }
   });
+
+  it('uses Paxel metadata to add the label but never returns shipment metadata or provider payload', async () => {
+    const { svc } = service([
+      gatewayOrder({
+        shipment: {
+          id: 'shipment-1',
+          orderId: 'o-1',
+          provider: 'paxel',
+          service: 'PAXEL_SAMEDAY',
+          status: 'CREATED',
+          cost: 18000,
+          trackingNumber: 'PXL-123',
+          trackingUrl: 'https://tracking.example/PXL-123',
+          providerShipmentId: 'internal-provider-id',
+          providerPayload: { raw: 'provider-response' },
+          metadata: {
+            paxel: {
+              webhook: {
+                lastReceivedAt: '2026-10-08T10:00:00.000Z',
+                latest: { latestStatus: 'RTP' },
+                driverName: 'courier-internal-name',
+              },
+              pickupDatetime: '2026-10-08T10:00:00.000Z',
+            },
+          },
+          history: [],
+        },
+      }),
+    ]);
+
+    const [order] = await svc.listForUser('user-1');
+    expect(order.shipment).toMatchObject({
+      provider: 'paxel',
+      status: 'CREATED',
+      displayStatusLabel: 'Kurir sedang menuju lokasi pickup',
+    });
+    expect(order.shipment).not.toHaveProperty('metadata');
+    expect(order.shipment).not.toHaveProperty('providerPayload');
+    expect(order.shipment).not.toHaveProperty('providerShipmentId');
+    expect(JSON.stringify(order)).not.toContain('courier-internal-name');
+    expect(JSON.stringify(order)).not.toContain('internal-provider-id');
+  });
 });
 
 describe('manual and un-initiated payments are unaffected', () => {
@@ -171,7 +213,11 @@ describe('the existing query contract is preserved', () => {
     expect(args.orderBy).toEqual({ createdAt: 'desc' });
     expect(args.include.items).toEqual({ include: { toppings: true } });
     expect(args.include.address).toBe(true);
-    expect(args.include.shipment).toBe(true);
+    expect(args.include.shipment.select).toMatchObject({
+      provider: true,
+      metadata: true,
+      history: { select: { providerStatus: true, changedAt: true }, take: 1 },
+    });
   });
 
   it('scopes to the requested user only', async () => {

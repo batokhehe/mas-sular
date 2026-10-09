@@ -67,6 +67,7 @@ function OrderCard({ order, onRefetch }: { order: Order; onRefetch: () => void }
   const payment = order.payment
   const pay = payment ? PAYMENT_LABEL[payment.status] : undefined
   const shipmentBadge = order.shipment ? shipmentStatusLabel(order.shipment.status) : undefined
+  const shipmentLabel = order.shipment ? order.shipment.displayStatusLabel ?? shipmentBadge?.label : undefined
   const canUpload =
     payment && RECEIPT_METHODS.has(order.paymentMethod) && UPLOADABLE.includes(payment.status)
   // A gateway payment the customer never finished. The link replays the attempt
@@ -89,9 +90,9 @@ function OrderCard({ order, onRefetch }: { order: Order; onRefetch: () => void }
             {meta.label}
           </Badge>
           {pay ? <Badge variant={pay.variant}>{pay.label}</Badge> : null}
-          {shipmentBadge ? (
+          {shipmentBadge && shipmentLabel ? (
             <Badge variant={shipmentBadge.variant}>
-              Pengiriman: {shipmentBadge.label}
+              Pengiriman: {shipmentLabel}
             </Badge>
           ) : null}
         </div>
@@ -173,7 +174,7 @@ function OrderCard({ order, onRefetch }: { order: Order; onRefetch: () => void }
                 <h4 className="font-medium">Pengiriman</h4>
                 <p className="text-muted-foreground">
                   {order.shipment.provider} · {order.shipment.service} ·{' '}
-                  {shipmentBadge?.label}
+                  {shipmentLabel}
                 </p>
                 {order.shipment.trackingNumber ? (
                   <p className="text-muted-foreground">

@@ -171,7 +171,7 @@ describe('PaxelShipmentProvider tracking', () => {
       res(200, JSON.stringify({ data: { status: 'DELIVERED', latest_status: 'RTP' } })),
     );
     // `status` is the field the old guessed contract used; latest_status wins
-    // (RTP = "Shipment successfully created" -> CREATED, not the DELIVERED of `status`).
+    // (RTP = courier on the way to pickup -> CREATED, not the DELIVERED of `status`).
     expect((await provider.trackShipment(AWB)).status).toBe(ShipmentStatus.CREATED);
   });
 
@@ -212,9 +212,8 @@ describe('PaxelShipmentProvider tracking', () => {
    * "CCS" carrying the cancellation_reason we had sent - direct evidence of its
    * meaning rather than an inference from the acronym.
    *
-   * HAPH, ODL, ODLXL and POLXL moved to the documented list once Paxel defined them.
-   * FAILED3PL and ONHOLD3PL stay UNKNOWN deliberately (AS-IS): Paxel has not confirmed
-   * their meaning, and their literal words are not evidence.
+   * Screenshot descriptions now cover FAILED3PL and ONHOLD3PL, but their internal
+   * transition behavior deliberately remains UNKNOWN / record-only.
    */
   it.each(['FAILED3PL', 'ONHOLD3PL'])(
     'keeps the unconfirmed status %s AS-IS: UNKNOWN rather than guessing',

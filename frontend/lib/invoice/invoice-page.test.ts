@@ -55,6 +55,7 @@ test('14. customer-facing labels follow the business statuses', () => {
   assert.equal(paymentMethodLabel('BANK_TRANSFER'), 'Transfer bank')
   assert.equal(orderStatusLabel('CANCELLED'), 'Dibatalkan')
   assert.equal(shipmentStatusLabel('IN_TRANSIT'), 'Dalam perjalanan')
+  assert.match(PAGE, /shipping\.statusLabel \?\? shipmentStatusLabel\(shipping\.status\)/)
   assert.equal(paymentStatusLabel('SOMETHING_NEW'), 'SOMETHING_NEW') // never hides an unknown status
   assert.equal(paymentStatusLabel(null), '-')
 })

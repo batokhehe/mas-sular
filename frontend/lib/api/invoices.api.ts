@@ -25,7 +25,13 @@ export interface CustomerInvoice {
   paymentServiceFeeApplies?: boolean
   total: number
   payment: { method: string; status: string | null; amountDue: number; uniqueCode: number | null }
-  shipping: { courier: string | null; service: string | null; status: string | null; trackingNumber: string | null }
+  shipping: {
+    courier: string | null
+    service: string | null
+    status: string | null
+    statusLabel: string | null
+    trackingNumber: string | null
+  }
   delivery: { recipientName: string; phone: string; address: string }
 }
 

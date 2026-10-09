@@ -217,13 +217,13 @@ describe('the allowlist is defense in depth: application checks unchanged', () =
     expect(SERVICE).not.toMatch(/34\.85\.159\.153|34\.126\.76\.148|remoteAddress|x-forwarded-for/i);
   });
 
-  it.each(['FAILED3PL', 'ONHOLD3PL'])('%s stays AS-IS: unmapped (record-only) and documented as unconfirmed', (code) => {
+  it.each(['FAILED3PL', 'ONHOLD3PL'])('%s stays AS-IS: display-described but unmapped (record-only)', (code) => {
     expect(lookupProviderStatus('paxel', code)).toBeUndefined();
-    expect(RUNBOOK).toContain('**AS-IS, meaning not confirmed by Paxel:** FAILED3PL and ONHOLD3PL.');
-    expect(RUNBOOK).toMatch(/\*\*Open — AS-IS\*\* for FAILED3PL and ONHOLD3PL/);
+    expect(RUNBOOK).toContain('FAILED3PL and ONHOLD3PL have display labels from the screenshots');
+    expect(RUNBOOK).toContain('Their screenshot descriptions are displayed when available');
   });
 
-  it.each(['RTP', 'COL', 'PAPV', 'POLXL', 'ODLXL', 'COD', 'PDO', 'PRJL', 'HAPH', 'ODL'])('documented %s is mapped and listed in the runbook status table', (code) => {
+  it.each(['RTP', 'CONFIRMED', 'COL', 'PRJL', 'RAP', 'PAPV', 'POL', 'POLXL', 'ODL', 'ODLXL', 'POD', 'COD', 'PDO', 'UNDLM', 'HAPH', 'RTN', 'CCS'])('screenshot status %s is mapped and listed in the runbook status table', (code) => {
     expect(lookupProviderStatus('paxel', code)).toBeDefined();
     expect(RUNBOOK).toMatch(new RegExp(`\\| ${code} — \\*[^*]+\\* \\|`));
   });

@@ -108,7 +108,9 @@ function InvoiceDocument({ invoice }: { invoice: CustomerInvoice }) {
           <div className="min-w-0 space-y-1 text-sm">
             <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pengiriman</h2>
             <p className="font-medium">{[shipping.courier, shipping.service].filter(Boolean).join(' - ') || '-'}</p>
-            {shipping.status ? <p className="text-muted-foreground">{shipmentStatusLabel(shipping.status)}</p> : null}
+            {shipping.status ? (
+              <p className="text-muted-foreground">{shipping.statusLabel ?? shipmentStatusLabel(shipping.status)}</p>
+            ) : null}
             {shipping.trackingNumber ? (
               <p className="text-muted-foreground [overflow-wrap:anywhere]">
                 No. resi: <span className="font-medium text-foreground">{shipping.trackingNumber}</span>

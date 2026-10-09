@@ -311,7 +311,7 @@ export class ShipmentSyncService {
             customerPhone: phone,
             customerEmail: shipment.order.user?.email ?? null,
             shipmentStatus: mapped,
-            statusLabel: this.mapper.label(mapped),
+            statusLabel: this.mapper.label(mapped, shipment.provider, providerStatus),
             shippingProvider: shipment.provider,
             shippingService:
               shipment.order.shippingServiceName ??

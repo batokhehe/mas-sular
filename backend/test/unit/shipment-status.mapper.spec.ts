@@ -1,5 +1,6 @@
 import { OrderStatus, ShipmentStatus } from '@prisma/client';
 import { ShipmentStatusMapper } from '../../src/modules/shipment/shipment-status.mapper';
+import { PAXEL_STATUS_LABEL_ID, shipmentDisplayLabel } from '../../src/modules/shipment/shipment-display-label';
 
 describe('ShipmentStatusMapper', () => {
   const mapper = new ShipmentStatusMapper();
@@ -37,23 +38,27 @@ describe('ShipmentStatusMapper', () => {
   });
 
   it.each([
-    // Paxel documentation (Webhook > Shipment Status Mapping) -> the existing lifecycle.
-    ['RTP', ShipmentStatus.CREATED], // Shipment successfully created
+    // Paxel screenshot source of truth -> the existing internal lifecycle.
+    ['RTP', ShipmentStatus.CREATED], // Courier is on the way to pickup location
     ['COL', ShipmentStatus.WAITING_PICKUP], // Courier has arrived at pickup location
     ['PAPV', ShipmentStatus.PICKED_UP], // Courier has picked up your shipment
     ['POLXL', ShipmentStatus.IN_TRANSIT], // Package on Origin Locker
     ['ODLXL', ShipmentStatus.IN_TRANSIT], // Package on Destination Locker
     ['HAPH', ShipmentStatus.IN_TRANSIT], // Hold at Paxel Home
     ['COD', ShipmentStatus.OUT_FOR_DELIVERY], // Courier has arrived at destination
-    ['ODL', ShipmentStatus.OUT_FOR_DELIVERY], // On Delivery
+    ['ODL', ShipmentStatus.OUT_FOR_DELIVERY], // Existing internal mapping; label uses Paxel code.
     ['PDO', ShipmentStatus.DELIVERED], // Delivery is Completed
     ['PRJL', ShipmentStatus.FAILED], // Pickup cancelled by courier
+    ['RAP', ShipmentStatus.FAILED], // Existing internal mapping; label uses Paxel code.
   ])('documented Paxel status %s -> %s', (code, status) => {
     expect(mapper.map('paxel', code)).toEqual({ mapped: status, known: true });
   });
 
-  it('ODL is "On Delivery": OUT_FOR_DELIVERY, never DELIVERED; only PDO completes a delivery', () => {
+  it('preserves internal mappings while displaying the Paxel-specific description', () => {
     expect(mapper.map('paxel', 'ODL').mapped).toBe(ShipmentStatus.OUT_FOR_DELIVERY);
+    expect(mapper.label(ShipmentStatus.OUT_FOR_DELIVERY, 'paxel', 'ODL')).toBe('Kurir telah tiba di locker tujuan');
+    expect(mapper.map('paxel', 'RAP').mapped).toBe(ShipmentStatus.FAILED);
+    expect(mapper.label(ShipmentStatus.FAILED, 'paxel', 'RAP')).toBe('Percobaan pickup ulang');
     const delivered = ['RTP', 'COL', 'PAPV', 'POLXL', 'ODLXL', 'COD', 'PDO', 'PRJL', 'HAPH', 'ODL'].filter(
       (code) => mapper.map('paxel', code).mapped === ShipmentStatus.DELIVERED,
     );
@@ -68,7 +73,7 @@ describe('ShipmentStatusMapper', () => {
   it('keeps the previously established Paxel mappings unchanged', () => {
     const expected: Array<[string, ShipmentStatus]> = [
       ['CONFIRMED', ShipmentStatus.CREATED],
-      // RTP: CREATED since Paxel documented it as "Shipment successfully created".
+      // RTP keeps its internal CREATED state; its display meaning is pickup en route.
       ['RTP', ShipmentStatus.CREATED],
       ['COL', ShipmentStatus.WAITING_PICKUP],
       ['PAPV', ShipmentStatus.PICKED_UP],
@@ -84,6 +89,42 @@ describe('ShipmentStatusMapper', () => {
     for (const [code, status] of expected) {
       expect(mapper.map('paxel', code)).toEqual({ mapped: status, known: true });
     }
+  });
+
+  it('uses the supplied Indonesian Paxel labels without exposing internal enum names', () => {
+    const expected = {
+      RTP: 'Kurir sedang menuju lokasi pickup',
+      CONFIRMED: 'Pengiriman dibuat',
+      COL: 'Kurir telah tiba di lokasi pickup',
+      PRJL: 'Pickup dibatalkan oleh kurir',
+      RAP: 'Percobaan pickup ulang',
+      PAPV: 'Kurir telah mengambil paket Anda',
+      POL: 'Paket sedang dalam perjalanan',
+      POLXL: 'Paket berada di locker asal',
+      ODL: 'Kurir telah tiba di locker tujuan',
+      ODLXL: 'Paket berada di locker tujuan',
+      POD: 'Kurir sedang menuju tujuan',
+      COD: 'Kurir telah tiba di tujuan',
+      PDO: 'Pengiriman telah selesai',
+      UNDLM: 'Pengiriman tidak berhasil dikirim',
+      HAPH: 'Paket ditahan di Paxel Home',
+      RTN: 'Paket dikembalikan',
+      FAILED3PL: 'Kurir tidak ditemukan',
+      CCS: 'Pengiriman dibatalkan',
+      ONHOLD3PL: 'Paket ditahan',
+    } satisfies Record<keyof typeof PAXEL_STATUS_LABEL_ID, string>;
+
+    expect(PAXEL_STATUS_LABEL_ID).toEqual(expected);
+    for (const [code, label] of Object.entries(expected)) {
+      expect(shipmentDisplayLabel('paxel', ShipmentStatus.UNKNOWN, code)).toBe(label);
+    }
+    expect(shipmentDisplayLabel('paxel', ShipmentStatus.IN_TRANSIT, 'NEW_CODE')).toBe('Dalam perjalanan');
+  });
+
+  it('uses the raw Paxel code for notification labels while preserving other-provider labels', () => {
+    expect(mapper.label(ShipmentStatus.FAILED, 'paxel', 'PRJL')).toBe('Pickup dibatalkan oleh kurir');
+    expect(mapper.label(ShipmentStatus.OUT_FOR_DELIVERY, 'paxel', 'COD')).toBe('Kurir telah tiba di tujuan');
+    expect(mapper.label(ShipmentStatus.OUT_FOR_DELIVERY, 'jne', 'OUT_FOR_DELIVERY')).toBe('sedang menuju alamat Anda');
   });
 
   it('maps JNE statuses (with spaces/case) to internal statuses', () => {

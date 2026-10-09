@@ -54,6 +54,30 @@ export function getWorld(): Promise<IntegrationWorld> {
   return worldPromise
 }
 
+export async function closeWorld(): Promise<void> {
+  if (!worldPromise) return
+
+  const world = await worldPromise
+  const errors: unknown[] = []
+  const close = async (resource: () => Promise<unknown>) => {
+    try {
+      await resource()
+    } catch (error) {
+      errors.push(error)
+    }
+  }
+
+  await close(() => world.orderConsumer.onModuleDestroy())
+  await close(() => world.paymentConsumer.onModuleDestroy())
+  await close(() => world.rabbit.onModuleDestroy())
+  await close(() => world.prisma.$disconnect())
+  await close(() => world.rabbitmq.stop())
+  await close(() => world.postgres.stop())
+
+  worldPromise = null
+  if (errors.length > 0) throw new AggregateError(errors, 'Failed to close integration world')
+}
+
 async function boot(): Promise<IntegrationWorld> {
   const postgres = await new PostgreSqlContainer('postgres:16-alpine')
     .withDatabase('app')

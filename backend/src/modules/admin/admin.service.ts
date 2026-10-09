@@ -53,6 +53,7 @@ import { pageArgs, paginate } from '../../common/pagination/pagination';
 import { buildOrderTimeline, computeAvailableActions } from './order-operations.util';
 import { activeShippingWhere, SHIPPING_LIST_ACTIVE_SCOPE } from './shipping-list-scope';
 import { buildOutboxEvent } from '../../infrastructure/outbox/outbox-event.builder';
+import { latestPaxelStatusCode, paxelStatusDisplayLabel } from '../shipment/shipment-display-label';
 
 // Payment terminal states now live with the settlement service (Phase 5D) so that
 // admin verification and gateway settlement cannot drift apart. Re-exported here
@@ -475,7 +476,11 @@ export class AdminService {
           address: ADDRESS_WITH_REGIONS,
           items: { include: { toppings: true } },
           payment: true,
-          shipment: true,
+          shipment: {
+            include: {
+              history: { select: { providerStatus: true, mappedStatus: true, changedAt: true }, orderBy: { changedAt: 'desc' }, take: 1 },
+            },
+          },
         },
         orderBy: { createdAt: 'desc' },
         skip,
@@ -483,7 +488,21 @@ export class AdminService {
       }),
       this.prisma.order.count({ where }),
     ]);
-    return paginate(items, total, page, limit);
+    const presented = items.map(({ shipment, ...order }) => {
+      if (!shipment) return { ...order, shipment: null };
+      const { history, ...shipmentData } = shipment;
+      return {
+        ...order,
+        shipment: {
+          ...shipmentData,
+          displayStatusLabel: paxelStatusDisplayLabel(
+            shipment.provider,
+            latestPaxelStatusCode(shipment.metadata, history),
+          ),
+        },
+      };
+    });
+    return paginate(presented, total, page, limit);
   }
 
   async getOrder(id: string) {
@@ -512,6 +531,16 @@ export class AdminService {
       },
     });
     if (!order || order.deletedAt) throw new NotFoundException('Order not found');
+    if (order.shipment) {
+      const providerStatus = latestPaxelStatusCode(order.shipment.metadata, order.shipment.history);
+      return {
+        ...order,
+        shipment: {
+          ...order.shipment,
+          displayStatusLabel: paxelStatusDisplayLabel(order.shipment.provider, providerStatus),
+        },
+      };
+    }
     return order;
   }
 
@@ -542,11 +571,12 @@ export class AdminService {
         },
         shipment: {
           select: {
+            provider: true,
             createdAt: true,
             status: true,
             trackingNumber: true,
             trackingUrl: true,
-            history: { select: { mappedStatus: true, changedAt: true }, orderBy: { changedAt: 'asc' } },
+            history: { select: { providerStatus: true, mappedStatus: true, changedAt: true }, orderBy: { changedAt: 'asc' } },
           },
         },
         events: { select: { status: true, note: true, createdAt: true }, orderBy: { createdAt: 'asc' } },
@@ -584,7 +614,9 @@ export class AdminService {
         payment: order.payment
           ? { createdAt: order.payment.createdAt, status: order.payment.status, verifiedAt: order.payment.verifiedAt, transactions: order.payment.transactions }
           : null,
-        shipment: order.shipment ? { createdAt: order.shipment.createdAt, history: order.shipment.history } : null,
+        shipment: order.shipment
+          ? { createdAt: order.shipment.createdAt, provider: order.shipment.provider, history: order.shipment.history }
+          : null,
         reservations: order.reservations,
       }),
       availableActions: computeAvailableActions({

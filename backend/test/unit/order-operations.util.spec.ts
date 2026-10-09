@@ -16,10 +16,11 @@ describe('buildOrderTimeline', () => {
       },
       shipment: {
         createdAt: at(3 * 3600_000),
+        provider: 'jne',
         history: [
-          { mappedStatus: 'CREATED', changedAt: at(3 * 3600_000) },
-          { mappedStatus: 'IN_TRANSIT', changedAt: at(5 * 3600_000) },
-          { mappedStatus: 'DELIVERED', changedAt: at(8 * 3600_000) },
+          { providerStatus: 'CREATED', mappedStatus: 'CREATED', changedAt: at(3 * 3600_000) },
+          { providerStatus: 'IN_TRANSIT', mappedStatus: 'IN_TRANSIT', changedAt: at(5 * 3600_000) },
+          { providerStatus: 'DELIVERED', mappedStatus: 'DELIVERED', changedAt: at(8 * 3600_000) },
         ],
       },
       reservations: [{ status: 'RESERVED', createdAt: at(60_000), product: { name: 'Bakso' } }],
@@ -35,6 +36,38 @@ describe('buildOrderTimeline', () => {
       'shipment.created',
       'shipment.in_transit',
       'shipment.delivered',
+    ]);
+  });
+
+  it('uses the original Paxel code and its Indonesian description in shipment timeline entries', () => {
+    const timeline = buildOrderTimeline({
+      createdAt: T0,
+      events: [],
+      payment: null,
+      shipment: {
+        createdAt: at(1000),
+        provider: 'paxel',
+        history: [
+          { providerStatus: 'RTP', mappedStatus: 'CREATED', changedAt: at(2000) },
+          { providerStatus: 'COD', mappedStatus: 'OUT_FOR_DELIVERY', changedAt: at(3000) },
+          { providerStatus: 'PRJL', mappedStatus: 'FAILED', changedAt: at(4000) },
+        ],
+      },
+      reservations: [],
+    });
+    expect(timeline.slice(1).map(({ title, description }) => ({ title, description }))).toEqual([
+      {
+        title: 'Kurir sedang menuju lokasi pickup',
+        description: 'Status Paxel RTP: Kurir sedang menuju lokasi pickup.',
+      },
+      {
+        title: 'Kurir telah tiba di tujuan',
+        description: 'Status Paxel COD: Kurir telah tiba di tujuan.',
+      },
+      {
+        title: 'Pickup dibatalkan oleh kurir',
+        description: 'Status Paxel PRJL: Pickup dibatalkan oleh kurir.',
+      },
     ]);
   });
 

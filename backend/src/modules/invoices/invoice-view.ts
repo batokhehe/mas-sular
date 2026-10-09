@@ -1,4 +1,5 @@
 import { PaymentMethod, Prisma } from '@prisma/client';
+import { latestPaxelStatusCode, shipmentDisplayLabel } from '../shipment/shipment-display-label';
 
 /**
  * P2 #14: the ONLY order data the public invoice page receives.
@@ -50,7 +51,16 @@ export const INVOICE_ORDER_SELECT = {
     },
   },
   payment: { select: { method: true, status: true, amount: true, uniqueCode: true } },
-  shipment: { select: { provider: true, service: true, status: true, trackingNumber: true } },
+  shipment: {
+    select: {
+      provider: true,
+      service: true,
+      status: true,
+      trackingNumber: true,
+      metadata: true,
+      history: { select: { providerStatus: true, changedAt: true }, orderBy: { changedAt: 'desc' }, take: 1 },
+    },
+  },
 } satisfies Prisma.OrderSelect;
 
 export type InvoiceOrderRow = Prisma.OrderGetPayload<{ select: typeof INVOICE_ORDER_SELECT }>;
@@ -86,7 +96,7 @@ export interface CustomerInvoice {
     /** Manual bank transfer only. */
     uniqueCode: number | null;
   };
-  shipping: { courier: string | null; service: string | null; status: string | null; trackingNumber: string | null };
+  shipping: { courier: string | null; service: string | null; status: string | null; statusLabel: string | null; trackingNumber: string | null };
   delivery: { recipientName: string; phone: string; address: string };
 }
 
@@ -152,6 +162,13 @@ export function toCustomerInvoice(order: InvoiceOrderRow): CustomerInvoice {
       courier: provider ? (COURIER_LABELS[provider.toLowerCase()] ?? provider) : null,
       service: order.shippingServiceName ?? order.shipment?.service ?? order.shippingService ?? null,
       status: order.shipment?.status ?? null,
+      statusLabel: order.shipment
+        ? shipmentDisplayLabel(
+            order.shipment.provider,
+            order.shipment.status,
+            latestPaxelStatusCode(order.shipment.metadata, order.shipment.history),
+          )
+        : null,
       trackingNumber: order.shipment?.trackingNumber ?? order.trackingNumber ?? null,
     },
     delivery: { recipientName: a.recipientName, phone: maskPhone(a.phone), address },
