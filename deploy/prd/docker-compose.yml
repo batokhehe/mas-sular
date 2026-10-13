@@ -1,0 +1,285 @@
+# Mas Sular — PRODUCTION stack (ecommerce.baksomassular.com).
+#
+# Never call this file directly; go through the wrapper so the secret env files
+# and the release tag are always applied the same way:
+#
+#   deploy/prd/dc ps | logs -f backend | ...   # ad-hoc compose commands
+#   deploy/prd/deploy.sh                       # build + backup + migrate + roll out
+#
+# ISOLATION FROM STAGING (which runs on the same VPS as project `mas-sular`):
+#   project  : mas-sular-prd  -> containers mas-sular-prd-*, volumes mas-sular-prd_*
+#   networks : mas-sular-prd_edge / mas-sular-prd_internal (named explicitly below)
+#   images   : mas-sular-prd/<service>:<git-sha>  (staging builds mas-sular-*:latest)
+# Nothing here publishes a host port. The shared edge proxy (deploy/prd/proxy)
+# joins mas-sular-prd_edge and reaches the web services by their `prd-*` aliases —
+# NOT by service name, because staging's services carry the same names.
+#
+# RESOURCES: 1 vCPU / 3.8 GiB shared with staging. Limits below cap production at
+# ~2.3 GiB in the worst case (staging idles at ~0.3 GiB). Every Node process gets
+# an explicit V8 heap ceiling below its cgroup limit, so it garbage-collects
+# instead of being OOM-killed. cpu_shares=2048 (Docker default 1024) gives
+# production twice staging's CPU weight when the single core is contended;
+# oom_score_adj makes the host OOM killer pick staging before production.
+#
+# Secrets: /etc/mas-sular-prd/compose.env (interpolation, infra credentials) and
+# /etc/mas-sular-prd/app.env (backend runtime). Templates: deploy/prd/env/.
+
+name: mas-sular-prd
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-hardening: &hardening
+  security_opt:
+    - no-new-privileges:true
+
+x-build-labels: &build-labels
+  id.baksomassular.stack: mas-sular-prd
+
+services:
+  # ------------------------------------------------------------- database ---
+  postgres:
+    image: postgres:16-alpine
+    restart: always
+    <<: *hardening
+    # Sized for a small shared host: 40 connections covers the API pool (15),
+    # the migrator and an operator psql with room to spare.
+    command:
+      - postgres
+      - -c
+      - max_connections=40
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - effective_cache_size=384MB
+      - -c
+      - work_mem=4MB
+      - -c
+      - maintenance_work_mem=64MB
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB}
+      # Cluster SUPERUSER — operators and backups only, never given to the app.
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+      # Read ONLY by initdb/10-roles.sh, on the very first boot of an empty volume.
+      APP_DB_OWNER_PASSWORD: ${APP_DB_OWNER_PASSWORD:?set APP_DB_OWNER_PASSWORD}
+      APP_DB_APP_PASSWORD: ${APP_DB_APP_PASSWORD:?set APP_DB_APP_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/initdb:/docker-entrypoint-initdb.d:ro
+    networks: [internal]
+    shm_size: 128m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    logging: *default-logging
+    cpu_shares: 2048
+    oom_score_adj: -500
+    deploy:
+      resources:
+        limits: { cpus: "0.60", memory: 640M }
+        reservations: { memory: 256M }
+
+  # ---------------------------------------------------------------- cache ---
+  redis:
+    image: redis:7.4-alpine
+    restart: always
+    <<: *hardening
+    # Cache only (non-authoritative): no persistence, evict rather than OOM.
+    # The password is expanded INSIDE the container ($$), never on the host CLI.
+    command: ["sh", "-c", "exec redis-server --save '' --appendonly no --maxmemory 64mb --maxmemory-policy allkeys-lru --requirepass \"$$REDIS_PASSWORD\""]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD}
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?set REDIS_PASSWORD}
+    networks: [internal]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    logging: *default-logging
+    cpu_shares: 2048
+    deploy:
+      resources:
+        limits: { cpus: "0.25", memory: 96M }
+
+  # ------------------------------------------------------------- messaging --
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    restart: always
+    <<: *hardening
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?set RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+      # Absolute memory watermark: the broker throttles publishers well before
+      # the container limit instead of being OOM-killed.
+      - ./rabbitmq/10-prd.conf:/etc/rabbitmq/conf.d/10-prd.conf:ro
+    networks: [internal]
+    # No ports. Management UI: docker exec / ssh tunnel only.
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 6
+      start_period: 45s
+    logging: *default-logging
+    cpu_shares: 2048
+    oom_score_adj: -300
+    deploy:
+      resources:
+        limits: { cpus: "0.30", memory: 448M }
+
+  # ------------------------------------------------------------ migration ---
+  # One-shot. Connects as the schema OWNER (not the superuser, not the app role).
+  backend-migrate:
+    image: mas-sular-prd/backend-migrate:${IMAGE_TAG:?set IMAGE_TAG (deploy.sh does)}
+    build:
+      context: ../../backend
+      target: migrator
+      labels: *build-labels
+    restart: "no"
+    <<: *hardening
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs:
+      - /tmp
+    environment:
+      DATABASE_URL: postgresql://mas_sular_owner:${APP_DB_OWNER_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+      NODE_OPTIONS: --max-old-space-size=384
+    networks: [internal]
+    depends_on:
+      postgres: { condition: service_healthy }
+    logging: *default-logging
+    deploy:
+      resources:
+        # pids: the Rust schema engine sizes its pool to the host CPU count (F56).
+        limits: { cpus: "0.75", memory: 512M, pids: 256 }
+
+  # ------------------------------------------------------------------ API ---
+  backend:
+    image: mas-sular-prd/backend:${IMAGE_TAG:?set IMAGE_TAG (deploy.sh does)}
+    build:
+      context: ../../backend
+      target: runner
+      labels: *build-labels
+    restart: always
+    <<: *hardening
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs:
+      - /tmp
+    env_file:
+      - ${PRD_CONF_DIR:-/etc/mas-sular-prd}/app.env
+    # These override anything in app.env: infrastructure endpoints and their
+    # credentials have exactly one source of truth (compose.env).
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_URL: postgresql://mas_sular_app:${APP_DB_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}?connection_limit=15&pool_timeout=20&schema=public
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672
+      NODE_OPTIONS: --max-old-space-size=320
+    volumes:
+      - uploads_data:/app/uploads
+    networks:
+      internal: {}
+      edge:
+        aliases: [prd-backend]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+      backend-migrate: { condition: service_completed_successfully }
+    # Room for Nest's shutdown hooks to drain the outbox relay and consumers.
+    stop_grace_period: 30s
+    logging: *default-logging
+    cpu_shares: 2048
+    oom_score_adj: -300
+    deploy:
+      resources:
+        limits: { cpus: "0.75", memory: 512M, pids: 256 }
+        reservations: { memory: 192M }
+
+  # ----------------------------------------------------------- storefront ---
+  frontend:
+    image: mas-sular-prd/frontend:${IMAGE_TAG:?set IMAGE_TAG (deploy.sh does)}
+    build:
+      context: ../../frontend
+      target: runner
+      labels: *build-labels
+      args:
+        # Compiled into the browser bundle at BUILD time — a change needs a rebuild.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?set NEXT_PUBLIC_API_URL}
+        NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${NEXT_PUBLIC_GOOGLE_CLIENT_ID:-}
+        NEXT_PUBLIC_SUPPORT_URL: ${NEXT_PUBLIC_SUPPORT_URL:-}
+        NEXT_PUBLIC_WHATSAPP_NUMBER: ${NEXT_PUBLIC_WHATSAPP_NUMBER:-}
+        NEXT_PUBLIC_WHATSAPP_MESSAGE: ${NEXT_PUBLIC_WHATSAPP_MESSAGE:-}
+    restart: always
+    <<: *hardening
+    cap_drop: [ALL]
+    read_only: true
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+      NODE_OPTIONS: --max-old-space-size=256
+    networks:
+      edge:
+        aliases: [prd-frontend]
+    logging: *default-logging
+    cpu_shares: 2048
+    deploy:
+      resources:
+        limits: { cpus: "0.50", memory: 384M, pids: 128 }
+
+  # ---------------------------------------------------------------- admin ---
+  admin:
+    image: mas-sular-prd/admin:${IMAGE_TAG:?set IMAGE_TAG (deploy.sh does)}
+    build:
+      context: ../../admin
+      target: runner
+      labels: *build-labels
+      args:
+        # INCLUDES /api/v1 (the storefront value is the bare origin).
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_ADMIN_API_URL:?set NEXT_PUBLIC_ADMIN_API_URL}
+    restart: always
+    <<: *hardening
+    cap_drop: [ALL]
+    read_only: true
+    environment:
+      NODE_ENV: production
+      PORT: 3002
+      HOSTNAME: 0.0.0.0
+      NODE_OPTIONS: --max-old-space-size=160
+    networks:
+      edge:
+        aliases: [prd-admin]
+    logging: *default-logging
+    cpu_shares: 1024
+    deploy:
+      resources:
+        limits: { cpus: "0.30", memory: 256M, pids: 128 }
+
+networks:
+  edge:
+    name: mas-sular-prd_edge
+    driver: bridge
+  internal:
+    name: mas-sular-prd_internal
+    driver: bridge
+    internal: true   # no route to the outside world
+
+volumes:
+  postgres_data:
+  rabbitmq_data:
+  uploads_data:

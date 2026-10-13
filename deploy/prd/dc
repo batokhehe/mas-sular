@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Every PRODUCTION compose command goes through here. It pins the project to
+# mas-sular-prd and always applies the secret env files, so it can never address
+# the staging stack (project mas-sular) by accident.
+#
+#   deploy/prd/dc ps
+#   deploy/prd/dc logs -f --tail=200 backend
+#   deploy/prd/dc exec postgres psql -U mas_sular_admin -d mas_sular
+#
+# IMAGE_TAG comes from $PRD_CONF_DIR/release.env (written by deploy.sh); an
+# IMAGE_TAG in the shell environment wins over it.
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export PRD_CONF_DIR="${PRD_CONF_DIR:-/etc/mas-sular-prd}"
+
+[[ -r "$PRD_CONF_DIR/compose.env" ]] || { echo "dc: $PRD_CONF_DIR/compose.env not readable" >&2; exit 1; }
+
+args=(--env-file "$PRD_CONF_DIR/compose.env")
+if [[ -f "$PRD_CONF_DIR/release.env" ]]; then
+  args+=(--env-file "$PRD_CONF_DIR/release.env")
+elif [[ -z "${IMAGE_TAG:-}" ]]; then
+  # Nothing deployed yet: let read-only commands (ps, config) interpolate.
+  export IMAGE_TAG=undeployed
+fi
+
+exec docker compose -p mas-sular-prd "${args[@]}" -f "$HERE/docker-compose.yml" "$@"
