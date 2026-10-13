@@ -128,15 +128,15 @@ export class NotificationCenterService {
     try {
       const rows = await this.prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
         SELECT COUNT(*) total,
-          SUM(status = 'PENDING') pending,
-          SUM(status = 'PENDING' AND lockedUntil IS NOT NULL AND lockedUntil > ${now}) sending,
-          SUM(status = 'SENT') sent,
-          SUM(status = 'FAILED') failed,
-          SUM(status = 'SENT' AND sentAt >= ${todayStart}) sentToday,
-          SUM(status = 'FAILED' AND createdAt >= ${todayStart}) failedToday,
-          SUM(attempts > 1 AND (sentAt >= ${todayStart} OR nextAttemptAt >= ${todayStart})) retriedToday,
-          AVG(CASE WHEN status = 'SENT' AND sentAt IS NOT NULL THEN TIMESTAMPDIFF(SECOND, createdAt, sentAt) END) avgDeliverySec
-        FROM \`NotificationOutbox\`
+          COUNT(*) FILTER (WHERE status = 'PENDING') pending,
+          COUNT(*) FILTER (WHERE status = 'PENDING' AND "lockedUntil" IS NOT NULL AND "lockedUntil" > ${now}) sending,
+          COUNT(*) FILTER (WHERE status = 'SENT') sent,
+          COUNT(*) FILTER (WHERE status = 'FAILED') failed,
+          COUNT(*) FILTER (WHERE status = 'SENT' AND "sentAt" >= ${todayStart}) "sentToday",
+          COUNT(*) FILTER (WHERE status = 'FAILED' AND "createdAt" >= ${todayStart}) "failedToday",
+          COUNT(*) FILTER (WHERE attempts > 1 AND ("sentAt" >= ${todayStart} OR "nextAttemptAt" >= ${todayStart})) "retriedToday",
+          AVG(EXTRACT(EPOCH FROM ("sentAt" - "createdAt"))) FILTER (WHERE status = 'SENT' AND "sentAt" IS NOT NULL) "avgDeliverySec"
+        FROM "NotificationOutbox"
       `);
       const r = rows[0] ?? {};
       return {
@@ -153,9 +153,9 @@ export class NotificationCenterService {
   private async trend(since: Date) {
     try {
       const rows = await this.prisma.$queryRaw<Array<{ day: unknown; sent: unknown; failed: unknown }>>(Prisma.sql`
-        SELECT DATE(createdAt) day, SUM(status = 'SENT') sent, SUM(status = 'FAILED') failed
-        FROM \`NotificationOutbox\` WHERE createdAt >= ${since}
-        GROUP BY DATE(createdAt) ORDER BY day ASC
+        SELECT "createdAt"::date AS "day", COUNT(*) FILTER (WHERE status = 'SENT') sent, COUNT(*) FILTER (WHERE status = 'FAILED') failed
+        FROM "NotificationOutbox" WHERE "createdAt" >= ${since}
+        GROUP BY "createdAt"::date ORDER BY "day" ASC
       `);
       return rows.map((r) => ({ day: String(r.day).slice(0, 10), sent: num(r.sent), failed: num(r.failed) }));
     } catch {
@@ -170,8 +170,8 @@ export class NotificationCenterService {
     const since = new Date((currentBucket - 23) * HOUR_MS);
     try {
       const rows = await this.prisma.$queryRaw<Array<{ bucket: unknown; total: unknown; sent: unknown; failed: unknown }>>(Prisma.sql`
-        SELECT UNIX_TIMESTAMP(createdAt) DIV 3600 bucket, COUNT(*) total, SUM(status = 'SENT') sent, SUM(status = 'FAILED') failed
-        FROM \`NotificationOutbox\` WHERE createdAt >= ${since}
+        SELECT FLOOR(EXTRACT(EPOCH FROM "createdAt") / 3600)::bigint bucket, COUNT(*) total, COUNT(*) FILTER (WHERE status = 'SENT') sent, COUNT(*) FILTER (WHERE status = 'FAILED') failed
+        FROM "NotificationOutbox" WHERE "createdAt" >= ${since}
         GROUP BY bucket ORDER BY bucket ASC
       `);
       const byBucket = new Map(rows.map((r) => [num(r.bucket), r]));
@@ -275,9 +275,9 @@ export class NotificationCenterService {
     const cond = this.sqlWhere(query);
     const [idRows, countRows] = await Promise.all([
       this.prisma.$queryRaw<Array<{ id: string }>>(
-        Prisma.sql`SELECT id FROM \`NotificationOutbox\` WHERE ${cond} ORDER BY createdAt DESC LIMIT ${take} OFFSET ${skip}`,
+        Prisma.sql`SELECT id FROM "NotificationOutbox" WHERE ${cond} ORDER BY "createdAt" DESC LIMIT ${take} OFFSET ${skip}`,
       ),
-      this.prisma.$queryRaw<Array<{ c: unknown }>>(Prisma.sql`SELECT COUNT(*) c FROM \`NotificationOutbox\` WHERE ${cond}`),
+      this.prisma.$queryRaw<Array<{ c: unknown }>>(Prisma.sql`SELECT COUNT(*) c FROM "NotificationOutbox" WHERE ${cond}`),
     ]);
     const ids = idRows.map((r) => r.id);
     const rows = ids.length ? await this.prisma.notificationOutbox.findMany({ where: { id: { in: ids } } }) : [];
@@ -290,29 +290,29 @@ export class NotificationCenterService {
   private sqlWhere(query: ListNotificationCenterQuery): Prisma.Sql {
     const like = (s: string) => `%${s}%`;
     const conds: Prisma.Sql[] = [Prisma.sql`1 = 1`];
-    if (query.channel) conds.push(Prisma.sql`channel = ${query.channel}`);
+    if (query.channel) conds.push(Prisma.sql`channel = ${query.channel}::"NotificationChannel"`);
     if (query.provider) {
       const providerChannel = PROVIDER_CHANNEL[query.provider.toUpperCase()];
-      conds.push(providerChannel ? Prisma.sql`channel = ${providerChannel}` : Prisma.sql`1 = 0`);
+      conds.push(providerChannel ? Prisma.sql`channel = ${providerChannel}::"NotificationChannel"` : Prisma.sql`1 = 0`);
     }
-    if (query.status) conds.push(Prisma.sql`status = ${query.status}`);
+    if (query.status) conds.push(Prisma.sql`status = ${query.status}::"NotificationStatus"`);
     if (query.template) conds.push(Prisma.sql`template LIKE ${like(query.template)}`);
     if (query.recipient) conds.push(Prisma.sql`recipient LIKE ${like(query.recipient)}`);
-    if (query.dateFrom) conds.push(Prisma.sql`createdAt >= ${query.dateFrom}`);
-    if (query.dateTo) conds.push(Prisma.sql`createdAt <= ${query.dateTo}`);
-    if (query.order) conds.push(Prisma.sql`CAST(payload AS CHAR) LIKE ${like(query.order)}`);
-    if (query.payment) conds.push(Prisma.sql`CAST(payload AS CHAR) LIKE ${like(query.payment)}`);
-    if (query.hasError === true) conds.push(Prisma.sql`lastError IS NOT NULL`);
-    if (query.hasError === false) conds.push(Prisma.sql`lastError IS NULL`);
+    if (query.dateFrom) conds.push(Prisma.sql`"createdAt" >= ${query.dateFrom}`);
+    if (query.dateTo) conds.push(Prisma.sql`"createdAt" <= ${query.dateTo}`);
+    if (query.order) conds.push(Prisma.sql`payload::text LIKE ${like(query.order)}`);
+    if (query.payment) conds.push(Prisma.sql`payload::text LIKE ${like(query.payment)}`);
+    if (query.hasError === true) conds.push(Prisma.sql`"lastError" IS NOT NULL`);
+    if (query.hasError === false) conds.push(Prisma.sql`"lastError" IS NULL`);
     if (query.retryMin !== undefined) conds.push(Prisma.sql`attempts >= ${query.retryMin}`);
     if (query.durationMin !== undefined)
-      conds.push(Prisma.sql`sentAt IS NOT NULL AND TIMESTAMPDIFF(SECOND, createdAt, sentAt) >= ${query.durationMin}`);
+      conds.push(Prisma.sql`"sentAt" IS NOT NULL AND EXTRACT(EPOCH FROM ("sentAt" - "createdAt")) >= ${query.durationMin}`);
     if (query.durationMax !== undefined)
-      conds.push(Prisma.sql`sentAt IS NOT NULL AND TIMESTAMPDIFF(SECOND, createdAt, sentAt) <= ${query.durationMax}`);
+      conds.push(Prisma.sql`"sentAt" IS NOT NULL AND EXTRACT(EPOCH FROM ("sentAt" - "createdAt")) <= ${query.durationMax}`);
     const term = query.search?.trim();
     if (term)
       conds.push(
-        Prisma.sql`(id = ${term} OR recipient LIKE ${like(term)} OR template LIKE ${like(term)} OR sourceMessageId = ${term} OR providerMessageId LIKE ${like(term)} OR CAST(payload AS CHAR) LIKE ${like(term)})`,
+        Prisma.sql`(id = ${term} OR recipient LIKE ${like(term)} OR template LIKE ${like(term)} OR "sourceMessageId" = ${term} OR "providerMessageId" LIKE ${like(term)} OR payload::text LIKE ${like(term)})`,
       );
     return Prisma.join(conds, ' AND ');
   }
@@ -407,8 +407,8 @@ export class NotificationCenterService {
     if (ids.length === 0) return;
     try {
       await this.prisma.$executeRaw(Prisma.sql`
-        UPDATE \`NotificationOutbox\`
-        SET payload = JSON_SET(payload, '$.resendAt', ${new Date().toISOString()})
+        UPDATE "NotificationOutbox"
+        SET payload = jsonb_set(payload, '{resendAt}', to_jsonb(${new Date().toISOString()}::text))
         WHERE status = 'FAILED' AND id IN (${Prisma.join(ids)})
       `);
     } catch (e) {

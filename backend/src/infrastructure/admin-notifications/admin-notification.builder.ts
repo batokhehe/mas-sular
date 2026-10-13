@@ -109,15 +109,33 @@ registerNotificationMapper('payment.expired', (p) => ({
 registerNotificationMapper('order.status_updated', (p) => {
   const status = str(p.status).toUpperCase();
   if (status === 'SHIPPED') {
+    // P1 #15: an automatic courier booking carries the OFFICIAL AWB the courier
+    // returned (JNE cnote_no / Paxel airwaybill_code). Surface it only when present -
+    // never derived or invented here - and keep the manual-transition bell (no AWB
+    // in its payload) exactly as it was.
+    const awb = str(p.trackingNumber);
+    const courier = str(p.shippingProvider);
     return {
       eventType: 'order.shipped',
       category: 'ORDER',
       priority: 'MEDIUM',
       title: 'Order Shipped',
-      message: `Order ${str(p.orderNumber, '')} handed to the courier.`.trim(),
+      message: awb
+        ? `Order ${str(p.orderNumber, '')} handed to ${courier ? courier.toUpperCase() : 'the courier'} · AWB ${awb}`
+            .replace(/\s+/g, ' ')
+            .trim()
+        : `Order ${str(p.orderNumber, '')} handed to the courier.`.trim(),
       url: p.orderId ? `/orders/${str(p.orderId)}` : '/orders',
       icon: 'truck',
-      metadata: { orderId: p.orderId ?? null },
+      metadata: awb
+        ? {
+            orderId: p.orderId ?? null,
+            orderNumber: p.orderNumber ?? null,
+            shipmentId: p.shipmentId ?? null,
+            trackingNumber: awb,
+            shippingProvider: courier || null,
+          }
+        : { orderId: p.orderId ?? null },
     };
   }
   if (status === 'CANCELLED') {

@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { AdminShell } from '@/components/layout/admin-shell';
 import { Badge } from '@/components/ui/badge';
+import { orderStatusLabel } from '@/lib/status-labels';
 import { Card, CardTitle } from '@/components/ui/card';
 import { Pagination } from '@/components/ui/pagination';
 import { ROUTE_PERMISSIONS } from '@/lib/access';
@@ -65,8 +66,8 @@ export default function OrdersPage() {
   return (
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.orders}>
       <div className="mb-6">
-        <h2 className="text-xl font-semibold text-gray-900">Order Management</h2>
-        <p className="mt-1 text-sm text-gray-500">Track checkout, fulfillment, delivery, and customer support states.</p>
+        <h2 className="text-xl font-semibold text-gray-900">Manajemen Pesanan</h2>
+        <p className="mt-1 text-sm text-gray-500">Pantau status checkout, pemenuhan, pengiriman, dan layanan pelanggan.</p>
       </div>
       <Card>
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -74,7 +75,7 @@ export default function OrdersPage() {
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search order number, customer, or email"
+              placeholder="Cari nomor pesanan, pelanggan, atau email"
               className="h-11 w-full rounded-xl border border-gray-200 bg-gray-50 px-4 text-sm outline-none focus:border-[#465fff] focus:bg-white"
             />
           </div>
@@ -88,7 +89,7 @@ export default function OrdersPage() {
           >
             {statusOptions.map((status) => (
               <option key={status} value={status}>
-                {status}
+                {status === 'ALL' ? 'Semua' : orderStatusLabel(status)}
               </option>
             ))}
           </select>
@@ -102,25 +103,25 @@ export default function OrdersPage() {
           />
         ) : null}
 
-        <CardTitle>Recent Orders</CardTitle>
+        <CardTitle>Pesanan Terbaru</CardTitle>
         <div className="mt-4 overflow-x-auto">
           {isLoading ? (
-            <p className="p-6 text-sm text-gray-500">Loading orders...</p>
+            <p className="p-6 text-sm text-gray-500">Memuat pesanan...</p>
           ) : isError ? (
-            <p className="p-6 text-sm text-red-600">Unable to load orders. Please reauthenticate.</p>
+            <p className="p-6 text-sm text-red-600">Gagal memuat pesanan. Silakan masuk ulang.</p>
           ) : orders.length === 0 ? (
-            <p className="p-6 text-sm text-gray-500">No orders match the current filters.</p>
+            <p className="p-6 text-sm text-gray-500">Tidak ada pesanan yang cocok dengan filter.</p>
           ) : (
             <table className="w-full min-w-[760px] text-left text-sm">
               <thead>
                 <tr className="border-b border-gray-100 text-xs uppercase text-gray-400">
-                  <th className="w-8 py-3 font-medium"><span className="sr-only">Select</span></th>
-                  <th className="py-3 font-medium">Order</th>
-                  <th className="py-3 font-medium">Customer</th>
+                  <th className="w-8 py-3 font-medium"><span className="sr-only">Pilih</span></th>
+                  <th className="py-3 font-medium">Pesanan</th>
+                  <th className="py-3 font-medium">Pelanggan</th>
                   <th className="py-3 font-medium">Status</th>
-                  <th className="py-3 font-medium">Payment</th>
+                  <th className="py-3 font-medium">Pembayaran</th>
                   <th className="py-3 text-right font-medium">Total</th>
-                  <th className="py-3 font-medium">Actions</th>
+                  <th className="py-3 font-medium">Aksi</th>
                 </tr>
               </thead>
               <tbody>
@@ -129,11 +130,11 @@ export default function OrdersPage() {
                     <td className="py-4">
                       <input
                         type="checkbox"
-                        aria-label={`Select ${order.orderNumber}`}
+                        aria-label={`Pilih ${order.orderNumber}`}
                         checked={selectedIds.has(order.id)}
                         onChange={() => toggle(order)}
                         disabled={!BOOKABLE_STATUSES.has(order.status)}
-                        title={BOOKABLE_STATUSES.has(order.status) ? undefined : 'Only paid orders being processed or packed can be shipped'}
+                        title={BOOKABLE_STATUSES.has(order.status) ? undefined : 'Hanya pesanan lunas yang sedang diproses atau dikemas yang dapat dikirim'}
                         className="h-4 w-4 rounded border-gray-300 disabled:cursor-not-allowed disabled:opacity-40"
                       />
                     </td>
@@ -141,14 +142,14 @@ export default function OrdersPage() {
                     <td className="py-4 text-gray-500">{order.user?.name ?? '-'}</td>
                     <td className="py-4">
                       <Badge tone={order.status === 'COMPLETED' ? 'success' : order.status === 'PENDING' ? 'danger' : 'brand'}>
-                        {order.status}
+                        {orderStatusLabel(order.status)}
                       </Badge>
                     </td>
                     <td className="py-4 text-gray-500">{order.payment?.status ?? order.paymentMethod}</td>
                     <td className="py-4 text-right font-semibold text-gray-900">Rp {order.totalPrice.toLocaleString('id-ID')}</td>
                     <td className="py-4">
                       <Link href={`/orders/${order.id}`} className="text-sm font-medium text-[#465fff] hover:text-indigo-700">
-                        View
+                        Lihat
                       </Link>
                     </td>
                   </tr>

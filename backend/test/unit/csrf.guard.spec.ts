@@ -73,7 +73,7 @@ describe('CsrfGuard', () => {
     // validateEnv rejects an empty object on unrelated required keys, so give it
     // the minimum it needs and read the CSRF default off the result.
     const minimal = {
-      DATABASE_URL: 'mysql://u:p@localhost:3306/d',
+      DATABASE_URL: 'postgresql://u:p@localhost:5432/d',
       REDIS_URL: 'redis://localhost:6379',
       JWT_ACCESS_SECRET: 'x'.repeat(32),
       JWT_REFRESH_SECRET: 'y'.repeat(32),

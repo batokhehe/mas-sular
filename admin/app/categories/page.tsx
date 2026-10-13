@@ -32,12 +32,12 @@ export default function CategoriesPage() {
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.categories}>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold text-gray-900">Category Management</h2>
-          <p className="mt-1 text-sm text-gray-500">Manage catalog groupings used by product forms and customer menus.</p>
+          <h2 className="text-xl font-semibold text-gray-900">Manajemen Kategori</h2>
+          <p className="mt-1 text-sm text-gray-500">Kelola pengelompokan katalog untuk formulir produk dan menu pelanggan.</p>
         </div>
         <PermissionGate permissions={ROUTE_PERMISSIONS.categoryCreate}>
           <Link href="/categories/new">
-            <Button type="button">Add Category</Button>
+            <Button type="button">Tambah Kategori</Button>
           </Link>
         </PermissionGate>
       </div>
@@ -47,28 +47,28 @@ export default function CategoriesPage() {
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search categories by name, slug, or icon"
+            placeholder="Cari kategori berdasarkan nama, slug, atau ikon"
             className="h-11 w-full rounded-xl border border-gray-200 bg-gray-50 px-4 text-sm outline-none focus:border-[#465fff] focus:bg-white md:max-w-md"
           />
         </div>
 
-        <CardTitle>Categories</CardTitle>
+        <CardTitle>Kategori</CardTitle>
         <div className="mt-4 overflow-x-auto">
           {isLoading ? (
-            <p className="p-6 text-sm text-gray-500">Loading categories...</p>
+            <p className="p-6 text-sm text-gray-500">Memuat kategori...</p>
           ) : isError ? (
-            <p className="p-6 text-sm text-red-600">Unable to load categories. Please reauthenticate.</p>
+            <p className="p-6 text-sm text-red-600">Gagal memuat kategori. Silakan masuk ulang.</p>
           ) : categories.length === 0 ? (
-            <p className="p-6 text-sm text-gray-500">No categories match your filters.</p>
+            <p className="p-6 text-sm text-gray-500">Tidak ada kategori yang cocok dengan filter.</p>
           ) : (
             <table className="w-full min-w-[680px] text-left text-sm">
               <thead>
                 <tr className="border-b border-gray-100 text-xs uppercase text-gray-400">
-                  <th className="py-3 font-medium">Name</th>
+                  <th className="py-3 font-medium">Nama</th>
                   <th className="py-3 font-medium">Slug</th>
-                  <th className="py-3 font-medium">Icon</th>
-                  <th className="py-3 font-medium">Sort</th>
-                  <th className="py-3 font-medium">Actions</th>
+                  <th className="py-3 font-medium">Ikon</th>
+                  <th className="py-3 font-medium">Urutan</th>
+                  <th className="py-3 font-medium">Aksi</th>
                 </tr>
               </thead>
               <tbody>
@@ -80,7 +80,7 @@ export default function CategoriesPage() {
                     <td className="py-4 text-gray-500">{category.sortOrder}</td>
                     <td className="py-4">
                       <Link href={`/categories/${category.id}`} className="text-sm font-medium text-[#465fff] hover:text-indigo-700">
-                        View
+                        Lihat
                       </Link>
                     </td>
                   </tr>

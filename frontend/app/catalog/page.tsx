@@ -28,7 +28,7 @@ const PAGE_SIZE = 8
 
 type SortValue = NonNullable<ProductQuery['sort']> | 'default'
 const SORT_OPTIONS: { value: SortValue; label: string }[] = [
-  { value: 'default', label: 'Default' },
+  { value: 'default', label: 'Standar' },
   { value: 'popular', label: 'Paling Populer' },
   { value: 'price-low', label: 'Harga Terendah' },
   { value: 'price-high', label: 'Harga Tertinggi' },
@@ -92,7 +92,7 @@ function CatalogInner() {
     <StorefrontShell>
       <section className="mx-auto max-w-6xl px-4 py-8">
         <div className="mb-4">
-          <h1 className="text-2xl font-bold">Catalog</h1>
+          <h1 className="text-2xl font-bold">Katalog</h1>
           <p className="text-sm text-muted-foreground">Pilih bakso favorit Anda</p>
         </div>
 
@@ -110,7 +110,7 @@ function CatalogInner() {
               <button
                 onClick={() => setSearch('')}
                 className="absolute right-3 top-1/2 -translate-y-1/2"
-                aria-label="Clear search"
+                aria-label="Hapus pencarian"
               >
                 <X className="size-4 text-muted-foreground" />
               </button>
@@ -149,7 +149,7 @@ function CatalogInner() {
             {category !== 'all' ? (
               <Badge variant="secondary" className="gap-1">
                 {activeCategoryName ?? category}
-                <button onClick={() => setCategory('all')} aria-label="Clear category filter">
+                <button onClick={() => setCategory('all')} aria-label="Hapus filter kategori">
                   <X className="size-3" />
                 </button>
               </Badge>
@@ -157,7 +157,7 @@ function CatalogInner() {
             {search ? (
               <Badge variant="secondary" className="gap-1">
                 &quot;{search}&quot;
-                <button onClick={() => setSearch('')} aria-label="Clear search filter">
+                <button onClick={() => setSearch('')} aria-label="Hapus filter pencarian">
                   <X className="size-3" />
                 </button>
               </Badge>
@@ -168,9 +168,9 @@ function CatalogInner() {
         {isLoading ? (
           <StorefrontSkeleton />
         ) : isError ? (
-          <ErrorState description="Could not load products." onRetry={() => void refetch()} />
+          <ErrorState description="Gagal memuat produk." onRetry={() => void refetch()} />
         ) : products.length === 0 ? (
-          <Empty title="No products found" description="Try a different search or category." />
+          <Empty title="Produk tidak ditemukan" description="Coba kata kunci atau kategori lain." />
         ) : (
           <>
             {/* Real count from the fetched list — not a fabricated figure. */}
@@ -182,10 +182,10 @@ function CatalogInner() {
             </div>
             <div className="mt-8 flex items-center justify-center gap-3">
               <Button variant="outline" size="sm" disabled={safePage <= 1} onClick={() => setPage(safePage - 1)}>
-                Previous
+                Sebelumnya
               </Button>
               <span className="text-sm text-muted-foreground">
-                Page {safePage} of {pageCount}
+                Halaman {safePage} dari {pageCount}
               </span>
               <Button
                 variant="outline"
@@ -193,7 +193,7 @@ function CatalogInner() {
                 disabled={safePage >= pageCount}
                 onClick={() => setPage(safePage + 1)}
               >
-                Next
+                Berikutnya
               </Button>
             </div>
           </>

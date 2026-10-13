@@ -22,15 +22,15 @@ export default function NewOutletPage() {
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.outletCreate}>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold text-gray-900">Add Outlet</h2>
-          <p className="mt-1 text-sm text-gray-500">New outlets start inactive — activate one to use it as the shipping origin.</p>
+          <h2 className="text-xl font-semibold text-gray-900">Tambah Outlet</h2>
+          <p className="mt-1 text-sm text-gray-500">Outlet baru dibuat nonaktif — aktifkan salah satu untuk dipakai sebagai asal pengiriman.</p>
         </div>
         <Link href="/outlets" className="text-sm font-medium text-[#465fff] hover:text-indigo-700">
-          Back to outlets
+          Kembali ke outlet
         </Link>
       </div>
       <OutletForm
-        submitLabel="Create Outlet"
+        submitLabel="Buat Outlet"
         isSubmitting={createMutation.isPending}
         onSubmit={async (values) => {
           await runWithFeedback({

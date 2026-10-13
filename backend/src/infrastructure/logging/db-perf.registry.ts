@@ -12,9 +12,15 @@ const OVERFLOW_KEY = 'OTHER';
 export function queryNameFromSql(sql: string): string {
   const s = (sql ?? '').trim();
   const verb = (s.match(/^[a-zA-Z]+/)?.[0] ?? 'QUERY').toUpperCase();
-  // Prefer the table after FROM/INTO/UPDATE; Prisma quotes `db`.`Table`.
+  // Prefer the table after FROM/INTO/UPDATE. PostgreSQL emits "public"."Table"
+  // (double quotes); the legacy MySQL form was `db`.`Table` (backticks). Both are
+  // matched so the Performance Center keeps naming queries after the migration,
+  // and an unquoted bare identifier is accepted as a last resort.
   const target =
+    s.match(/(?:FROM|INTO|UPDATE)\s+"(?:[^"]+"\.")?([^"]+)"/i)?.[1] ??
     s.match(/(?:FROM|INTO|UPDATE)\s+`(?:[^`]+`\.`)?([^`]+)`/i)?.[1] ??
+    s.match(/(?:FROM|INTO|UPDATE)\s+([A-Za-z_][A-Za-z0-9_]*)/i)?.[1] ??
+    s.match(/"(?:[^"]+"\.")?([^"]+)"/)?.[1] ??
     s.match(/`(?:[^`]+`\.`)?([^`]+)`/)?.[1] ??
     null;
   return target ? `${verb} ${target}` : verb;

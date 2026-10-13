@@ -38,27 +38,27 @@ function SuccessInner() {
           <CheckCircle2 className="size-10 text-green-600" />
         </div>
 
-        <h1 className="text-xl font-bold">Payment receipt uploaded successfully</h1>
+        <h1 className="text-xl font-bold">Bukti pembayaran berhasil diunggah</h1>
 
         {orderNumber ? (
           <div className="rounded-full bg-muted px-3 py-1 text-sm">
-            <span className="text-muted-foreground">Order</span>{' '}
+            <span className="text-muted-foreground">Pesanan</span>{' '}
             <span className="font-semibold">{orderNumber}</span>
           </div>
         ) : null}
 
         <p className="text-sm text-muted-foreground">
-          Thank you. Your payment receipt has been received and will be verified by our team.
+          Terima kasih. Bukti pembayaran Anda sudah kami terima dan akan diverifikasi oleh tim kami.
         </p>
         <p className="text-sm text-muted-foreground">
-          Verification usually takes <span className="font-medium text-foreground">5–15 minutes</span> during
-          business hours. You will receive another WhatsApp notification once your payment has been verified.
+          Verifikasi biasanya memerlukan waktu <span className="font-medium text-foreground">5–15 menit</span> pada
+          jam operasional. Anda akan menerima notifikasi WhatsApp setelah pembayaran diverifikasi.
         </p>
 
         <div className="mt-2 flex w-full flex-col gap-2">
           {showOrders ? (
             <Button className="w-full" onClick={() => router.push('/orders')}>
-              <Package className="mr-2 size-4" /> View My Orders
+              <Package className="mr-2 size-4" /> Lihat Pesanan Saya
             </Button>
           ) : null}
           <Button
@@ -66,11 +66,11 @@ function SuccessInner() {
             variant={showOrders ? 'outline' : 'default'}
             onClick={() => router.push('/')}
           >
-            <Home className="mr-2 size-4" /> Back to Home
+            <Home className="mr-2 size-4" /> Kembali ke Beranda
           </Button>
           <Button asChild variant="ghost" className="w-full">
             <a href={SUPPORT_URL} target="_blank" rel="noopener noreferrer">
-              <Headset className="mr-2 size-4" /> Contact Customer Service
+              <Headset className="mr-2 size-4" /> Hubungi Layanan Pelanggan
             </a>
           </Button>
         </div>

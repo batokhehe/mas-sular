@@ -35,7 +35,7 @@ export function PaymentCountdown({ expiryAt, onExpire }: { expiryAt: string | nu
     return (
       <div className="flex items-center justify-center gap-2 rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm font-medium text-destructive">
         <Clock className="size-4" />
-        Payment Expired
+        Waktu pembayaran habis
       </div>
     )
   }

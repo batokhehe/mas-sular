@@ -5,11 +5,12 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { LoggerModule } from 'nestjs-pino';
 import { appConfig } from './common/config/app.config';
 import { validateEnv } from './common/config/env.validation';
-import { redactSensitivePath } from './common/logging/redact';
+import { PINO_HTTP_REDACT } from './common/logging/redact';
 import { DatabaseModule } from './database/database.module';
 import { CacheInfrastructureModule } from './infrastructure/cache/cache.module';
 import { ConsumersModule } from './infrastructure/consumers/consumers.module';
 import { LifecycleModule } from './infrastructure/lifecycle/lifecycle.module';
+import { IntegrationLogModule } from './infrastructure/integration-log/integration-log.module';
 import { LoggingModule } from './infrastructure/logging/logging.module';
 import { AuditTrailModule } from './infrastructure/audit/audit.module';
 import { AdminNotificationsModule } from './infrastructure/admin-notifications/admin-notifications.module';
@@ -39,6 +40,7 @@ import { RegionsModule } from './modules/regions/regions.module';
 import { DeliveryCoverageModule } from './modules/delivery-coverage/delivery-coverage.module';
 import { HealthController } from './health.controller';
 import { UploadModule } from './modules/upload/upload.module';
+import { InvoicesModule } from './modules/invoices/invoices.module';
 
 @Module({
   imports: [
@@ -46,13 +48,9 @@ import { UploadModule } from './modules/upload/upload.module';
     LoggerModule.forRoot({
       pinoHttp: {
         level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
-        // Headers fully censored; the request URL is partially censored so the
-        // payment-upload token segment never reaches request logs.
-        redact: {
-          paths: ['req.headers.authorization', 'req.headers.cookie', 'req.url'],
-          censor: (value: unknown, path: string[]) =>
-            path[path.length - 1] === 'url' ? redactSensitivePath(String(value)) : '[Redacted]',
-        },
+        // Credential headers (incl. X-Paxel-Signature) fully censored; URL and route
+        // params partially censored (capability tokens). See PINO_HTTP_REDACT.
+        redact: PINO_HTTP_REDACT,
       },
     }),
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
@@ -62,6 +60,7 @@ import { UploadModule } from './modules/upload/upload.module';
     QueueModule,
     OutboxModule,
     LoggingModule,
+    IntegrationLogModule,
     AuditTrailModule,
     AdminNotificationsModule,
     NotificationsModule,
@@ -88,6 +87,7 @@ import { UploadModule } from './modules/upload/upload.module';
     CmsModule,
     AuditModule,
     UploadModule,
+    InvoicesModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

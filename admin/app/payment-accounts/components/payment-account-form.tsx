@@ -61,36 +61,36 @@ export function PaymentAccountForm({ initialValues, onSubmit, onDelete, isSubmit
       <form onSubmit={handleSubmit} className="mt-4 space-y-6">
         <div className="grid gap-4 lg:grid-cols-2">
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Bank Name</span>
+            <span>Nama Bank</span>
             <input value={values.bankName} onChange={(e) => setValues((c) => ({ ...c, bankName: e.target.value }))} className={inputClass} required />
           </label>
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Bank Code</span>
-            <input value={values.bankCode ?? ''} onChange={(e) => setValues((c) => ({ ...c, bankCode: e.target.value }))} className={inputClass} placeholder="e.g. 014" />
+            <span>Kode Bank</span>
+            <input value={values.bankCode ?? ''} onChange={(e) => setValues((c) => ({ ...c, bankCode: e.target.value }))} className={inputClass} placeholder="mis. 014" />
           </label>
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Account Name</span>
+            <span>Nama Pemilik Rekening</span>
             <input value={values.accountName} onChange={(e) => setValues((c) => ({ ...c, accountName: e.target.value }))} className={inputClass} required />
           </label>
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Account Number</span>
+            <span>Nomor Rekening</span>
             <input value={values.accountNumber} onChange={(e) => setValues((c) => ({ ...c, accountNumber: e.target.value }))} className={inputClass} required />
           </label>
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Logo URL</span>
+            <span>URL logo</span>
             <input value={values.logoUrl ?? ''} onChange={(e) => setValues((c) => ({ ...c, logoUrl: e.target.value }))} className={inputClass} />
           </label>
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Display Order</span>
+            <span>Urutan tampil</span>
             <input type="number" min={0} value={values.displayOrder} onChange={(e) => setValues((c) => ({ ...c, displayOrder: toNumber(e.target.value) }))} className={inputClass} required />
           </label>
           <label className="space-y-2 text-sm text-gray-700 lg:col-span-2">
-            <span>Notes</span>
+            <span>Catatan</span>
             <input value={values.notes ?? ''} onChange={(e) => setValues((c) => ({ ...c, notes: e.target.value }))} className={inputClass} />
           </label>
           <label className="inline-flex items-center gap-2 text-sm text-gray-700">
             <input type="checkbox" checked={values.isVisible} onChange={(e) => setValues((c) => ({ ...c, isVisible: e.target.checked }))} className="h-4 w-4 rounded border-gray-300 text-[#465fff] focus:ring-[#465fff]" />
-            <span>Visible</span>
+            <span>Ditampilkan</span>
           </label>
         </div>
 
@@ -100,7 +100,7 @@ export function PaymentAccountForm({ initialValues, onSubmit, onDelete, isSubmit
           </Button>
           {onDelete ? (
             <Button type="button" className="bg-white text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50" disabled={isDeleting} onClick={onDelete}>
-              Delete
+              Hapus
             </Button>
           ) : null}
         </div>

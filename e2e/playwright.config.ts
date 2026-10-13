@@ -6,7 +6,7 @@ import { E2E_BACKEND_PORT, E2E_FRONTEND_PORT } from './fixtures/global-setup';
  * emits HTML + JSON reports consumed by scripts/update_excel.py & gen_reports.py.
  *
  * ISOLATION IS THE DEFAULT (PAXELBOX-61AG.3.16). Playwright starts its own
- * disposable stack — MySQL 8.4 container, isolated Nest backend with the Google
+ * disposable stack — PostgreSQL 16 container, isolated Nest backend with the Google
  * and Paxel transports stubbed, and the real frontend pointed at it. Previously
  * the suite ran against whatever was listening on :3001, which in practice was
  * the shared development database with live providers behind it.

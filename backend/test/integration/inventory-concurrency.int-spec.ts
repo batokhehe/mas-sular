@@ -1,7 +1,7 @@
 /**
  * PAXELBOX-61AG.3.25 — BF-017: the last unit of stock must not be sold twice.
  *
- * Exercises the REAL InventoryReservationService against the real MySQL 8.4
+ * Exercises the REAL InventoryReservationService against the real PostgreSQL 16
  * container from ./world. Nothing about the reservation logic is reimplemented
  * here: a test that re-ran the SQL by hand would prove something about the test,
  * not about the service.

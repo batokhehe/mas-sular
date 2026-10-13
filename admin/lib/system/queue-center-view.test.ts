@@ -13,7 +13,7 @@ test('health badge + label cover every health level', () => {
     assert.ok(HEALTH_BADGE[h]);
     assert.ok(HEALTH_LABEL[h]);
   }
-  assert.equal(HEALTH_LABEL.green, 'Healthy');
+  assert.equal(HEALTH_LABEL.green, 'Sehat');
 });
 
 test('status badge tones: success green, failed red, pending amber', () => {
@@ -33,7 +33,7 @@ test('formatAge: seconds → minutes → hours → days', () => {
 
 test('relatedLinks: builds drawer links only for present refs (order number preferred)', () => {
   const links = relatedLinks({ requestId: 'req-1', orderId: 'o1', orderNumber: 'BMS-1', paymentId: null, shipmentId: null });
-  assert.deepEqual(links.map((l) => l.label), ['Request', 'Order']);
+  assert.deepEqual(links.map((l) => l.label), ['Request', 'Pesanan']);
   assert.equal(links[1].id, 'BMS-1'); // shows the human order number
   assert.equal(links[0].href, '/system/requests/req-1');
   assert.deepEqual(relatedLinks({ requestId: null, orderId: null, orderNumber: null, paymentId: null, shipmentId: null }), []);
@@ -41,7 +41,7 @@ test('relatedLinks: builds drawer links only for present refs (order number pref
 
 test('relatedLinks: customer ref links to the admin user page', () => {
   const links = relatedLinks({ requestId: null, orderId: null, orderNumber: null, paymentId: null, shipmentId: null, customerId: 'u-9' });
-  assert.deepEqual(links, [{ label: 'Customer', href: '/users/u-9', id: 'u-9' }]);
+  assert.deepEqual(links, [{ label: 'Pelanggan', href: '/users/u-9', id: 'u-9' }]);
 });
 
 test('copy/download: rowJson pretty-prints the full row', () => {

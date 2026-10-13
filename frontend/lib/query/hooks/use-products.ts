@@ -10,3 +10,15 @@ export function useProducts(query: ProductQuery = {}) {
     queryFn: () => productsApi.list(query),
   })
 }
+
+/**
+ * Toppings a customer can add to a product. GET /catalog/toppings returns only
+ * active, non-deleted toppings (the backend filters); the order endpoint re-checks
+ * and reprices them, so this list is for display and selection only.
+ */
+export function useToppings() {
+  return useQuery({
+    queryKey: qk.catalog.toppings,
+    queryFn: () => productsApi.toppings(),
+  })
+}

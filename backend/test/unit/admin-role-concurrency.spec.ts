@@ -31,15 +31,22 @@ function build(claimed: number, roleExists = true) {
     updateMany: jest.fn().mockResolvedValue({ count: claimed }),
     deleteMany: jest.fn().mockResolvedValue({ count: 2 }),
     createMany: jest.fn().mockResolvedValue({ count: 3 }),
-    findUniqueOrThrow: jest.fn().mockResolvedValue({ id: 'role-tgt', name: 'ADMIN', permissions: [] }),
+    findUniqueOrThrow: jest.fn().mockResolvedValue({ id: 'role-tgt', name: 'Ops Lead', permissions: [] }),
   };
   const tx = {
     role: { updateMany: calls.updateMany, findUniqueOrThrow: calls.findUniqueOrThrow },
     rolePermission: { deleteMany: calls.deleteMany, createMany: calls.createMany },
   };
   const prisma = {
-    // getRole()'s 404 guard
-    role: { findUnique: jest.fn().mockResolvedValue(roleExists ? { id: 'role-tgt', permissions: [] } : null) },
+    // getRole()'s 404 guard (a CUSTOM role - system roles are immutable, see role-escalation.spec.ts)
+    role: {
+      findUnique: jest.fn().mockResolvedValue(roleExists ? { id: 'role-tgt', name: 'Ops Lead', permissions: [] } : null),
+      findFirst: jest.fn().mockResolvedValue(null), // no name clash
+    },
+    // the actor does not hold the role being edited
+    adminRole: { findFirst: jest.fn().mockResolvedValue(null) },
+    // every requested id is a canonical catalogue permission
+    permission: { findMany: jest.fn(async ({ where }: { where: { id: { in: string[] } } }) => where.id.in.map((id) => ({ id, subject: 'Order', action: 'read' }))) },
     // Interactive form: hand the callback our tx stub and let it run for real.
     $transaction: jest.fn(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx)),
   };
@@ -48,17 +55,20 @@ function build(claimed: number, roleExists = true) {
   return { service, calls, prisma };
 }
 
+/** Role administration is SUPER_ADMIN-only (H1); the concurrency contract is unchanged. */
+const SUPER = { sub: 'super-1', role: 'SUPER_ADMIN' };
+
 describe('AdminService.updateRole — optimistic concurrency (C7b)', () => {
   it('1. a normal update succeeds when the CAS matches', async () => {
     const { service, calls } = build(1);
-    const role = await service.updateRole('role-tgt', { name: 'ADMIN', expectedUpdatedAt: T1 });
-    expect(role).toEqual({ id: 'role-tgt', name: 'ADMIN', permissions: [] });
+    const role = await service.updateRole('role-tgt', { name: 'Ops Lead', expectedUpdatedAt: T1 }, SUPER);
+    expect(role).toEqual({ id: 'role-tgt', name: 'Ops Lead', permissions: [] });
     expect(calls.updateMany).toHaveBeenCalledTimes(1);
   });
 
   it('2. expectedUpdatedAt is sent as the CAS predicate, as a Date', async () => {
     const { service, calls } = build(1);
-    await service.updateRole('role-tgt', { expectedUpdatedAt: T1, permissionIds: ['p1'] });
+    await service.updateRole('role-tgt', { expectedUpdatedAt: T1, permissionIds: ['p1'] }, SUPER);
     const where = calls.updateMany.mock.calls[0][0].where;
     expect(where.id).toBe('role-tgt');
     expect(where.updatedAt).toBeInstanceOf(Date);
@@ -68,13 +78,13 @@ describe('AdminService.updateRole — optimistic concurrency (C7b)', () => {
   it('3. a stale expectedUpdatedAt raises ConflictException', async () => {
     const { service } = build(0); // the row moved on; nothing matched
     await expect(
-      service.updateRole('role-tgt', { expectedUpdatedAt: T1, permissionIds: ['p1'] }),
+      service.updateRole('role-tgt', { expectedUpdatedAt: T1, permissionIds: ['p1'] }, SUPER),
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
   it('4. the conflict message is stable and leaks nothing', async () => {
     const { service } = build(0);
-    await expect(service.updateRole('role-tgt', { expectedUpdatedAt: T1 })).rejects.toThrow(
+    await expect(service.updateRole('role-tgt', { expectedUpdatedAt: T1 }, SUPER)).rejects.toThrow(
       'Role was modified by another administrator. Please reload and retry.',
     );
   });
@@ -82,7 +92,7 @@ describe('AdminService.updateRole — optimistic concurrency (C7b)', () => {
   it('5. a successful update bumps updatedAt (so the next stale token cannot match)', async () => {
     const { service, calls } = build(1);
     const before = Date.now();
-    await service.updateRole('role-tgt', { expectedUpdatedAt: T1, permissionIds: ['p1'] });
+    await service.updateRole('role-tgt', { expectedUpdatedAt: T1, permissionIds: ['p1'] }, SUPER);
     const written = calls.updateMany.mock.calls[0][0].data.updatedAt as Date;
     expect(written).toBeInstanceOf(Date);
     expect(written.getTime()).toBeGreaterThanOrEqual(before);
@@ -91,7 +101,7 @@ describe('AdminService.updateRole — optimistic concurrency (C7b)', () => {
   it('6. a stale update deletes NO permissions', async () => {
     const { service, calls } = build(0);
     await expect(
-      service.updateRole('role-tgt', { expectedUpdatedAt: T1, permissionIds: ['p1', 'p2'] }),
+      service.updateRole('role-tgt', { expectedUpdatedAt: T1, permissionIds: ['p1', 'p2'] }, SUPER),
     ).rejects.toBeInstanceOf(ConflictException);
     expect(calls.deleteMany).not.toHaveBeenCalled();
   });
@@ -99,7 +109,7 @@ describe('AdminService.updateRole — optimistic concurrency (C7b)', () => {
   it('7. a stale update creates NO permissions', async () => {
     const { service, calls } = build(0);
     await expect(
-      service.updateRole('role-tgt', { expectedUpdatedAt: T1, permissionIds: ['p1', 'p2'] }),
+      service.updateRole('role-tgt', { expectedUpdatedAt: T1, permissionIds: ['p1', 'p2'] }, SUPER),
     ).rejects.toBeInstanceOf(ConflictException);
     expect(calls.createMany).not.toHaveBeenCalled();
   });
@@ -120,7 +130,7 @@ describe('AdminService.updateRole — optimistic concurrency (C7b)', () => {
       return { count: 2 };
     });
 
-    await service.updateRole('role-tgt', { expectedUpdatedAt: T1, permissionIds: ['p1', 'p2'] });
+    await service.updateRole('role-tgt', { expectedUpdatedAt: T1, permissionIds: ['p1', 'p2'] }, SUPER);
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(order).toEqual(['cas', 'delete', 'create']);
@@ -128,24 +138,24 @@ describe('AdminService.updateRole — optimistic concurrency (C7b)', () => {
 
   it('9. a retry with the fresh updatedAt succeeds', async () => {
     const stale = build(0);
-    await expect(stale.service.updateRole('role-tgt', { expectedUpdatedAt: T1 })).rejects.toBeInstanceOf(
+    await expect(stale.service.updateRole('role-tgt', { expectedUpdatedAt: T1 }, SUPER)).rejects.toBeInstanceOf(
       ConflictException,
     );
     const retry = build(1);
-    await expect(retry.service.updateRole('role-tgt', { expectedUpdatedAt: T2 })).resolves.toBeDefined();
+    await expect(retry.service.updateRole('role-tgt', { expectedUpdatedAt: T2 }, SUPER)).resolves.toBeDefined();
     expect((retry.calls.updateMany.mock.calls[0][0].where.updatedAt as Date).toISOString()).toBe(T2);
   });
 
   it('10. an unrelated role is scoped by its own id', async () => {
     const { service, calls } = build(1);
-    await service.updateRole('role-other', { expectedUpdatedAt: T1, permissionIds: ['p9'] });
+    await service.updateRole('role-other', { expectedUpdatedAt: T1, permissionIds: ['p9'] }, SUPER);
     expect(calls.updateMany.mock.calls[0][0].where.id).toBe('role-other');
     expect(calls.deleteMany.mock.calls[0][0].where.roleId).toBe('role-other');
   });
 
   it('11. clearing every permission is allowed and skips the insert', async () => {
     const { service, calls } = build(1);
-    await service.updateRole('role-tgt', { expectedUpdatedAt: T1, permissionIds: [] });
+    await service.updateRole('role-tgt', { expectedUpdatedAt: T1, permissionIds: [] }, SUPER);
     expect(calls.deleteMany).toHaveBeenCalledTimes(1);
     expect(calls.createMany).not.toHaveBeenCalled();
   });
@@ -153,14 +163,14 @@ describe('AdminService.updateRole — optimistic concurrency (C7b)', () => {
   it('12. a name/description-only edit is protected by the same CAS', async () => {
     const { service, calls } = build(0);
     await expect(
-      service.updateRole('role-tgt', { expectedUpdatedAt: T1, description: 'renamed' }),
+      service.updateRole('role-tgt', { expectedUpdatedAt: T1, description: 'renamed' }, SUPER),
     ).rejects.toBeInstanceOf(ConflictException);
     expect(calls.updateMany).toHaveBeenCalledTimes(1);
   });
 
   it('13. a missing role still 404s before any CAS is attempted', async () => {
     const { service, calls } = build(1, false);
-    await expect(service.updateRole('nope', { expectedUpdatedAt: T1 })).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.updateRole('nope', { expectedUpdatedAt: T1 }, SUPER)).rejects.toBeInstanceOf(NotFoundException);
     expect(calls.updateMany).not.toHaveBeenCalled();
   });
 });

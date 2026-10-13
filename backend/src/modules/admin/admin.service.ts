@@ -1,10 +1,12 @@
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
-import { ConflictException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import type { Cache } from 'cache-manager';
 import { OrderStatus, PaymentStatus, Prisma, ShipmentStatus } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { ShipmentService } from '../shipment/shipment.service';
 import { trackingCacheKey } from '../shipment/shipment-sync.service';
+import { mergeAdminShipmentMetadata } from '../shipment/shipment-metadata';
+import { lockShipmentRow } from '../shipment/shipment-row-lock';
 import { InventoryReservationService } from '../inventory/inventory-reservation.service';
 import { CreateBannerDto } from '../cms/application/dto/banner.dto';
 import {
@@ -17,20 +19,41 @@ import {
   VerifyAdminPaymentDto,
 } from './application/dto/admin-operations.dto';
 import { OrderCancellationService } from '../orders/order-cancellation.service';
+import {
+  PRODUCT_AUDIT_ENTITY,
+  PRODUCT_REORDER_AUDIT_ACTION,
+  PRODUCT_SEQUENCE_ORDER_BY,
+  validateProductReorder,
+} from '../catalog/product-sequence';
 import { orderStatusSourcesFor } from '../orders/domain/order-status-transitions';
+import { isSkuUniqueViolation, skuCandidates, skuFromSlug } from './product-sku';
+import { assertCoverMatches, assertProductImageList, galleryRows, ORDERED_PRODUCT_IMAGES, sameGallery } from './product-images';
 import { CreateCategoryDto } from './application/dto/create-category.dto';
 import { CreateProductDto } from './application/dto/create-product.dto';
 import { CreatePromoDto } from './application/dto/create-promo.dto';
 import { CreateRoleDto } from './application/dto/create-role.dto';
+import { CreateToppingDto } from './application/dto/create-topping.dto';
 import { UpdateBannerDto } from './application/dto/update-banner.dto';
 import { UpdateCategoryDto } from './application/dto/update-category.dto';
 import { UpdateProductDto } from './application/dto/update-product.dto';
 import { UpdatePromoDto } from './application/dto/update-promo.dto';
 import { UpdateRoleDto } from './application/dto/update-role.dto';
+import { UpdateToppingDto } from './application/dto/update-topping.dto';
+import { ALL_PERMISSION_NAMES } from '../../../prisma/bootstrap/permission-catalogue';
+import {
+  assertCustomerRoles,
+  assertGrantablePermissions,
+  assertMutableRole,
+  assertRoleAdministrator,
+  RoleActor,
+  validateCustomRoleName,
+} from './role-policy';
 import { UpdateUserDto } from './application/dto/update-user.dto';
 import { pageArgs, paginate } from '../../common/pagination/pagination';
 import { buildOrderTimeline, computeAvailableActions } from './order-operations.util';
+import { activeShippingWhere, SHIPPING_LIST_ACTIVE_SCOPE } from './shipping-list-scope';
 import { buildOutboxEvent } from '../../infrastructure/outbox/outbox-event.builder';
+import { latestPaxelStatusCode, paxelStatusDisplayLabel } from '../shipment/shipment-display-label';
 
 // Payment terminal states now live with the settlement service (Phase 5D) so that
 // admin verification and gateway settlement cannot drift apart. Re-exported here
@@ -160,22 +183,146 @@ export class AdminService {
   }
 
   async createProduct(dto: CreateProductDto) {
-    return this.prisma.product.create({ data: { ...dto } });
+    // P2 gallery. `images` is never spread into Product data: it becomes a nested
+    // create, atomic with the product row. With images[] the cover is images[0];
+    // without it the legacy imageUrl is the cover (its validation is unchanged) and
+    // becomes the single gallery image, so Product.imageUrl = images[0] from day one.
+    const { images, ...fields } = dto;
+    const gallery = images !== undefined ? assertProductImageList(images) : undefined;
+    if (gallery) assertCoverMatches(fields.imageUrl, gallery);
+    const imageUrl = gallery ? gallery[0] : fields.imageUrl;
+    if (imageUrl === undefined) throw new BadRequestException('imageUrl or images is required');
+    const data = { ...fields, imageUrl, images: { create: galleryRows(gallery ?? [imageUrl]) } };
+
+    // An explicit SKU is honoured exactly as before (P2 #5).
+    if (data.sku?.trim()) return this.createProductRow(data);
+
+    // Otherwise assign one from the unique slug. SKU stays load-bearing (it is the
+    // Paxel item code), so a product must never be created without one; and a
+    // blank '' is never written because it would collide on @unique. Only a SKU
+    // collision moves to the next candidate - any other error (a duplicate slug,
+    // say) surfaces exactly as it did before.
+    const { sku: _blank, ...rest } = data;
+    for (const sku of skuCandidates(skuFromSlug(dto.slug))) {
+      try {
+        return await this.createProductRow({ ...rest, sku });
+      } catch (err) {
+        if (!isSkuUniqueViolation(err)) throw err;
+      }
+    }
+    throw new ConflictException('Could not assign a unique SKU for this product; set one explicitly.');
+  }
+
+  /**
+   * Create a product at the END of the catalogue: MAX(sequence) + 1, read inside the
+   * same transaction as the insert. Soft-deleted products are included in the MAX -
+   * they keep their position, so a new product must never reuse one. Two creates that
+   * race can still land on the same number; that is harmless, because the sequence is
+   * not unique and PRODUCT_SEQUENCE_ORDER_BY breaks the tie, and the next reorder
+   * renumbers the whole set to 1..N anyway.
+   */
+  private createProductRow(data: Prisma.ProductCreateArgs['data']) {
+    return this.prisma.$transaction(async (tx) => {
+      const { _max } = await tx.product.aggregate({ _max: { sequence: true } });
+      return tx.product.create({ data: { ...data, sequence: (_max.sequence ?? 0) + 1 } });
+    });
   }
 
   listProducts() {
-    return this.prisma.product.findMany({ where: { deletedAt: null }, orderBy: { createdAt: 'desc' } });
+    // Canonical order: what the admin dragged into place. The Admin list offers its own
+    // explicit sorts (name, stock, newest) on top of this, client-side.
+    return this.prisma.product.findMany({ where: { deletedAt: null }, orderBy: PRODUCT_SEQUENCE_ORDER_BY });
   }
 
+  /**
+   * Rewrite the catalogue order (Admin -> Produk drag & drop). The payload must carry
+   * the complete set of non-deleted products with a permutation of 1..N; a stale
+   * snapshot is refused with 409 rather than written in part. Every row moves in ONE
+   * transaction, so a failure leaves the previous order completely intact.
+   */
+  async reorderProducts(items: { id: string; sequence: number }[], adminId?: string) {
+    const ordered = await this.prisma.$transaction(async (tx) => {
+      const live = await tx.product.findMany({ where: { deletedAt: null }, select: { id: true, sequence: true } });
+      const validated = validateProductReorder(
+        items,
+        live.map((product) => product.id),
+      );
+      const before = Object.fromEntries(live.map((product) => [product.id, product.sequence]));
+      const changed = validated.filter((item) => before[item.id] !== item.sequence);
+      for (const item of changed) {
+        await tx.product.update({ where: { id: item.id }, data: { sequence: item.sequence } });
+      }
+      return { validated, before, changed };
+    });
+
+    // actorId NULL: AuditLog.actorId FKs to User; the admin identity goes in the payload
+    // (the same limitation every other admin-side audit write documents).
+    await this.prisma.auditLog
+      .create({
+        data: {
+          actorId: null,
+          action: PRODUCT_REORDER_AUDIT_ACTION,
+          entity: PRODUCT_AUDIT_ENTITY,
+          entityId: null,
+          before: ordered.before,
+          after: {
+            byAdminId: adminId ?? null,
+            movedCount: ordered.changed.length,
+            sequence: Object.fromEntries(ordered.validated.map((item) => [item.id, item.sequence])),
+          },
+        },
+      })
+      .catch(() => undefined);
+
+    return this.listProducts();
+  }
+
+  /** Admin detail (edit form): the product plus its ordered gallery. The list never loads images. */
   async getProduct(id: string) {
-    const product = await this.prisma.product.findUnique({ where: { id } });
+    const product = await this.prisma.product.findUnique({ where: { id }, include: { images: ORDERED_PRODUCT_IMAGES } });
     if (!product || product.deletedAt) throw new NotFoundException('Product not found');
     return product;
   }
 
   async updateProduct(id: string, dto: UpdateProductDto) {
-    await this.getProduct(id);
-    return this.prisma.product.update({ where: { id }, data: dto });
+    const current = await this.getProduct(id);
+    // The Admin form no longer sends a SKU (P2 #5), so an edit leaves the stored SKU
+    // untouched. A blank SKU is treated as "not provided" rather than written: ''
+    // would erase the Paxel item code and collide on @unique. A non-blank SKU from
+    // an API client is still applied as before.
+    const { sku, images, ...rest } = dto;
+    const data = sku?.trim() ? { ...rest, sku } : rest;
+
+    // No gallery change and no new cover: exactly the previous single update.
+    const coverChanged = rest.imageUrl !== undefined && rest.imageUrl !== current.imageUrl;
+    if (images === undefined && !coverChanged) {
+      return this.prisma.product.update({ where: { id }, data });
+    }
+
+    // Validate before opening the transaction. A url the product already has
+    // (legacy /products/*.jpg included) stays valid; a new one must be an upload.
+    const existing = new Set([current.imageUrl, ...(current.images ?? []).map((image) => image.url)]);
+    const gallery = images !== undefined ? assertProductImageList(images, existing) : undefined;
+    if (gallery) assertCoverMatches(rest.imageUrl, gallery);
+
+    // One transaction: the product row, the gallery and the cover never diverge.
+    return this.prisma.$transaction(async (tx) => {
+      if (gallery) {
+        if (!sameGallery(current.images ?? [], gallery)) {
+          await tx.productImage.deleteMany({ where: { productId: id } });
+          await tx.productImage.createMany({ data: galleryRows(gallery).map((row) => ({ ...row, productId: id })) });
+        }
+        return tx.product.update({ where: { id }, data: { ...data, imageUrl: gallery[0] }, include: { images: ORDERED_PRODUCT_IMAGES } });
+      }
+      // imageUrl-only change (API clients): the cover row follows; other images stay.
+      const imageUrl = rest.imageUrl as string;
+      await tx.productImage.upsert({
+        where: { productId_sortOrder: { productId: id, sortOrder: 0 } },
+        update: { url: imageUrl },
+        create: { productId: id, url: imageUrl, sortOrder: 0 },
+      });
+      return tx.product.update({ where: { id }, data, include: { images: ORDERED_PRODUCT_IMAGES } });
+    });
   }
 
   async deleteProduct(id: string) {
@@ -258,6 +405,38 @@ export class AdminService {
     return this.prisma.promo.update({ where: { id }, data: { deletedAt: new Date() } });
   }
 
+  /**
+   * Toppings. The storefront lists active, non-deleted ones and checkout re-prices
+   * each chosen topping from this table (orders.service getCartPricing), while every
+   * placed order keeps its own OrderItemTopping name/price snapshot - so editing a
+   * price here only affects orders placed afterwards. Delete is a soft delete, like
+   * the rest of the catalogue: ordered toppings stay referenced by OrderItemTopping.
+   */
+  createTopping(dto: CreateToppingDto) {
+    return this.prisma.topping.create({ data: { ...dto } });
+  }
+
+  /** Active and inactive alike - the admin needs to see what customers do not. */
+  listToppings() {
+    return this.prisma.topping.findMany({ where: { deletedAt: null }, orderBy: { name: 'asc' } });
+  }
+
+  async getTopping(id: string) {
+    const topping = await this.prisma.topping.findUnique({ where: { id } });
+    if (!topping || topping.deletedAt) throw new NotFoundException('Topping not found');
+    return topping;
+  }
+
+  async updateTopping(id: string, dto: UpdateToppingDto) {
+    await this.getTopping(id);
+    return this.prisma.topping.update({ where: { id }, data: dto });
+  }
+
+  async deleteTopping(id: string) {
+    await this.getTopping(id);
+    return this.prisma.topping.update({ where: { id }, data: { deletedAt: new Date() } });
+  }
+
   async createBanner(dto: CreateBannerDto) {
     return this.prisma.banner.create({ data: { ...dto } });
   }
@@ -297,7 +476,11 @@ export class AdminService {
           address: ADDRESS_WITH_REGIONS,
           items: { include: { toppings: true } },
           payment: true,
-          shipment: true,
+          shipment: {
+            include: {
+              history: { select: { providerStatus: true, mappedStatus: true, changedAt: true }, orderBy: { changedAt: 'desc' }, take: 1 },
+            },
+          },
         },
         orderBy: { createdAt: 'desc' },
         skip,
@@ -305,7 +488,21 @@ export class AdminService {
       }),
       this.prisma.order.count({ where }),
     ]);
-    return paginate(items, total, page, limit);
+    const presented = items.map(({ shipment, ...order }) => {
+      if (!shipment) return { ...order, shipment: null };
+      const { history, ...shipmentData } = shipment;
+      return {
+        ...order,
+        shipment: {
+          ...shipmentData,
+          displayStatusLabel: paxelStatusDisplayLabel(
+            shipment.provider,
+            latestPaxelStatusCode(shipment.metadata, history),
+          ),
+        },
+      };
+    });
+    return paginate(presented, total, page, limit);
   }
 
   async getOrder(id: string) {
@@ -334,6 +531,16 @@ export class AdminService {
       },
     });
     if (!order || order.deletedAt) throw new NotFoundException('Order not found');
+    if (order.shipment) {
+      const providerStatus = latestPaxelStatusCode(order.shipment.metadata, order.shipment.history);
+      return {
+        ...order,
+        shipment: {
+          ...order.shipment,
+          displayStatusLabel: paxelStatusDisplayLabel(order.shipment.provider, providerStatus),
+        },
+      };
+    }
     return order;
   }
 
@@ -364,11 +571,12 @@ export class AdminService {
         },
         shipment: {
           select: {
+            provider: true,
             createdAt: true,
             status: true,
             trackingNumber: true,
             trackingUrl: true,
-            history: { select: { mappedStatus: true, changedAt: true }, orderBy: { changedAt: 'asc' } },
+            history: { select: { providerStatus: true, mappedStatus: true, changedAt: true }, orderBy: { changedAt: 'asc' } },
           },
         },
         events: { select: { status: true, note: true, createdAt: true }, orderBy: { createdAt: 'asc' } },
@@ -388,7 +596,9 @@ export class AdminService {
         select: { id: true, actorId: true, action: true, entity: true, entityId: true, ipAddress: true, after: true, createdAt: true },
       }),
       this.prisma.notificationOutbox.findMany({
-        where: { payload: { path: '$.orderId', equals: id } },
+        // PostgreSQL JSON path filter: an array of keys. MySQL took a JSONPath
+        // string ("$.orderId"); Prisma types the two differently per provider.
+        where: { payload: { path: ['orderId'], equals: id } },
         orderBy: { createdAt: 'desc' },
         take: 100,
         select: { id: true, channel: true, template: true, status: true, attempts: true, providerMessageId: true, sentAt: true, createdAt: true },
@@ -404,7 +614,9 @@ export class AdminService {
         payment: order.payment
           ? { createdAt: order.payment.createdAt, status: order.payment.status, verifiedAt: order.payment.verifiedAt, transactions: order.payment.transactions }
           : null,
-        shipment: order.shipment ? { createdAt: order.shipment.createdAt, history: order.shipment.history } : null,
+        shipment: order.shipment
+          ? { createdAt: order.shipment.createdAt, provider: order.shipment.provider, history: order.shipment.history }
+          : null,
         reservations: order.reservations,
       }),
       availableActions: computeAvailableActions({
@@ -565,7 +777,11 @@ export class AdminService {
 
   async listShipments(query: ListAdminShipmentsQueryDto) {
     const { skip, take, page, limit } = pageArgs(query);
-    const where: Prisma.ShipmentWhereInput = { status: query.status };
+    // Without a scope the filter is exactly what it always was; `active` narrows it
+    // to the Admin → Shipping list (both halves apply to findMany AND count, so the
+    // pagination totals match what is shown).
+    const where: Prisma.ShipmentWhereInput =
+      query.scope === SHIPPING_LIST_ACTIVE_SCOPE ? { AND: [{ status: query.status }, activeShippingWhere()] } : { status: query.status };
     const [items, total] = await Promise.all([
       this.prisma.shipment.findMany({
         where,
@@ -676,18 +892,30 @@ export class AdminService {
     // cached under it.
     await this.invalidateTrackingCache(existing.provider, existing.trackingNumber);
 
-    return this.prisma.shipment.update({
-      where: { id },
-      data: {
-        provider: dto.provider,
-        service: dto.service,
-        cost: dto.cost,
-        status: dto.status,
-        trackingNumber: dto.trackingNumber,
-        trackingUrl: dto.trackingUrl,
-        metadata: dto.metadata as Prisma.InputJsonValue | undefined,
-      },
-      include: { order: true },
+    const fields = {
+      provider: dto.provider,
+      service: dto.service,
+      cost: dto.cost,
+      status: dto.status,
+      trackingNumber: dto.trackingNumber,
+      trackingUrl: dto.trackingUrl,
+    };
+    if (dto.metadata === undefined) {
+      return this.prisma.shipment.update({ where: { id }, data: fields, include: { order: true } });
+    }
+
+    // A metadata edit MERGES into what is stored (never a wholesale replace), under
+    // the shipment row lock so it cannot overwrite what the JNE webhook or a poller
+    // is writing at the same moment. System-owned paths (jne.webhook, tracking) keep
+    // their stored value whatever the edit contains.
+    return this.prisma.$transaction(async (tx) => {
+      await lockShipmentRow(tx, id);
+      const current = await tx.shipment.findUnique({ where: { id }, select: { metadata: true } });
+      return tx.shipment.update({
+        where: { id },
+        data: { ...fields, metadata: mergeAdminShipmentMetadata(current?.metadata, dto.metadata as Record<string, unknown>) },
+        include: { order: true },
+      });
     });
   }
 
@@ -737,17 +965,39 @@ export class AdminService {
     return user;
   }
 
-  async createRole(dto: CreateRoleDto) {
+  /** H1: SUPER_ADMIN only; custom roles only; reserved names and non-catalogue permissions refused. */
+  async createRole(dto: CreateRoleDto, actor: RoleActor) {
+    assertRoleAdministrator(actor);
+    const name = validateCustomRoleName(dto.name);
+    await this.assertRoleNameAvailable(name);
+    const permissionIds = dto.permissionIds ?? [];
+    await this.assertGrantable(permissionIds);
     return this.prisma.role.create({
       data: {
-        name: dto.name,
+        name,
         description: dto.description,
-        permissions: dto.permissionIds ? {
-          create: dto.permissionIds.map((permissionId) => ({ permissionId })),
-        } : undefined,
+        permissions: permissionIds.length ? { create: [...new Set(permissionIds)].map((permissionId) => ({ permissionId })) } : undefined,
       },
       include: { permissions: { include: { permission: true } } },
     });
+  }
+
+  /** Case-insensitive uniqueness, so "Ops Lead" and "ops lead" cannot coexist. */
+  private async assertRoleNameAvailable(name: string, exceptId?: string) {
+    const clash = await this.prisma.role.findFirst({
+      where: { name: { equals: name, mode: 'insensitive' }, ...(exceptId ? { NOT: { id: exceptId } } : {}) },
+      select: { id: true },
+    });
+    if (clash) throw new ConflictException('A role with this name already exists');
+  }
+
+  private async assertGrantable(permissionIds: readonly string[]) {
+    if (permissionIds.length === 0) return;
+    const found = await this.prisma.permission.findMany({
+      where: { id: { in: [...new Set(permissionIds)] } },
+      select: { id: true, subject: true, action: true },
+    });
+    assertGrantablePermissions(permissionIds, found);
   }
 
   listRoles() {
@@ -786,14 +1036,22 @@ export class AdminService {
    * touches it when a scalar actually changes - a permissions-only edit would otherwise
    * leave the timestamp untouched and the next caller's stale token would still match.
    */
-  async updateRole(id: string, dto: UpdateRoleDto) {
-    await this.getRole(id);
+  async updateRole(id: string, dto: UpdateRoleDto, actor: RoleActor) {
+    // H1, in this order: who may edit roles at all, then which roles are editable.
+    assertRoleAdministrator(actor);
+    const current = await this.getRole(id);
+    assertMutableRole(current);
+    const heldByActor = await this.prisma.adminRole.findFirst({ where: { adminId: actor.sub, roleId: id }, select: { roleId: true } });
+    if (heldByActor) throw new ForbiddenException('You cannot modify a role you hold');
+    const name = dto.name !== undefined ? validateCustomRoleName(dto.name) : undefined;
+    if (name !== undefined) await this.assertRoleNameAvailable(name, id);
+    if (dto.permissionIds) await this.assertGrantable(dto.permissionIds);
 
     return this.prisma.$transaction(async (tx) => {
       const claimed = await tx.role.updateMany({
         where: { id, updatedAt: new Date(dto.expectedUpdatedAt) },
         data: {
-          ...(dto.name ? { name: dto.name } : {}),
+          ...(name ? { name } : {}),
           ...(dto.description !== undefined ? { description: dto.description } : {}),
           updatedAt: new Date(),
         },
@@ -809,7 +1067,7 @@ export class AdminService {
         await tx.rolePermission.deleteMany({ where: { roleId: id } });
         if (dto.permissionIds.length > 0) {
           await tx.rolePermission.createMany({
-            data: dto.permissionIds.map((permissionId) => ({ roleId: id, permissionId })),
+            data: [...new Set(dto.permissionIds)].map((permissionId) => ({ roleId: id, permissionId })),
           });
         }
       }
@@ -823,6 +1081,11 @@ export class AdminService {
 
   async updateUser(id: string, dto: UpdateUserDto) {
     await this.getUser(id);
+    // L3: a customer-management endpoint must never turn a customer into an admin.
+    if (dto.roleIds) {
+      const roles = await this.prisma.role.findMany({ where: { id: { in: [...new Set(dto.roleIds)] } }, select: { id: true, name: true } });
+      assertCustomerRoles(dto.roleIds, roles);
+    }
 
     const updateData: Prisma.UserUpdateInput = {
       ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
@@ -836,7 +1099,7 @@ export class AdminService {
           data: {
             ...updateData,
             roles: {
-              create: dto.roleIds.map((roleId) => ({ roleId })),
+              create: [...new Set(dto.roleIds)].map((roleId) => ({ roleId })),
             },
           },
           include: { roles: { include: { role: true } }, addresses: ADDRESS_WITH_REGIONS, orders: true },
@@ -852,9 +1115,10 @@ export class AdminService {
     });
   }
 
-  listPermissions() {
-    return this.prisma.permission.findMany({
-      orderBy: { subject: 'asc' },
-    });
+  /** Only canonical catalogue permissions are offered; retired legacy rows are hidden and not grantable. */
+  async listPermissions() {
+    const catalogue = new Set(ALL_PERMISSION_NAMES);
+    const rows = await this.prisma.permission.findMany({ orderBy: [{ subject: 'asc' }, { action: 'asc' }] });
+    return rows.filter((p) => catalogue.has(`${p.subject}.${p.action}`));
   }
 }

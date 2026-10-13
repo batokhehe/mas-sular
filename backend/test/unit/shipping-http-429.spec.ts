@@ -90,7 +90,9 @@ describe('executeShippingRequest — 429 safety (PAXELBOX-45A)', () => {
       .mockResolvedValueOnce(res(500, 'boom'))
       .mockResolvedValueOnce(res(200, '{"ok":true}'));
 
-    await expect(run(http, 2)).resolves.toEqual({ status: 200, text: '{"ok":true}' });
+    // `operationId` is '' because these calls pass no integration context (P1):
+    // without one the transport writes nothing and generates no id.
+    await expect(run(http, 2)).resolves.toEqual({ status: 200, text: '{"ok":true}', operationId: '' });
     expect(http).toHaveBeenCalledTimes(2);
   });
 
@@ -104,7 +106,7 @@ describe('executeShippingRequest — 429 safety (PAXELBOX-45A)', () => {
   it('2xx is returned unchanged on the first attempt', async () => {
     const http = jest.fn().mockResolvedValue(res(200, 'body'));
 
-    await expect(run(http, 2)).resolves.toEqual({ status: 200, text: 'body' });
+    await expect(run(http, 2)).resolves.toEqual({ status: 200, text: 'body', operationId: '' });
     expect(http).toHaveBeenCalledTimes(1);
   });
 });

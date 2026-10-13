@@ -2,8 +2,8 @@ import { z } from 'zod'
 import { isIndonesianMobile } from '@/lib/address/phone'
 
 export const addressSchema = z.object({
-  label: z.string().min(1, 'Label is required'),
-  recipientName: z.string().min(1, 'Recipient name is required'),
+  label: z.string().min(1, 'Label wajib diisi'),
+  recipientName: z.string().min(1, 'Nama penerima wajib diisi'),
   // Indonesian MOBILE only (PAXELBOX-61AG.3.20). The backend normalises to
   // canonical 628… and is authoritative; this is the matching client-side rule
   // so the customer is told before submitting rather than by a 400.

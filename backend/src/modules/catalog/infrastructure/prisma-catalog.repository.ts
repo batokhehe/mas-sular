@@ -3,12 +3,16 @@ import { ProductStatus } from '@prisma/client';
 import { PrismaService } from '../../../database/prisma.service';
 import { ListProductsQueryDto } from '../application/dto/catalog.dto';
 import { CatalogRepository } from '../domain/catalog.repository';
+import { PRODUCT_SEQUENCE_ORDER_BY } from '../product-sequence';
 
 @Injectable()
 export class PrismaCatalogRepository implements CatalogRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async listProducts(query: ListProductsQueryDto) {
+    // Explicit business sorts are unchanged; `popular` is still most-reviewed first.
+    // Everything else - the storefront's "Standar", the homepage sections, related
+    // products - uses the canonical sequence the admin dragged into place.
     const orderBy =
       query.sort === 'price-low'
         ? { price: 'asc' as const }
@@ -16,13 +20,18 @@ export class PrismaCatalogRepository implements CatalogRepository {
           ? { price: 'desc' as const }
           : query.sort === 'rating'
             ? { rating: 'desc' as const }
-            : { reviewCount: 'desc' as const };
+            : query.sort === 'popular'
+              ? { reviewCount: 'desc' as const }
+              : PRODUCT_SEQUENCE_ORDER_BY;
 
     return this.prisma.product.findMany({
       where: {
         status: ProductStatus.ACTIVE,
         deletedAt: null,
         category: query.category ? { slug: query.category } : undefined,
+        // P2 #10 / #11: same visibility rules as every other listing, plus the flag(s).
+        isPromoSpecial: query.promoSpecial,
+        isTrialPack: query.trialPack,
         OR: query.search
           ? [
               { name: { contains: query.search } },
@@ -31,6 +40,9 @@ export class PrismaCatalogRepository implements CatalogRepository {
           : undefined,
       },
       include: { category: true },
+      // P2 #5: SKU is internal (the courier item code) and never shown to customers,
+      // so the public catalog does not send it at all.
+      omit: { sku: true },
       orderBy,
     });
   }
@@ -41,7 +53,10 @@ export class PrismaCatalogRepository implements CatalogRepository {
         deletedAt: null,
         OR: [{ id: idOrSlug }, { slug: idOrSlug }],
       },
-      include: { category: true },
+      // P2 gallery, ordered, detail ONLY (listProducts never loads images). One
+      // batched query alongside the product - no N+1.
+      include: { category: true, images: { orderBy: { sortOrder: 'asc' }, select: { id: true, url: true, sortOrder: true } } },
+      omit: { sku: true }, // P2 #5: internal only - see listProducts
     });
     if (!product) throw new NotFoundException('Product not found');
     return product;

@@ -41,6 +41,10 @@ export class AuthController {
     }
     const tokens = await this.auth.rotateRefreshToken(refreshToken);
     setCustomerAuthCookies(res, tokens);
+    // P0-2: renew the presence marker with the rotated session. It was only set at
+    // login, so it could expire (or be dropped by the client) while the rotated
+    // refresh cookie was still valid, leaving a live session looking signed out.
+    setCustomerSessionMarker(res);
     return tokens;
   }
 

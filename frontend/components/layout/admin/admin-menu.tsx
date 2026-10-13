@@ -16,9 +16,9 @@ export interface AdminNavItem {
 }
 
 export const ADMIN_NAV: AdminNavItem[] = [
-  { label: 'Dashboard', href: '/admin', icon: LayoutDashboard, permission: 'Dashboard.read' },
-  { label: 'Orders', href: '/admin/orders', icon: ClipboardList, permission: 'Order.read' },
-  { label: 'Payments', href: '/admin/payments', icon: CreditCard, permission: 'Payment.read' },
+  { label: 'Dasbor', href: '/admin', icon: LayoutDashboard, permission: 'Dashboard.read' },
+  { label: 'Pesanan', href: '/admin/orders', icon: ClipboardList, permission: 'Order.read' },
+  { label: 'Pembayaran', href: '/admin/payments', icon: CreditCard, permission: 'Payment.read' },
 ]
 
 /** Permission-aware nav: only renders items the admin is allowed to read. */

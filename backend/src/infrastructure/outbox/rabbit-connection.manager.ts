@@ -14,6 +14,8 @@ export class RabbitConnectionManager implements OnModuleDestroy {
   private connection: amqp.Connection | null = null;
   private channel: amqp.ConfirmChannel | null = null;
   private connecting: Promise<amqp.ConfirmChannel> | null = null;
+  /** Single-flight guard: concurrent callers share ONE connection attempt (no leaked duplicates). */
+  private connectionAttempt: Promise<amqp.Connection> | null = null;
   private readonly assertedExchanges = new Set<string>();
   private closing = false;
 
@@ -65,14 +67,47 @@ export class RabbitConnectionManager implements OnModuleDestroy {
 
   private async ensureConnection(): Promise<amqp.Connection> {
     if (this.connection) return this.connection;
+    if (this.connectionAttempt) return this.connectionAttempt;
     if (!this.config.rabbitmqUrl) {
       throw new Error('RABBITMQ_URL is not configured');
     }
-    const connection = await amqp.connect(this.config.rabbitmqUrl);
-    connection.on('error', (err: Error) => this.logger.error(`AMQP connection error: ${err.message}`));
-    connection.on('close', () => this.handleClose());
-    this.connection = connection;
-    return connection;
+    const url = this.config.rabbitmqUrl;
+    this.connectionAttempt = (async () => {
+      const connection = await amqp.connect(url);
+      connection.on('error', (err: Error) => this.logger.error(`AMQP connection error: ${err.message}`));
+      connection.on('close', () => this.handleClose());
+      this.connection = connection;
+      return connection;
+    })();
+    try {
+      return await this.connectionAttempt;
+    } finally {
+      this.connectionAttempt = null;
+    }
+  }
+
+  /**
+   * Readiness probe (L4). Reuses the SHARED connection - the one the relay and the
+   * consumers already hold - instead of opening and closing a fresh AMQP connection
+   * per /health/ready call. When disconnected it (re)establishes that same shared
+   * connection, bounded by `timeoutMs`; nothing is created per request, so there is
+   * nothing to leak.
+   */
+  async isHealthy(timeoutMs = 3000): Promise<boolean> {
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      const connection = await Promise.race([
+        this.ensureConnection(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('AMQP readiness timeout')), timeoutMs);
+        }),
+      ]);
+      return connection === this.connection && !this.closing;
+    } catch {
+      return false;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   private async connect(): Promise<amqp.ConfirmChannel> {

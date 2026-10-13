@@ -10,6 +10,7 @@ import { ErrorState } from '@/components/common/error-state'
 import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { paymentBreakdownFromUpload } from '@/lib/checkout/summary'
+import { paymentMethodLabel } from '@/lib/invoice/labels'
 
 export default function PaymentUploadPage() {
   const params = useParams<{ token: string }>()
@@ -25,9 +26,9 @@ export default function PaymentUploadPage() {
 
   return (
     <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-4 py-8">
-      <h1 className="mb-1 text-center text-xl font-bold">Upload payment receipt</h1>
+      <h1 className="mb-1 text-center text-xl font-bold">Unggah bukti pembayaran</h1>
       <p className="mb-6 text-center text-sm text-muted-foreground">
-        Submit your transfer proof to verify your payment.
+        Kirim bukti transfer untuk verifikasi pembayaran Anda.
       </p>
 
       {isLoading ? (
@@ -38,20 +39,20 @@ export default function PaymentUploadPage() {
         </Card>
       ) : isError || !data ? (
         <ErrorState
-          title="Link unavailable"
-          description="This upload link is invalid, already used, or expired."
+          title="Tautan tidak tersedia"
+          description="Tautan unggah ini tidak valid, sudah digunakan, atau kedaluwarsa."
           onRetry={() => void refetch()}
         />
       ) : (
         <Card className="space-y-4 p-5">
           <div className="space-y-1 text-sm">
             <div className="flex justify-between">
-              <span className="text-muted-foreground">Order</span>
+              <span className="text-muted-foreground">Pesanan</span>
               <span className="font-semibold">{data.orderNumber}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-muted-foreground">Method</span>
-              <span className="font-semibold">{data.method}</span>
+              <span className="text-muted-foreground">Metode</span>
+              <span className="font-semibold">{paymentMethodLabel(data.method)}</span>
             </div>
             {data.bankName ? (
               <div className="flex justify-between">

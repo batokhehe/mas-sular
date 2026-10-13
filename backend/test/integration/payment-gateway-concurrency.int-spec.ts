@@ -1,5 +1,5 @@
 /**
- * Phase 5G — the payment gateway against REAL MySQL under REAL concurrency.
+ * Phase 5G — the payment gateway against REAL PostgreSQL under REAL concurrency.
  *
  * Everything here runs the production services against the Testcontainers database:
  * real transactions, real CAS, real FOR UPDATE, real unique indexes. Only two things
@@ -515,7 +515,7 @@ describe('§14 shipment under real concurrency', () => {
 
 // ============================================================ §15 outbox =====
 
-describe('§15 outbox rows in MySQL', () => {
+describe('§15 outbox rows in PostgreSQL', () => {
   it('carries a unique id, version 1, correct routing and source', async () => {
     const c = await charge({ withShipment: true })
     script.set(c.providerOrderId, statusBody(c.providerOrderId))

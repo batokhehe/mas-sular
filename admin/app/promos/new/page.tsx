@@ -23,8 +23,8 @@ export default function NewPromoPage() {
   return (
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.promoCreate}>
       <div className="mb-6">
-        <h2 className="text-xl font-semibold text-gray-900">New Voucher</h2>
-        <p className="mt-1 text-sm text-gray-500">Create a new promo code for campaigns and discounts.</p>
+        <h2 className="text-xl font-semibold text-gray-900">Voucher Baru</h2>
+        <p className="mt-1 text-sm text-gray-500">Buat kode promo baru untuk kampanye dan diskon.</p>
       </div>
       <PromoForm
         onSubmit={async (values) => {
@@ -34,7 +34,7 @@ export default function NewPromoPage() {
             action: () => createPromo.mutateAsync(values),
           });
         }}
-        submitLabel={createPromo.isPending ? 'Creating...' : 'Create Voucher'}
+        submitLabel={createPromo.isPending ? 'Membuat...' : 'Buat Voucher'}
         isSubmitting={createPromo.isPending}
       />
     </AdminShell>

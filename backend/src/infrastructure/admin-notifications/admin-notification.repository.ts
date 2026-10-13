@@ -142,7 +142,10 @@ export class AdminNotificationRepository {
     for (;;) {
       const affected = Number(
         await this.prisma.$executeRaw(
-          Prisma.sql`DELETE FROM \`Notification\` WHERE \`createdAt\` < ${cutoff} ORDER BY \`createdAt\` ASC LIMIT ${Prisma.raw(String(limit))}`,
+          Prisma.sql`DELETE FROM "Notification" WHERE ctid IN (
+            SELECT ctid FROM "Notification" WHERE "createdAt" < ${cutoff}
+            ORDER BY "createdAt" ASC LIMIT ${Prisma.raw(String(limit))}
+          )`,
         ),
       );
       notifications += affected;

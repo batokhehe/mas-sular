@@ -29,7 +29,7 @@ export default function NewShipmentPage() {
   if (ordersQuery.isLoading) {
     return (
       <AdminShell requiredPermissions={ROUTE_PERMISSIONS.shipmentCreate}>
-        <p className="text-sm text-gray-500">Loading orders…</p>
+        <p className="text-sm text-gray-500">Memuat pesanan…</p>
       </AdminShell>
     );
   }
@@ -37,7 +37,7 @@ export default function NewShipmentPage() {
   if (ordersQuery.isError || !ordersQuery.data) {
     return (
       <AdminShell requiredPermissions={ROUTE_PERMISSIONS.shipmentCreate}>
-        <p className="text-sm text-red-600">Unable to load orders. Please reauthenticate.</p>
+        <p className="text-sm text-red-600">Gagal memuat pesanan. Silakan masuk ulang.</p>
       </AdminShell>
     );
   }
@@ -45,19 +45,19 @@ export default function NewShipmentPage() {
   return (
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.shipmentCreate}>
       <div className="mb-6">
-        <h2 className="text-xl font-semibold text-gray-900">New Shipment</h2>
-        <p className="mt-1 text-sm text-gray-500">Create a shipment record for an existing order.</p>
+        <h2 className="text-xl font-semibold text-gray-900">Pengiriman Baru</h2>
+        <p className="mt-1 text-sm text-gray-500">Buat data pengiriman untuk pesanan yang sudah ada.</p>
       </div>
       <ShipmentForm
         orders={ordersQuery.data.items}
         onSubmit={async (values) => {
           await runWithFeedback({
             loading: ADMIN_LOADING_MESSAGES.create,
-            success: ADMIN_SUCCESS_MESSAGES.created('Shipment'),
+            success: ADMIN_SUCCESS_MESSAGES.created('Pengiriman'),
             action: () => createShipment.mutateAsync(values),
           });
         }}
-        submitLabel={createShipment.isPending ? 'Creating...' : 'Create Shipment'}
+        submitLabel={createShipment.isPending ? 'Membuat...' : 'Buat Pengiriman'}
         isSubmitting={createShipment.isPending}
       />
     </AdminShell>

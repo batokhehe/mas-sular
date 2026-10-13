@@ -25,7 +25,7 @@ export function AuthMenu() {
   if (!user) {
     return (
       <Button asChild variant="ghost" size="sm">
-        <Link href="/login">Login</Link>
+        <Link href="/login">Masuk</Link>
       </Button>
     )
   }
@@ -35,7 +35,7 @@ export function AuthMenu() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button className="flex items-center gap-2 rounded-full outline-none" aria-label="Account menu">
+        <button className="flex items-center gap-2 rounded-full outline-none" aria-label="Menu akun">
           <Avatar className="size-8">
             <AvatarImage src={user.avatarUrl ?? undefined} alt={user.name} />
             <AvatarFallback>{initials}</AvatarFallback>
@@ -47,13 +47,13 @@ export function AuthMenu() {
         <DropdownMenuLabel className="truncate font-normal text-muted-foreground">{user.email}</DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
-          <Link href="/account">Account</Link>
+          <Link href="/account">Akun</Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>
-          <Link href="/account/addresses">Addresses</Link>
+          <Link href="/account/addresses">Alamat</Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>
-          <Link href="/orders">My orders</Link>
+          <Link href="/orders">Pesanan Saya</Link>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem
@@ -63,7 +63,7 @@ export function AuthMenu() {
           }}
         >
           <LogOut className="mr-2 size-4" />
-          Logout
+          Keluar
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

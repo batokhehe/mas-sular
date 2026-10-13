@@ -1,5 +1,5 @@
 /**
- * Phase 5D — gateway settlement against REAL MySQL.
+ * Phase 5D — gateway settlement against REAL PostgreSQL.
  *
  * The unit suite proves the orchestration and the rollback ordering against doubles.
  * These specs prove what a double cannot: that the transaction, the CAS and the
@@ -46,7 +46,7 @@ const actor = (gatewayTransactionId: string) => ({
   gatewayStatus: GatewayTransactionStatus.SETTLEMENT,
 })
 
-describe('Phase 5D. Gateway settlement (real MySQL)', () => {
+describe('Phase 5D. Gateway settlement (real PostgreSQL)', () => {
   it('settles payment + order + gateway + outbox atomically', async () => {
     const { scenario, gtx } = await attempt()
     const out = await settlement.settle(scenario.payment.id, actor(gtx.id))

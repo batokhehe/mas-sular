@@ -224,29 +224,29 @@ export class ExecutiveDashboardService {
   /** Daily orders + PAID revenue for the sales chart (one grouped query). */
   private salesRows(since: Date) {
     return this.prisma.$queryRaw<Array<{ day: unknown; orders: unknown; revenue: unknown }>>(Prisma.sql`
-      SELECT DATE(o.createdAt) AS day,
+      SELECT o."createdAt"::date AS "day",
              COUNT(o.id) AS orders,
-             COALESCE(SUM(CASE WHEN p.status = 'PAID' THEN o.totalPrice ELSE 0 END), 0) AS revenue
-      FROM \`Order\` o
-      LEFT JOIN \`Payment\` p ON p.orderId = o.id
-      WHERE o.deletedAt IS NULL AND o.createdAt >= ${since}
-      GROUP BY DATE(o.createdAt)
-      ORDER BY day ASC
+             COALESCE(SUM(o."totalPrice") FILTER (WHERE p.status = 'PAID'), 0) AS revenue
+      FROM "Order" o
+      LEFT JOIN "Payment" p ON p."orderId" = o.id
+      WHERE o."deletedAt" IS NULL AND o."createdAt" >= ${since}
+      GROUP BY o."createdAt"::date
+      ORDER BY "day" ASC
     `);
   }
 
   /** Top 10 products by PAID revenue (qty + revenue in one grouped query). */
   private topProductRows() {
     return this.prisma.$queryRaw<Array<{ productId: unknown; name: unknown; qtySold: unknown; revenue: unknown }>>(Prisma.sql`
-      SELECT oi.productId AS productId,
-             MAX(oi.productName) AS name,
-             SUM(oi.quantity) AS qtySold,
-             SUM(oi.unitPrice * oi.quantity) AS revenue
-      FROM \`OrderItem\` oi
-      JOIN \`Order\` o ON o.id = oi.orderId
-      JOIN \`Payment\` p ON p.orderId = o.id
-      WHERE o.deletedAt IS NULL AND p.status = 'PAID'
-      GROUP BY oi.productId
+      SELECT oi."productId" AS "productId",
+             MAX(oi."productName") AS name,
+             SUM(oi.quantity) AS "qtySold",
+             SUM(oi."unitPrice" * oi.quantity) AS revenue
+      FROM "OrderItem" oi
+      JOIN "Order" o ON o.id = oi."orderId"
+      JOIN "Payment" p ON p."orderId" = o.id
+      WHERE o."deletedAt" IS NULL AND p.status = 'PAID'
+      GROUP BY oi."productId"
       ORDER BY revenue DESC
       LIMIT 10
     `);

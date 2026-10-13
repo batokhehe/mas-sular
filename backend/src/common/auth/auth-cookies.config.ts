@@ -6,12 +6,21 @@
  * options consumed by the cookie utility in later 13A sub-phases.
  */
 
+import { ADMIN_ACCESS_TTL_DEFAULT, adminAccessTtlToMs } from '../../modules/admin-auth/admin-session.config';
+
 export type SameSite = 'lax' | 'strict' | 'none';
 export type CsrfMode = 'off' | 'report' | 'enforce';
 
 export interface CookieConfig {
   /** Parent domain for first-party cookies, e.g. ".baksomassular.com". Undefined → host-only (dev). */
   domain?: string;
+  /**
+   * Domain for the httpOnly ADMIN access cookie (ADMIN_COOKIE_DOMAIN). Undefined by
+   * default → HOST-ONLY on the API host (M4): the admin credential is never sent to
+   * sibling subdomains and cannot collide with another environment's cookie. The
+   * admin UI still sends it on its credentialed, same-site API requests.
+   */
+  adminCookieDomain?: string;
   secure: boolean;
   sameSite: SameSite;
   /**
@@ -65,13 +74,14 @@ export function loadCookieConfig(env: NodeJS.ProcessEnv = process.env): CookieCo
 
   return {
     domain: env.COOKIE_DOMAIN || undefined,
+    adminCookieDomain: env.ADMIN_COOKIE_DOMAIN || undefined,
     // SameSite=None is only valid alongside Secure (browser requirement); force it.
     secure: sameSite === 'none' ? true : secureEnv,
     sameSite,
     authCookiePath: `/${prefix}/v${version}/auth`,
     accessMaxAgeMs: ttlToMs(env.JWT_ACCESS_TTL, DAY_MS),
     refreshMaxAgeMs: ttlToMs(env.JWT_REFRESH_TTL, 30 * DAY_MS),
-    adminAccessMaxAgeMs: ttlToMs(env.JWT_ADMIN_ACCESS_TTL, DAY_MS),
+    adminAccessMaxAgeMs: adminAccessTtlToMs(env.JWT_ADMIN_ACCESS_TTL?.trim() || ADMIN_ACCESS_TTL_DEFAULT) ?? adminAccessTtlToMs(ADMIN_ACCESS_TTL_DEFAULT)!,
     authCookieExtractorEnabled: env.AUTH_COOKIE_EXTRACTOR_ENABLED === 'true',
     csrfMode: (env.CSRF_MODE as CsrfMode) ?? 'enforce',
   };

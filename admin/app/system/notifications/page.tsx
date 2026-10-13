@@ -124,7 +124,7 @@ export default function NotificationCenterPage() {
   };
   const resendM = useMutation({ mutationFn: resendNotification, onSuccess: refresh });
   const resend = (id: string) =>
-    runWithFeedback({ loading: ADMIN_LOADING_MESSAGES.update, success: 'Notification queued for resend', action: () => resendM.mutateAsync(id) });
+    runWithFeedback({ loading: ADMIN_LOADING_MESSAGES.update, success: 'Notifikasi diantrekan untuk dikirim ulang', action: () => resendM.mutateAsync(id) });
 
   // ---- Bulk actions ----
   const selectedList = useMemo(() => Array.from(selectedRows.values()), [selectedRows]);
@@ -142,7 +142,7 @@ export default function NotificationCenterPage() {
   const bulkRetry = () =>
     runWithFeedback({
       loading: ADMIN_LOADING_MESSAGES.update,
-      success: `${failedIds.length} failed notification(s) queued for resend`,
+      success: `${failedIds.length} notifikasi gagal diantrekan untuk dikirim ulang`,
       action: () => bulkRetryM.mutateAsync(failedIds),
     });
   const exportSelected = () => {
@@ -178,17 +178,17 @@ export default function NotificationCenterPage() {
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
           <nav className="flex items-center gap-1 text-xs text-gray-400">
-            System <ChevronRight className="h-3 w-3" /> <span className="font-medium text-gray-600">Notification Center</span>
+            Sistem <ChevronRight className="h-3 w-3" /> <span className="font-medium text-gray-600">Pusat Notifikasi</span>
           </nav>
-          <h2 className="mt-1 text-xl font-semibold text-gray-900">Notification Center</h2>
-          <p className="mt-1 text-sm text-gray-500">Monitor every WhatsApp, Email, Push, and SMS notification sent by the platform.</p>
+          <h2 className="mt-1 text-xl font-semibold text-gray-900">Pusat Notifikasi</h2>
+          <p className="mt-1 text-sm text-gray-500">Pantau setiap notifikasi WhatsApp, Email, Push, dan SMS yang dikirim platform.</p>
         </div>
         <div className="flex items-center gap-3">
           <span className="text-xs text-gray-400" title={query.dataUpdatedAt ? dt(new Date(query.dataUpdatedAt).toISOString()) : undefined}>
-            Updated {updatedAgoLabel(query.dataUpdatedAt, nowTick)}
+            Diperbarui {updatedAgoLabel(query.dataUpdatedAt, nowTick)}
           </span>
           <Button onClick={() => void query.refetch()} disabled={query.isFetching} className="gap-2">
-            <RefreshCw className={`h-4 w-4 ${query.isFetching ? 'animate-spin' : ''}`} /> Refresh
+            <RefreshCw className={`h-4 w-4 ${query.isFetching ? 'animate-spin' : ''}`} /> Muat ulang
           </Button>
         </div>
       </div>
@@ -199,8 +199,8 @@ export default function NotificationCenterPage() {
         <Card>
           <div className="flex flex-col items-center gap-3 p-10 text-center">
             <AlertTriangle className="h-6 w-6 text-red-500" />
-            <p className="text-sm text-red-600">Unable to load the notification center.</p>
-            <Button onClick={() => void query.refetch()}>Retry</Button>
+            <p className="text-sm text-red-600">Gagal memuat pusat notifikasi.</p>
+            <Button onClick={() => void query.refetch()}>Coba ulang</Button>
           </div>
         </Card>
       ) : (
@@ -208,33 +208,33 @@ export default function NotificationCenterPage() {
           {/* Summary cards */}
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
             <Stat label="Total" value={rp(o.summary.total)} />
-            <Stat label="Sent" value={rp(o.summary.sent)} tone="ok" />
-            <Stat label="Pending" value={rp(o.summary.pending)} tone={o.summary.pending > 0 ? 'warn' : undefined} />
+            <Stat label="Terkirim" value={rp(o.summary.sent)} tone="ok" />
+            <Stat label="Menunggu" value={rp(o.summary.pending)} tone={o.summary.pending > 0 ? 'warn' : undefined} />
             <Stat label="Sending" value={rp(o.summary.sending)} />
-            <Stat label="Failed" value={rp(o.summary.failed)} tone={o.summary.failed > 0 ? 'error' : undefined} />
-            <Stat label="Today's Success Rate" value={o.summary.todaySuccessRatePct != null ? `${o.summary.todaySuccessRatePct}%` : '—'} tone="ok" />
-            <Stat label="Avg Delivery Time" value={deliveryLabel(o.summary.avgDeliverySec)} />
-            <Stat label="Retried Today" value={rp(o.summary.retriedToday ?? 0)} tone={(o.summary.retriedToday ?? 0) > 0 ? 'warn' : undefined} />
+            <Stat label="Gagal" value={rp(o.summary.failed)} tone={o.summary.failed > 0 ? 'error' : undefined} />
+            <Stat label="Tingkat Keberhasilan Hari Ini" value={o.summary.todaySuccessRatePct != null ? `${o.summary.todaySuccessRatePct}%` : '—'} tone="ok" />
+            <Stat label="Rata-rata Waktu Terkirim" value={deliveryLabel(o.summary.avgDeliverySec)} />
+            <Stat label="Dicoba Ulang Hari Ini" value={rp(o.summary.retriedToday ?? 0)} tone={(o.summary.retriedToday ?? 0) > 0 ? 'warn' : undefined} />
           </div>
 
           {/* Charts */}
           <div className="grid gap-6 xl:grid-cols-3">
             <Card>
-              <CardTitle>By Status</CardTitle>
+              <CardTitle>Per Status</CardTitle>
               <div className="mt-4">
                 <DonutChart segments={o.byStatus.filter((s) => s.count > 0).map((s) => ({ label: s.key, value: s.count, color: STATUS_COLORS[s.key] ?? '#94a3b8' }))} />
               </div>
             </Card>
             <Card>
-              <CardTitle>By Channel</CardTitle>
+              <CardTitle>Per Kanal</CardTitle>
               <div className="mt-4">
                 <DonutChart segments={o.byChannel.filter((s) => s.count > 0).map((s) => ({ label: s.key, value: s.count, color: CHANNEL_COLORS[s.key] ?? '#94a3b8' }))} />
               </div>
             </Card>
             <Card>
-              <CardTitle>Success Trend (7d)</CardTitle>
+              <CardTitle>Tren Keberhasilan (7 hari)</CardTitle>
               {o.trend.length === 0 ? (
-                <p className="py-10 text-center text-sm text-gray-500">No notifications yet.</p>
+                <p className="py-10 text-center text-sm text-gray-500">Belum ada notifikasi.</p>
               ) : (
                 <div className="mt-4"><TrendChart points={trendSeries(o.trend)} color="#22c55e" height={160} /></div>
               )}
@@ -246,13 +246,13 @@ export default function NotificationCenterPage() {
           {/* Recent failures */}
           {o.failures.length > 0 ? (
             <Card>
-              <CardTitle>Recent Failures</CardTitle>
+              <CardTitle>Kegagalan Terbaru</CardTitle>
               <ul className="mt-3 space-y-2">
                 {o.failures.map((f) => (
                   <li key={f.id} className="cursor-pointer rounded-lg border border-red-100 bg-red-50/50 p-2.5 text-sm" onClick={() => setSelectedId(f.id)}>
                     <div className="flex items-center justify-between">
                       <span className="font-medium text-gray-800">{f.channel} · {f.template}</span>
-                      <span className="text-xs text-gray-400">{dt(f.createdAt)} · {f.attempts} attempts</span>
+                      <span className="text-xs text-gray-400">{dt(f.createdAt)} · {f.attempts} percobaan</span>
                     </div>
                     <p className="mt-0.5 truncate text-xs text-red-600" title={f.lastError ?? ''}>{f.lastError ?? '—'} · {f.recipient}</p>
                   </li>
@@ -265,35 +265,35 @@ export default function NotificationCenterPage() {
           <div className="sticky top-16 z-10 -mx-1 space-y-2 px-1 pt-1">
             <Card className="shadow-sm">
               <div key={filterFormKey} className="flex flex-wrap items-end gap-3">
-                <Filter label="Search"><input defaultValue={filters.search ?? ''} onChange={(e) => patchDebounced({ search: e.target.value || undefined })} placeholder="ID, recipient, phone, email, order no, payment, provider msg…" className="h-10 w-80 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm outline-none focus:border-[#465fff] focus:bg-white" /></Filter>
-                <Filter label="Channel">
+                <Filter label="Cari"><input defaultValue={filters.search ?? ''} onChange={(e) => patchDebounced({ search: e.target.value || undefined })} placeholder="ID, penerima, telepon, email, no. pesanan, pembayaran, pesan penyedia…" className="h-10 w-80 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm outline-none focus:border-[#465fff] focus:bg-white" /></Filter>
+                <Filter label="Kanal">
                   <select value={filters.channel ?? ''} onChange={(e) => patch({ channel: e.target.value as NotificationChannel | '' })} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]">
-                    <option value="">All</option>{CHANNELS.map((c) => <option key={c} value={c}>{c}</option>)}
+                    <option value="">Semua</option>{CHANNELS.map((c) => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </Filter>
                 <Filter label="Status">
                   <select value={filters.status ?? ''} onChange={(e) => patch({ status: e.target.value as NotificationSendStatus | '' })} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]">
-                    <option value="">All</option>{SEND_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                    <option value="">Semua</option>{SEND_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </Filter>
-                <Filter label="Provider">
+                <Filter label="Penyedia">
                   <select value={filters.provider ?? ''} onChange={(e) => patch({ provider: e.target.value || undefined })} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]">
-                    <option value="">All</option>{PROVIDERS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+                    <option value="">Semua</option>{PROVIDERS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
                   </select>
                 </Filter>
                 <Filter label="Template"><input defaultValue={filters.template ?? ''} onChange={(e) => patchDebounced({ template: e.target.value || undefined })} placeholder="order.transfer" className="h-10 w-40 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
-                <Filter label="Recipient"><input defaultValue={filters.recipient ?? ''} onChange={(e) => patchDebounced({ recipient: e.target.value || undefined })} placeholder="628… / email" className="h-10 w-40 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
-                <Filter label="Order ID"><input defaultValue={filters.order ?? ''} onChange={(e) => patchDebounced({ order: e.target.value || undefined })} className="h-10 w-36 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
-                <Filter label="From"><input type="datetime-local" defaultValue={toLocalInput(filters.dateFrom)} onChange={(e) => patch({ dateFrom: e.target.value ? new Date(e.target.value).toISOString() : undefined })} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
-                <Filter label="To"><input type="datetime-local" defaultValue={toLocalInput(filters.dateTo)} onChange={(e) => patch({ dateTo: e.target.value ? new Date(e.target.value).toISOString() : undefined })} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
-                <Filter label="Has Error">
+                <Filter label="Penerima"><input defaultValue={filters.recipient ?? ''} onChange={(e) => patchDebounced({ recipient: e.target.value || undefined })} placeholder="628… / email" className="h-10 w-40 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
+                <Filter label="ID Pesanan"><input defaultValue={filters.order ?? ''} onChange={(e) => patchDebounced({ order: e.target.value || undefined })} className="h-10 w-36 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
+                <Filter label="Dari"><input type="datetime-local" defaultValue={toLocalInput(filters.dateFrom)} onChange={(e) => patch({ dateFrom: e.target.value ? new Date(e.target.value).toISOString() : undefined })} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
+                <Filter label="Sampai"><input type="datetime-local" defaultValue={toLocalInput(filters.dateTo)} onChange={(e) => patch({ dateTo: e.target.value ? new Date(e.target.value).toISOString() : undefined })} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
+                <Filter label="Ada error">
                   <select value={filters.hasError ?? ''} onChange={(e) => patch({ hasError: (e.target.value || '') as '' | 'true' | 'false' })} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]">
-                    <option value="">All</option><option value="true">With error</option><option value="false">Without error</option>
+                    <option value="">Semua</option><option value="true">Dengan error</option><option value="false">Tanpa error</option>
                   </select>
                 </Filter>
-                <Filter label="Min Retries"><input type="number" min={0} defaultValue={filters.retryMin ?? ''} onChange={(e) => patchDebounced({ retryMin: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)) })} className="h-10 w-24 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
-                <Filter label="Duration ≥ (s)"><input type="number" min={0} defaultValue={filters.durationMin ?? ''} onChange={(e) => patchDebounced({ durationMin: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)) })} className="h-10 w-24 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
-                <Filter label="Duration ≤ (s)"><input type="number" min={0} defaultValue={filters.durationMax ?? ''} onChange={(e) => patchDebounced({ durationMax: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)) })} className="h-10 w-24 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
+                <Filter label="Min. Percobaan Ulang"><input type="number" min={0} defaultValue={filters.retryMin ?? ''} onChange={(e) => patchDebounced({ retryMin: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)) })} className="h-10 w-24 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
+                <Filter label="Durasi ≥ (dtk)"><input type="number" min={0} defaultValue={filters.durationMin ?? ''} onChange={(e) => patchDebounced({ durationMin: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)) })} className="h-10 w-24 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
+                <Filter label="Durasi ≤ (dtk)"><input type="number" min={0} defaultValue={filters.durationMax ?? ''} onChange={(e) => patchDebounced({ durationMax: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)) })} className="h-10 w-24 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
                 {activeFilterCount > 0 ? (
                   <button onClick={resetFilters} className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-gray-200 px-3 text-sm font-medium text-gray-600 hover:border-[#465fff] hover:text-[#465fff]">
                     <FilterX className="h-4 w-4" /> Reset ({activeFilterCount})
@@ -305,23 +305,23 @@ export default function NotificationCenterPage() {
             {selectedRows.size > 0 ? (
               <Card className="shadow-sm">
                 <div className="flex flex-wrap items-center gap-3 text-sm">
-                  <span className="font-medium text-gray-800">{selectedRows.size} selected</span>
+                  <span className="font-medium text-gray-800">{selectedRows.size} dipilih</span>
                   <span className="text-xs text-gray-400">({failedIds.length} failed / retryable)</span>
                   <PermissionGate permissions={ROUTE_PERMISSIONS.notificationResend}>
                     <Button
                       onClick={() => void bulkRetry()}
                       disabled={failedIds.length === 0 || failedIds.length > BULK_RETRY_LIMIT || bulkRetryM.isPending}
                       className="gap-2"
-                      title={failedIds.length > BULK_RETRY_LIMIT ? `At most ${BULK_RETRY_LIMIT} per bulk retry` : undefined}
+                      title={failedIds.length > BULK_RETRY_LIMIT ? `Maksimal ${BULK_RETRY_LIMIT} per percobaan ulang massal` : undefined}
                     >
                       <RotateCcw className="h-4 w-4" /> Retry Selected ({failedIds.length})
                     </Button>
                   </PermissionGate>
                   <button onClick={exportSelected} className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-gray-200 px-3 text-sm font-medium text-gray-600 hover:border-[#465fff] hover:text-[#465fff]">
-                    <FileJson className="h-4 w-4" /> Export Selected JSON
+                    <FileJson className="h-4 w-4" /> Ekspor JSON Terpilih
                   </button>
                   <button onClick={() => setSelectedRows(new Map())} className="inline-flex items-center gap-1 text-xs font-medium text-gray-400 hover:text-gray-700">
-                    <X className="h-3.5 w-3.5" /> Clear selection
+                    <X className="h-3.5 w-3.5" /> Hapus pilihan
                   </button>
                 </div>
               </Card>
@@ -330,27 +330,27 @@ export default function NotificationCenterPage() {
 
           {/* List */}
           <Card>
-            <CardTitle>Notifications</CardTitle>
+            <CardTitle>Notifikasi</CardTitle>
             <div className="mt-4 overflow-x-auto">
               {(data.items.length ?? 0) === 0 ? (
-                <p className="p-10 text-center text-sm text-gray-500">No notifications found.</p>
+                <p className="p-10 text-center text-sm text-gray-500">Tidak ada notifikasi ditemukan.</p>
               ) : (
                 <table className="w-full min-w-[1100px] text-left text-sm">
                   <thead>
                     <tr className="border-b border-gray-100 text-xs uppercase text-gray-400">
                       <th className="w-8 py-2">
-                        <input type="checkbox" checked={pageAllSelected} onChange={togglePage} aria-label="Select all on this page" className="h-4 w-4 accent-[#465fff]" />
+                        <input type="checkbox" checked={pageAllSelected} onChange={togglePage} aria-label="Pilih semua di halaman ini" className="h-4 w-4 accent-[#465fff]" />
                       </th>
-                      <th className="py-2 font-medium">Created</th><th className="py-2 font-medium">Channel</th><th className="py-2 font-medium">Status</th>
-                      <th className="py-2 font-medium">Recipient</th><th className="py-2 font-medium">Template</th><th className="py-2 font-medium">Subject</th>
-                      <th className="py-2 text-right font-medium">Attempts</th><th className="py-2 font-medium">Sent At</th><th className="py-2 font-medium">Duration</th>
+                      <th className="py-2 font-medium">Dibuat</th><th className="py-2 font-medium">Kanal</th><th className="py-2 font-medium">Status</th>
+                      <th className="py-2 font-medium">Penerima</th><th className="py-2 font-medium">Template</th><th className="py-2 font-medium">Subjek</th>
+                      <th className="py-2 text-right font-medium">Percobaan</th><th className="py-2 font-medium">Dikirim pada</th><th className="py-2 font-medium">Durasi</th>
                     </tr>
                   </thead>
                   <tbody>
                     {data.items.map((n) => (
                       <tr key={n.id} onClick={() => setSelectedId(n.id)} className={`cursor-pointer border-b border-gray-50 last:border-0 hover:bg-gray-50/70 ${selectedRows.has(n.id) ? 'bg-indigo-50/40' : ''}`}>
                         <td className="py-2.5" onClick={(e) => e.stopPropagation()}>
-                          <input type="checkbox" checked={selectedRows.has(n.id)} onChange={() => toggleRow(n)} aria-label={`Select notification ${n.id}`} className="h-4 w-4 accent-[#465fff]" />
+                          <input type="checkbox" checked={selectedRows.has(n.id)} onChange={() => toggleRow(n)} aria-label={`Pilih notifikasi ${n.id}`} className="h-4 w-4 accent-[#465fff]" />
                         </td>
                         <td className="whitespace-nowrap py-2.5 text-gray-500">{dt(n.createdAt)}</td>
                         <td className="py-2.5"><Badge cls={CHANNEL_BADGE[n.channel] ?? 'bg-gray-100 text-gray-600'}>{n.channel}</Badge></td>
@@ -383,9 +383,9 @@ function ByHourCard({ byHour }: { byHour: Array<{ hour: string; total: number; s
   const hh = (iso: string) => new Date(iso).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
   return (
     <Card>
-      <CardTitle>Notifications by Hour (last 24h)</CardTitle>
+      <CardTitle>Notifikasi per Jam (24 jam terakhir)</CardTitle>
       {byHour.length === 0 ? (
-        <p className="py-10 text-center text-sm text-gray-500">No hourly data yet.</p>
+        <p className="py-10 text-center text-sm text-gray-500">Belum ada data per jam.</p>
       ) : (
         <div className="mt-4">
           <BarChart values={byHour.map((h) => h.total)} color="#465fff" height={120} />

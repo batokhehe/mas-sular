@@ -28,7 +28,7 @@ export default function NewProductPage() {
   if (isLoading) {
     return (
       <AdminShell requiredPermissions={ROUTE_PERMISSIONS.productCreate}>
-        <p className="p-6 text-sm text-gray-500">Loading categories...</p>
+        <p className="p-6 text-sm text-gray-500">Memuat kategori...</p>
       </AdminShell>
     );
   }
@@ -36,7 +36,7 @@ export default function NewProductPage() {
   if (isError || !categories) {
     return (
       <AdminShell requiredPermissions={ROUTE_PERMISSIONS.productCreate}>
-        <p className="p-6 text-sm text-red-600">Unable to load categories. Please reauthenticate.</p>
+        <p className="p-6 text-sm text-red-600">Gagal memuat kategori. Silakan masuk ulang.</p>
       </AdminShell>
     );
   }
@@ -44,19 +44,19 @@ export default function NewProductPage() {
   return (
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.productCreate}>
       <div className="mb-6">
-        <h2 className="text-xl font-semibold text-gray-900">Add Product</h2>
-        <p className="mt-1 text-sm text-gray-500">Create a new product for the catalog.</p>
+        <h2 className="text-xl font-semibold text-gray-900">Tambah Produk</h2>
+        <p className="mt-1 text-sm text-gray-500">Buat produk baru untuk katalog.</p>
       </div>
       <ProductForm
         categories={categories}
         onSubmit={async (values) => {
           await runWithFeedback({
             loading: ADMIN_LOADING_MESSAGES.create,
-            success: ADMIN_SUCCESS_MESSAGES.created('Product'),
+            success: ADMIN_SUCCESS_MESSAGES.created('Produk'),
             action: () => createProduct.mutateAsync(values),
           });
         }}
-        submitLabel={createProduct.isPending ? 'Creating...' : 'Create Product'}
+        submitLabel={createProduct.isPending ? 'Membuat...' : 'Buat Produk'}
         isSubmitting={createProduct.isPending}
       />
     </AdminShell>

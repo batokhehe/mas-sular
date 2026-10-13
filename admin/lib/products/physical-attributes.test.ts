@@ -84,14 +84,14 @@ test('payload values are numbers, not strings (backend expects number)', () => {
 });
 
 test('weight out of range is rejected at both ends', () => {
-  assert.match(validatePhysicalField('weightGram', '0') ?? '', /between 1 and 5000 gram/);
-  assert.match(validatePhysicalField('weightGram', '5001') ?? '', /between 1 and 5000 gram/);
+  assert.match(validatePhysicalField('weightGram', '0') ?? '', /di antara 1 dan 5000 gram/);
+  assert.match(validatePhysicalField('weightGram', '5001') ?? '', /di antara 1 dan 5000 gram/);
   assert.equal(validatePhysicalField('weightGram', '1'), null);
   assert.equal(validatePhysicalField('weightGram', '5000'), null);
 });
 
 test('decimal weight is rejected, never silently rounded', () => {
-  assert.match(validatePhysicalField('weightGram', '500.5') ?? '', /whole number of gram/);
+  assert.match(validatePhysicalField('weightGram', '500.5') ?? '', /bilangan bulat \(gram\)/);
   // and the value is not coerced behind the scenes
   assert.equal(toPhysicalPayload({
     weightGram: '500.5', lengthCm: '', widthCm: '', heightCm: '', isFragile: false,
@@ -100,8 +100,8 @@ test('decimal weight is rejected, never silently rounded', () => {
 
 test('dimensions out of range are rejected at both ends', () => {
   for (const field of ['lengthCm', 'widthCm', 'heightCm'] as const) {
-    assert.match(validatePhysicalField(field, '0') ?? '', /between 1 and 50 cm/);
-    assert.match(validatePhysicalField(field, '51') ?? '', /between 1 and 50 cm/);
+    assert.match(validatePhysicalField(field, '0') ?? '', /di antara 1 dan 50 cm/);
+    assert.match(validatePhysicalField(field, '51') ?? '', /di antara 1 dan 50 cm/);
     assert.equal(validatePhysicalField(field, '1'), null);
     assert.equal(validatePhysicalField(field, '50'), null);
   }
@@ -109,12 +109,12 @@ test('dimensions out of range are rejected at both ends', () => {
 
 test('decimal dimensions are rejected', () => {
   for (const field of ['lengthCm', 'widthCm', 'heightCm'] as const) {
-    assert.match(validatePhysicalField(field, '20.5') ?? '', /whole number of cm/);
+    assert.match(validatePhysicalField(field, '20.5') ?? '', /bilangan bulat \(cm\)/);
   }
 });
 
 test('non-numeric input is rejected', () => {
-  assert.match(validatePhysicalField('weightGram', 'abc') ?? '', /must be a number/);
+  assert.match(validatePhysicalField('weightGram', 'abc') ?? '', /harus berupa angka/);
 });
 
 test('EMPTY is valid - editing an unrelated field must not force a measurement', () => {

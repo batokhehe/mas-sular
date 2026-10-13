@@ -7,13 +7,16 @@ import { PaymentAccountsModule } from '../../payment-accounts/payment-accounts.m
 import { ManualTransferProvider } from './infrastructure/providers/manual-transfer.provider';
 import { MidtransPaymentProvider } from './infrastructure/providers/midtrans-payment.provider';
 import { MIDTRANS_CONFIG, MidtransConfig, assertMidtransConfigured, loadMidtransConfig } from './midtrans.config';
-import { PaymentChannelRegistry } from './payment-channel.registry';
+import { PAYMENT_CHANNEL_AVAILABILITY_CONFIG, PaymentChannelRegistry } from './payment-channel.registry';
+import { loadPaymentChannelAvailability } from './domain/payment-channel-settings';
 import { PaymentGatewayPersistenceService } from './payment-gateway-persistence.service';
+import { PaymentAttemptPricingService } from './payment-attempt-pricing.service';
 import { PaymentInitiationService } from './payment-initiation.service';
 import { PAYMENT_PROVIDERS, PaymentProviderFactory } from './payment-provider.factory';
 import { PaymentChannelsController } from './presentation/payment-channels.controller';
 import { PaymentWebhookController } from './presentation/payment-webhook.controller';
 import { PaymentWebhookService } from './payment-webhook.service';
+import { loadPaymentServiceFeeConfig, PAYMENT_SERVICE_FEE_CONFIG } from './payment-service-fee.config';
 
 /**
  * Payment gateway module (Phases 1-3): provider abstraction, channel catalog,
@@ -54,6 +57,8 @@ import { PaymentWebhookService } from './payment-webhook.service';
     PaymentProviderFactory,
     PaymentChannelRegistry,
     PaymentGatewayPersistenceService,
+    // Prices gateway attempts (Payment/Order amount + fee). Initiation only — never the webhook.
+    PaymentAttemptPricingService,
     PaymentInitiationService,
     PaymentWebhookService,
     // === Phase 5E ===
@@ -61,7 +66,17 @@ import { PaymentWebhookService } from './payment-webhook.service';
     GatewayStatusApplier,
     { provide: MIDTRANS_RECONCILIATION_CONFIG, useFactory: () => loadMidtransReconciliationConfig() },
     MidtransReconciliationWorker,
+    // Who bears the payment service fee. Independent of MIDTRANS_CONFIG on purpose.
+    { provide: PAYMENT_SERVICE_FEE_CONFIG, useFactory: () => loadPaymentServiceFeeConfig() },
+    // Which channels a customer may choose for a NEW payment (PAYMENT_<channel>_ENABLED).
+    { provide: PAYMENT_CHANNEL_AVAILABILITY_CONFIG, useFactory: () => loadPaymentChannelAvailability() },
   ],
-  exports: [PaymentInitiationService, PaymentChannelRegistry, PaymentProviderFactory, PaymentGatewayPersistenceService],
+  exports: [
+    PaymentInitiationService,
+    PaymentChannelRegistry,
+    PaymentProviderFactory,
+    PaymentGatewayPersistenceService,
+    PAYMENT_SERVICE_FEE_CONFIG,
+  ],
 })
 export class PaymentGatewayModule {}

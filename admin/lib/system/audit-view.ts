@@ -53,7 +53,7 @@ export function entityHref(entity: string, entityId: string | null): string | nu
 /** One-line summary for the table: diff count or the action itself. */
 export function entrySummary(entry: Pick<AuditEntry, 'diff' | 'action' | 'entityName'>): string {
   const changed = entry.diff?.length ?? 0;
-  if (changed > 0) return `${changed} field${changed > 1 ? 's' : ''} changed`;
+  if (changed > 0) return `${changed} field diubah`;
   if (entry.entityName) return entry.entityName;
   return entry.action.toLowerCase().replace(/_/g, ' ');
 }

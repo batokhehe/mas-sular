@@ -40,7 +40,7 @@ export function StorefrontHeader() {
 
         {/* Actions */}
         <div className="flex items-center gap-1">
-          <Button asChild variant="ghost" size="icon" className="relative" aria-label="Cart">
+          <Button asChild variant="ghost" size="icon" className="relative" aria-label="Keranjang">
             <Link href="/cart">
               <ShoppingCart className="size-5" />
               {count > 0 ? (
@@ -59,12 +59,12 @@ export function StorefrontHeader() {
           {/* Mobile menu */}
           <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
             <SheetTrigger asChild>
-              <Button variant="ghost" size="icon" className="md:hidden" aria-label="Open menu">
+              <Button variant="ghost" size="icon" className="md:hidden" aria-label="Buka menu">
                 <Menu className="size-5" />
               </Button>
             </SheetTrigger>
             <SheetContent side="right" className="w-72">
-              <SheetTitle className="sr-only">Navigation</SheetTitle>
+              <SheetTitle className="sr-only">Navigasi</SheetTitle>
               <nav className="mt-8 flex flex-col gap-2">
                 {STOREFRONT_LINKS.map((link) => {
                   const active = isActivePath(pathname, link.href)

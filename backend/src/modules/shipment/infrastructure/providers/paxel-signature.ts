@@ -1,4 +1,4 @@
-import { createHash } from 'crypto';
+import { createHash, timingSafeEqual } from 'crypto';
 
 /**
  * Paxel request signing (`X-Paxel-Signature`).
@@ -59,10 +59,40 @@ export function paxelCancelSignature(airwaybillCode: string, cancellationReason:
  *
  * SHA256(airwaybill_code[-6:] + latest_status[:2] + secret)
  *
- * Provided now because it belongs with its two siblings and is verified by the
- * same collection example. Nothing consumes it yet: the webhook endpoint,
- * routing and processing are deliberately out of scope until a later phase.
+ * Consumed by verifyPaxelWebhookSignature (POST /api/v1/shipments/webhook/paxel).
+ * NEEDS PAXEL CONFIRMATION: the collection documents this formula but publishes
+ * no webhook digest to test it against, and does not say which secret Paxel
+ * signs webhooks with. Until Paxel confirms both (with one real signed example),
+ * a real push may fail verification - which fails CLOSED (401, nothing written).
  */
 export function paxelWebhookSignature(airwaybillCode: string, latestStatus: string, secret: string): string {
   return sha256Hex(airwaybillCode.slice(-6) + latestStatus.slice(0, 2) + secret);
+}
+
+export type PaxelWebhookSignatureCheck = { ok: true } | { ok: false; reason: 'missing' | 'malformed' | 'mismatch' };
+
+const HEX_SHA256 = /^[0-9a-f]{64}$/i;
+
+/**
+ * Verify an inbound `X-Paxel-Signature` header against paxelWebhookSignature(),
+ * over the `airwaybill_code` and `latest_status` exactly as they appear in the
+ * body (Paxel does not normalise its inputs, so neither does this).
+ *
+ * The comparison is over the decoded 32 digest bytes with timingSafeEqual, so a
+ * wrong signature leaks no timing about how much of it matched. Hex letter case is
+ * representation only and is accepted either way; the algorithm is unchanged.
+ * Nothing here logs or returns the header, the expected digest or the secret.
+ */
+export function verifyPaxelWebhookSignature(
+  header: string | undefined,
+  airwaybillCode: string,
+  latestStatus: string,
+  secret: string,
+): PaxelWebhookSignatureCheck {
+  const provided = header?.trim();
+  if (!provided) return { ok: false, reason: 'missing' };
+  if (!HEX_SHA256.test(provided)) return { ok: false, reason: 'malformed' };
+  const expected = Buffer.from(paxelWebhookSignature(airwaybillCode, latestStatus, secret), 'hex');
+  const actual = Buffer.from(provided, 'hex');
+  return expected.length === actual.length && timingSafeEqual(expected, actual) ? { ok: true } : { ok: false, reason: 'mismatch' };
 }

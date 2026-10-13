@@ -17,7 +17,10 @@
     "prisma:seed": "tsx prisma/seed.ts",
     "prisma:seed:address": "tsx prisma/seed-address.ts",
     "prisma:seed:inventory": "tsx prisma/seed-inventory.ts",
-    "test:sandbox": "jest --config test/integration/jest.sandbox.config.js"
+    "test:sandbox": "jest --config test/integration/jest.sandbox.config.js",
+    "prisma:seed:catalog": "tsx prisma/seed-catalog.ts",
+    "admin:create": "tsx prisma/create-admin.ts",
+    "admin:disable": "tsx prisma/disable-admin.ts"
   },
   "dependencies": {
     "@nestjs/bullmq": "^11.0.2",
@@ -58,7 +61,7 @@
   "devDependencies": {
     "@nestjs/cli": "^11.0.7",
     "@nestjs/testing": "^11.1.0",
-    "@testcontainers/mysql": "^10.28.0",
+    "@testcontainers/postgresql": "^10.28.0",
     "@testcontainers/rabbitmq": "^10.28.0",
     "@types/amqplib": "^0.8.2",
     "@types/bcrypt": "^5.0.2",

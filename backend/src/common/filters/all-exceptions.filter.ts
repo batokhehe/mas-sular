@@ -22,9 +22,9 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const rawMessage = exception instanceof HttpException ? exception.getResponse() : 'Internal server error';
     const message = this.parseMessage(rawMessage);
 
-    // Redact capability tokens (e.g. the payment upload token) from the LOGGED url.
-    // The response `path` is returned only to the caller who already holds the token,
-    // so it is left unchanged (no API behavior change).
+    // Redact capability tokens, credential query values and JWT-shaped strings from
+    // the logged URL AND from the echoed `path` (H2): error bodies end up in proxy,
+    // browser and client logs, so a rejected ?token= request must not reflect it.
     this.logger.error({ err: exception, method: request.method, url: redactSensitivePath(request.url) }, 'request failed');
 
     // ADDITIVE: persist the exception to the SystemLog center (with stack + status).
@@ -46,7 +46,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     response.status(status).json({
       statusCode: status,
       message,
-      path: request.url,
+      path: redactSensitivePath(request.url),
       timestamp: new Date().toISOString(),
     });
   }

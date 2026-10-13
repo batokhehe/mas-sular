@@ -3,10 +3,10 @@ import type { PerfEndpoint, PerfRange } from '@/lib/admin';
 /** Pure view helpers for the Performance page (backend values rendered verbatim). */
 
 export const PERF_RANGES: Array<{ key: PerfRange; label: string }> = [
-  { key: '1h', label: 'Last Hour' },
-  { key: '24h', label: '24 Hours' },
-  { key: '7d', label: '7 Days' },
-  { key: '30d', label: '30 Days' },
+  { key: '1h', label: '1 Jam Terakhir' },
+  { key: '24h', label: '24 Jam' },
+  { key: '7d', label: '7 Hari' },
+  { key: '30d', label: '30 Hari' },
 ];
 
 /** 950 → "950ms"; 2400 → "2.4s". Display-only. */

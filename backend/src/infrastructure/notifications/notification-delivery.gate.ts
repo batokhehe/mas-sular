@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { NotificationChannel } from '@prisma/client';
 import { InvalidPhoneError, maskPhone, normalizePhoneNumber } from '../../common/utils/phone.util';
 import { NotificationMessage } from './notification-message';
@@ -20,11 +20,38 @@ export class NotificationBlockedError extends Error {
   }
 }
 
+/**
+ * Who may receive a delivered notification (production-readiness B6).
+ *
+ *   allowlist  only recipients listed in NOTIFICATION_ALLOWED_RECIPIENTS - the
+ *              default, and the only policy development/test can run with;
+ *   all        every legitimate customer recipient. Honored ONLY when
+ *              NODE_ENV=production, and only as an explicit opt-in.
+ *
+ * `all` replaces the allowlist check and nothing else: delivery must still be
+ * enabled, the recipient must still normalize to a usable phone/email, the sender
+ * worker must still be running, and templates/credentials are still enforced by
+ * their own configuration checks.
+ */
+export type NotificationRecipientPolicy = 'allowlist' | 'all';
+
 export interface NotificationDeliveryConfig {
   /** Master delivery switch. Absent/anything-but-"true" ⇒ nothing is delivered. */
   enabled: boolean;
-  /** Normalized recipients cleared for delivery. Empty ⇒ nothing is delivered. */
+  /** Normalized recipients cleared for delivery. Empty ⇒ nothing is delivered (allowlist policy). */
   allowedRecipients: string[];
+  /** Recipient policy. Absent means `allowlist`; only an explicit `all` widens it. */
+  policy?: NotificationRecipientPolicy;
+}
+
+/**
+ * Fail closed. Unset, misspelled or unknown values are `allowlist`, and so is `all`
+ * outside production - env.validation rejects both at boot, and this keeps the
+ * gate safe even if it is ever constructed without that validation.
+ */
+export function resolveRecipientPolicy(env: NodeJS.ProcessEnv = process.env): NotificationRecipientPolicy {
+  const raw = env.NOTIFICATION_RECIPIENT_POLICY?.trim();
+  return raw === 'all' && env.NODE_ENV === 'production' ? 'all' : 'allowlist';
 }
 
 /**
@@ -74,6 +101,7 @@ export function loadNotificationDeliveryConfig(
     // De-duplicated, but deliberately NOT deduped case-insensitively beyond the
     // normalization above — normalizeRecipient already case-folds emails.
     allowedRecipients: [...new Set(allowedRecipients)],
+    policy: resolveRecipientPolicy(env),
   };
 }
 
@@ -87,25 +115,36 @@ export function loadNotificationDeliveryConfig(
  * DELIVERY, not at generation: domain events still record NotificationOutbox
  * rows exactly as before, and only the outbound call is withheld.
  *
- * Two independent conditions must BOTH hold before a send is permitted:
+ * Conditions that must ALL hold before a send is permitted:
  *   1. NOTIFICATION_DELIVERY_ENABLED === 'true'
- *   2. the message's recipient appears in NOTIFICATION_ALLOWED_RECIPIENTS
+ *   2. the message carries a usable (normalizable) recipient for its channel
+ *   3. under the default `allowlist` policy, that recipient appears in
+ *      NOTIFICATION_ALLOWED_RECIPIENTS; under an explicit production `all`
+ *      policy (B6) every legitimate customer recipient qualifies.
  *
  * Enabling delivery therefore never by itself means "send to everyone", and
- * there is no wildcard: an empty allowlist blocks everything.
+ * there is no wildcard entry: an empty allowlist blocks everything.
  */
 @Injectable()
 export class NotificationDeliveryGate {
+  private readonly logger = new Logger(NotificationDeliveryGate.name);
+
   constructor(
     @Inject(NOTIFICATION_DELIVERY_CONFIG) private readonly config: NotificationDeliveryConfig,
-  ) {}
+  ) {
+    // Counts only — never the recipients themselves.
+    this.logger.log(
+      `notification delivery: enabled=${config.enabled} policy=${config.policy ?? 'allowlist'} allowlist_entries=${config.allowedRecipients.length}`,
+    );
+  }
 
   /** Throws NotificationBlockedError unless this exact message may be delivered. */
   assertDeliverable(message: NotificationMessage): void {
     if (!this.config.enabled) {
       throw new NotificationBlockedError('NOTIFICATION_DELIVERY_ENABLED is not "true"');
     }
-    if (this.config.allowedRecipients.length === 0) {
+    const allowlist = this.config.policy !== 'all';
+    if (allowlist && this.config.allowedRecipients.length === 0) {
       throw new NotificationBlockedError('NOTIFICATION_ALLOWED_RECIPIENTS is empty');
     }
 
@@ -116,7 +155,7 @@ export class NotificationDeliveryGate {
         `no usable recipient for channel ${message.channel} (${maskRecipient(target)})`,
       );
     }
-    if (!this.config.allowedRecipients.includes(normalized)) {
+    if (allowlist && !this.config.allowedRecipients.includes(normalized)) {
       throw new NotificationBlockedError(`recipient ${maskRecipient(normalized)} is not allowlisted`);
     }
   }

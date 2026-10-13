@@ -27,7 +27,6 @@ const ORIGIN_NOTE = 'gerbang samping, tanya shift lead';
 
 function config(over: Partial<{ enabled: boolean; needInsurance: boolean; maxRetry: number }> = {}): ShippingConfig {
   return {
-    originPostalCode: '40111',
     allowMockRates: false,
     // RajaOngkir is the JNE rate source (PAXELBOX-45); disabled here so these
     // pre-existing cases keep exercising exactly what they always did.

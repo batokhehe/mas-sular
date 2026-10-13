@@ -18,7 +18,7 @@ export default function ShipmentDetailPage() {
 
   const shipmentQuery = useQuery({
     queryKey: ['admin-shipment', shipmentId],
-    queryFn: () => (shipmentId ? fetchAdminShipment(shipmentId) : Promise.reject(new Error('Missing shipment id'))),
+    queryFn: () => (shipmentId ? fetchAdminShipment(shipmentId) : Promise.reject(new Error('ID pengiriman tidak ada'))),
     enabled: Boolean(shipmentId),
     retry: false,
   });
@@ -41,7 +41,7 @@ export default function ShipmentDetailPage() {
 
   const deleteShipment = useMutation({
     mutationFn: () => {
-      if (!shipmentId) throw new Error('Missing shipment id');
+      if (!shipmentId) throw new Error('ID pengiriman tidak ada');
       return deleteAdminShipment(shipmentId);
     },
     onSuccess: () => {
@@ -53,7 +53,7 @@ export default function ShipmentDetailPage() {
   if (shipmentQuery.isLoading || ordersQuery.isLoading) {
     return (
       <AdminShell requiredPermissions={ROUTE_PERMISSIONS.shipmentUpdate}>
-        <p className="text-sm text-gray-500">Loading shipment details…</p>
+        <p className="text-sm text-gray-500">Memuat detail pengiriman…</p>
       </AdminShell>
     );
   }
@@ -62,8 +62,8 @@ export default function ShipmentDetailPage() {
     return (
       <AdminShell requiredPermissions={ROUTE_PERMISSIONS.shipmentUpdate}>
         <div className="space-y-3 rounded-2xl border border-red-100 bg-red-50 p-6 text-sm text-red-700">
-          <p>Unable to load shipment details. Please try again later.</p>
-          <Link href="/shipping" className="font-medium text-[#465fff] underline">Back to shipments</Link>
+          <p>Gagal memuat detail pengiriman. Silakan coba lagi nanti.</p>
+          <Link href="/shipping" className="font-medium text-[#465fff] underline">Kembali ke pengiriman</Link>
         </div>
       </AdminShell>
     );
@@ -73,14 +73,14 @@ export default function ShipmentDetailPage() {
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.shipmentUpdate}>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold text-gray-900">Edit Shipment</h2>
-          <p className="mt-1 text-sm text-gray-500">Update shipment details and tracking information.</p>
+          <h2 className="text-xl font-semibold text-gray-900">Ubah Pengiriman</h2>
+          <p className="mt-1 text-sm text-gray-500">Perbarui detail pengiriman dan informasi pelacakan.</p>
         </div>
-        <Link href="/shipping" className="text-sm font-medium text-[#465fff] hover:text-indigo-700">Back to shipments</Link>
+        <Link href="/shipping" className="text-sm font-medium text-[#465fff] hover:text-indigo-700">Kembali ke pengiriman</Link>
       </div>
       {shipmentQuery.data.order.address ? (
         <div className="mb-5 rounded-2xl border border-gray-200 bg-gray-50 p-4 text-sm">
-          <p className="text-xs uppercase text-gray-400">Delivery Address</p>
+          <p className="text-xs uppercase text-gray-400">Alamat Pengiriman</p>
           <p className="mt-2 font-medium text-gray-900">
             {shipmentQuery.data.order.address.recipientName} • {shipmentQuery.data.order.address.phone}
           </p>
@@ -100,13 +100,13 @@ export default function ShipmentDetailPage() {
         }}
         onDelete={async () => {
           await runWithFeedback({
-            confirm: () => confirmDelete('Shipment'),
+            confirm: () => confirmDelete('Pengiriman'),
             loading: ADMIN_LOADING_MESSAGES.delete,
-            success: ADMIN_SUCCESS_MESSAGES.deleted('Shipment'),
+            success: ADMIN_SUCCESS_MESSAGES.deleted('Pengiriman'),
             action: () => deleteShipment.mutateAsync(),
           });
         }}
-        submitLabel={updateShipment.isPending ? 'Save changes' : 'Save shipment'}
+        submitLabel={updateShipment.isPending ? 'Simpan perubahan' : 'Simpan pengiriman'}
         isSubmitting={updateShipment.isPending}
         isDeleting={deleteShipment.isPending}
       />

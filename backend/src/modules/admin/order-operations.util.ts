@@ -1,4 +1,5 @@
 import { OrderStatus, PaymentStatus, ShipmentStatus } from '@prisma/client';
+import { shipmentDisplayLabel } from '../shipment/shipment-display-label';
 
 export type TimelineActor = 'customer' | 'admin' | 'system';
 
@@ -22,7 +23,8 @@ export interface TimelineSource {
   } | null;
   shipment: {
     createdAt: Date;
-    history: Array<{ mappedStatus: string; changedAt: Date }>;
+    provider: string;
+    history: Array<{ providerStatus: string; mappedStatus: string; changedAt: Date }>;
   } | null;
   reservations: Array<{ status: string; createdAt: Date; product?: { name: string } | null }>;
 }
@@ -88,8 +90,14 @@ export function buildOrderTimeline(src: TimelineSource): TimelineEntry[] {
       entries.push({
         at: h.changedAt.toISOString(),
         type: `shipment.${h.mappedStatus.toLowerCase()}`,
-        title: SHIPMENT_TITLES[h.mappedStatus] ?? `Shipment ${h.mappedStatus}`,
-        description: `Courier reported status: ${h.mappedStatus}.`,
+        title:
+          src.shipment.provider.toLowerCase() === 'paxel'
+            ? shipmentDisplayLabel(src.shipment.provider, h.mappedStatus as ShipmentStatus, h.providerStatus)
+            : SHIPMENT_TITLES[h.mappedStatus] ?? `Shipment ${h.mappedStatus}`,
+        description:
+          src.shipment.provider.toLowerCase() === 'paxel'
+            ? `Status Paxel ${h.providerStatus}: ${shipmentDisplayLabel(src.shipment.provider, h.mappedStatus as ShipmentStatus, h.providerStatus)}.`
+            : `Courier reported status: ${h.mappedStatus}.`,
         actor: 'system',
       });
     }

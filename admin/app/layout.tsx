@@ -4,7 +4,7 @@ import { Providers } from './providers';
 
 export const metadata: Metadata = {
   title: 'Bakso Mas Sular Admin',
-  description: 'Admin CMS for ecommerce operations',
+  description: 'CMS admin untuk operasional e-commerce',
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

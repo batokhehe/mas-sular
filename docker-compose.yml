@@ -1,28 +1,56 @@
+# Mas Sular — LOCAL DEVELOPMENT stack.
+#
+# The whole application runs here: PostgreSQL, Redis, RabbitMQ, the API, the
+# storefront and the admin console. Nothing in this file depends on the retired
+# shared infrastructure (Hostinger MySQL / Upstash Redis / CloudAMQP).
+#
+# SERVICE DNS, NOT LOCALHOST. Inside the compose network the API reaches its
+# dependencies by SERVICE NAME — postgres:5432, redis:6379, rabbitmq:5672.
+# `localhost` inside a container means the container itself, so it would never
+# find them. The published host ports below exist ONLY so a developer can run an
+# app on the host (pnpm dev) or attach psql; container-to-container traffic never
+# uses them.
+#
+# HOST PORTS ARE CONFIGURABLE because 5432/6379/5672 are commonly already taken
+# by another project on a developer machine. Override in .env, e.g.
+#   POSTGRES_HOST_PORT=55432
+#
+#   docker compose up -d                  # everything
+#   docker compose up -d postgres redis rabbitmq   # infra only, apps on the host
+
+name: mas-sular-dev
+
 services:
-  mysql:
-    image: mysql:8.4
-    container_name: baso_mysql
+  # ------------------------------------------------------------- database ---
+  postgres:
+    image: postgres:16-alpine
+    container_name: massular_postgres
+    restart: unless-stopped
     environment:
-      MYSQL_DATABASE: baso_nusantara
-      MYSQL_USER: baso
-      MYSQL_PASSWORD: baso_secret
-      MYSQL_ROOT_PASSWORD: root_secret
+      POSTGRES_DB: ${POSTGRES_DB:-massular}
+      POSTGRES_USER: ${POSTGRES_USER:-massular}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-massular_dev}
     ports:
-      - "3306:3306"
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
-      - mysql_data:/var/lib/mysql
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      # -U/-d are required: pg_isready otherwise probes the OS user ("root"),
+      # which does not exist in the cluster, and reports the server as down.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-massular} -d ${POSTGRES_DB:-massular}"]
       interval: 10s
       timeout: 5s
-      retries: 10
+      retries: 12
+      start_period: 15s
 
+  # ---------------------------------------------------------------- cache ---
   redis:
     image: redis:7.4-alpine
-    container_name: baso_redis
+    container_name: massular_redis
+    restart: unless-stopped
     command: redis-server --appendonly yes
     ports:
-      - "6379:6379"
+      - "${REDIS_HOST_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -31,24 +59,127 @@ services:
       timeout: 5s
       retries: 10
 
+  # ------------------------------------------------------------ messaging ---
   rabbitmq:
-    image: rabbitmq:3.13-management
-    container_name: baso_rabbitmq
+    image: rabbitmq:3.13-management-alpine
+    container_name: massular_rabbitmq
+    restart: unless-stopped
     environment:
-      RABBITMQ_DEFAULT_USER: baso
-      RABBITMQ_DEFAULT_PASS: baso_secret
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-massular}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-massular_dev}
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - "${RABBITMQ_HOST_PORT:-5672}:5672"
+      - "${RABBITMQ_MGMT_HOST_PORT:-15672}:15672"
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "ping"]
-      interval: 10s
-      timeout: 5s
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
       retries: 10
+      start_period: 30s
+
+  # ------------------------------------------------------------ migration ---
+  # Runs to completion BEFORE the API starts. `migrate deploy` only applies
+  # committed migrations — it never generates, resets or drops anything.
+  backend-migrate:
+    build:
+      context: ./backend
+      target: migrator
+    container_name: massular_migrate
+    restart: "no"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-massular}:${POSTGRES_PASSWORD:-massular_dev}@postgres:5432/${POSTGRES_DB:-massular}
+      # The migrator IMAGE sets NODE_ENV=production, where prisma/seed.ts (dev data)
+      # refuses to run (B5). This LOCAL stack is development, so the dev seed can
+      # still be run here with: docker compose run --rm --no-deps backend-migrate
+      #   node node_modules/tsx/dist/cli.mjs prisma/seed.ts
+      NODE_ENV: development
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ------------------------------------------------------------------ API ---
+  backend:
+    build:
+      context: ./backend
+      target: runner
+    container_name: massular_backend
+    restart: unless-stopped
+    # Base config is the committed LOCAL template, so a fresh clone boots with no
+    # extra file (placeholders only - it holds no real credential). The optional,
+    # gitignored backend/.env.docker is applied on top: put your own local values
+    # there (e.g. sandbox keys), never in the template. Later files win.
+    env_file:
+      - path: ./backend/.env.example
+        required: true
+      - path: ./backend/.env.docker
+        required: false
+    environment:
+      NODE_ENV: development
+      PORT: 3001
+      # Service DNS — NOT localhost. These three override anything in the env file.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-massular}:${POSTGRES_PASSWORD:-massular_dev}@postgres:5432/${POSTGRES_DB:-massular}
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-massular}:${RABBITMQ_PASSWORD:-massular_dev}@rabbitmq:5672
+    ports:
+      - "${BACKEND_HOST_PORT:-3001}:3001"
+    volumes:
+      - uploads_data:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      backend-migrate:
+        condition: service_completed_successfully
+
+  # ----------------------------------------------------------- storefront ---
+  frontend:
+    build:
+      context: ./frontend
+      target: runner
+      args:
+        # NEXT_PUBLIC_* are inlined at BUILD time and are read by the BROWSER,
+        # so this is the host-visible URL, not the Docker service name.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
+        NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${NEXT_PUBLIC_GOOGLE_CLIENT_ID:-}
+        NEXT_PUBLIC_SUPPORT_URL: ${NEXT_PUBLIC_SUPPORT_URL:-}
+    container_name: massular_frontend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+    ports:
+      - "${FRONTEND_HOST_PORT:-3000}:3000"
+    depends_on:
+      backend:
+        condition: service_started
+
+  # ---------------------------------------------------------------- admin ---
+  admin:
+    build:
+      context: ./admin
+      target: runner
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_ADMIN_API_URL:-http://localhost:3001/api/v1}
+    container_name: massular_admin
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3002
+      HOSTNAME: 0.0.0.0
+    ports:
+      - "${ADMIN_HOST_PORT:-3002}:3002"
+    depends_on:
+      backend:
+        condition: service_started
 
 volumes:
-  mysql_data:
+  postgres_data:
   redis_data:
   rabbitmq_data:
+  uploads_data:

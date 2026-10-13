@@ -109,9 +109,11 @@ test.describe('Authentication', () => {
       data: { email: process.env.ADMIN_EMAIL, password: process.env.ADMIN_PASSWORD },
     });
     test.skip(!login.ok(), 'admin creds not available');
-    const { accessToken } = await login.json();
+    // H4: the admin token only exists as the httpOnly session cookie.
+    const adminToken = (await request.storageState()).cookies.find((c) => c.name === 'ms_admin_access')?.value;
+    expect(adminToken).toBeTruthy();
     const res = await request.get(`${API_URL}/users/me`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
+      headers: { Authorization: `Bearer ${adminToken}` },
     });
     expect([401, 403]).toContain(res.status()); // admin secret ≠ customer secret
   });

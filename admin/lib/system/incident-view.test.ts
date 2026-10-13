@@ -23,7 +23,7 @@ test('duration: firstSeen → lastSeen humanized (s/m/h/d)', () => {
 
 test('drawer related links only for present refs', () => {
   const links = incidentLinks({ requestId: 'req-1', orderId: 'o1', paymentId: null, shipmentId: null } as never);
-  assert.deepEqual(links.map((l) => l.label), ['Request', 'Order']);
+  assert.deepEqual(links.map((l) => l.label), ['Request', 'Pesanan']);
   assert.equal(links[0].href, '/system/requests/req-1');
   assert.deepEqual(incidentLinks({} as never), []);
 });

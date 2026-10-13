@@ -2,7 +2,7 @@ import { validateEnv } from '../../src/common/config/env.validation';
 
 const VALID: Record<string, string> = {
   NODE_ENV: 'production',
-  DATABASE_URL: 'mysql://u:p@db:3306/app',
+  DATABASE_URL: 'postgresql://u:p@db:5432/app',
   REDIS_URL: 'redis://redis:6379',
   JWT_ACCESS_SECRET: 'a'.repeat(32),
   JWT_REFRESH_SECRET: 'b'.repeat(32),
@@ -12,6 +12,8 @@ const VALID: Record<string, string> = {
   CORS_ORIGINS: 'https://shop.example.com',
   // Required in staging/production (M5); part of a valid production baseline.
   CHECKOUT_IDEMPOTENCY_ENABLED: 'true',
+  // Required in staging/production (B3): one reverse proxy in front of the API.
+  TRUST_PROXY_HOPS: '1',
 };
 
 const valid = (over: Record<string, string | undefined> = {}) => ({ ...VALID, ...over });
@@ -24,6 +26,22 @@ describe('validateEnv', () => {
   it('fails fast on missing core infrastructure', () => {
     expect(() => validateEnv(valid({ DATABASE_URL: undefined }))).toThrow(/DATABASE_URL/);
     expect(() => validateEnv(valid({ REDIS_URL: undefined }))).toThrow(/REDIS_URL/);
+  });
+
+  describe('H4: admin session lifetime', () => {
+    it.each(['8h', '12h', '30m'])('accepts JWT_ADMIN_ACCESS_TTL=%s', (ttl) => {
+      expect(() => validateEnv(valid({ JWT_ADMIN_ACCESS_TTL: ttl }))).not.toThrow();
+    });
+    it.each(['6d', '1d', '24h', '7d'])('refuses JWT_ADMIN_ACCESS_TTL=%s at boot (days-long admin tokens)', (ttl) => {
+      expect(() => validateEnv(valid({ JWT_ADMIN_ACCESS_TTL: ttl }))).toThrow(/JWT_ADMIN_ACCESS_TTL/);
+    });
+    it('unset is fine (defaults to 8h)', () => {
+      expect(() => validateEnv(valid({ JWT_ADMIN_ACCESS_TTL: undefined }))).not.toThrow();
+    });
+    it('METRICS_TOKEN, when set, must be long', () => {
+      expect(() => validateEnv(valid({ METRICS_TOKEN: 'short' }))).toThrow(/METRICS_TOKEN/);
+      expect(() => validateEnv(valid({ METRICS_TOKEN: 'm'.repeat(40) }))).not.toThrow();
+    });
   });
 
   describe('secrets', () => {

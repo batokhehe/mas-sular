@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { ADMIN_AUTH_TOKEN_EVENT, api, ApiError, getAuthToken, setAuthToken } from './api';
+import { ADMIN_AUTH_TOKEN_EVENT, api, ApiError, clearAdminSessionMarker, hasAdminSessionMarker, notifyAuthChanged } from './api';
 import {
   ADMIN_PERMISSIONS_EVENT,
   clearStoredPermissions,
@@ -17,6 +17,7 @@ export type AdminProfile = {
   email: string;
   name: string;
   isActive: boolean;
+  role?: string | null;
   permissions?: string[];
 };
 
@@ -30,8 +31,10 @@ export async function logoutAdmin() {
       method: 'POST',
     });
   } finally {
-    setAuthToken(null);
+    // The API cleared the httpOnly cookie and revoked the session; drop local UI state.
+    clearAdminSessionMarker();
     clearStoredPermissions();
+    notifyAuthChanged();
   }
 }
 
@@ -110,7 +113,7 @@ export function useAdminLogout() {
   return useMutation<void, ApiError>({
     mutationFn: logoutAdmin,
     onSettled() {
-      setAuthToken(null);
+      clearAdminSessionMarker();
       clearStoredPermissions();
       queryClient.clear();
       router.replace('/login');
@@ -118,6 +121,7 @@ export function useAdminLogout() {
   });
 }
 
+/** Session presence only (the marker cookie carries no token); /admin/auth/me is authoritative. */
 export function isAdminAuthenticated() {
-  return Boolean(getAuthToken());
+  return hasAdminSessionMarker();
 }

@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardTitle } from '@/components/ui/card';
 import { AdminOrder, AdminShipment } from '@/lib/admin';
+import { shipmentStatusLabel } from '@/lib/status-labels';
 
 export type ShipmentFormValues = {
   orderId: string;
@@ -69,7 +70,7 @@ export function ShipmentForm({
       <form onSubmit={handleSubmit} className="mt-4 space-y-6">
         <div className="grid gap-4 lg:grid-cols-2">
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Order</span>
+            <span>Pesanan</span>
             <select
               value={values.orderId}
               onChange={(event) => handleChange('orderId', event.target.value)}
@@ -84,7 +85,7 @@ export function ShipmentForm({
             </select>
           </label>
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Provider</span>
+            <span>Penyedia</span>
             <input
               value={values.provider}
               onChange={(event) => handleChange('provider', event.target.value)}
@@ -93,7 +94,7 @@ export function ShipmentForm({
             />
           </label>
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Service</span>
+            <span>Layanan</span>
             <input
               value={values.service}
               onChange={(event) => handleChange('service', event.target.value)}
@@ -102,7 +103,7 @@ export function ShipmentForm({
             />
           </label>
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Cost</span>
+            <span>Biaya</span>
             <input
               type="number"
               min={0}
@@ -121,13 +122,13 @@ export function ShipmentForm({
             >
               {statusOptions.map((status) => (
                 <option key={status} value={status}>
-                  {status}
+                  {shipmentStatusLabel(status)}
                 </option>
               ))}
             </select>
           </label>
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Tracking number</span>
+            <span>Nomor resi</span>
             <input
               value={values.trackingNumber ?? ''}
               onChange={(event) => handleChange('trackingNumber', event.target.value)}
@@ -135,7 +136,7 @@ export function ShipmentForm({
             />
           </label>
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Tracking URL</span>
+            <span>URL pelacakan</span>
             <input
               type="url"
               value={values.trackingUrl ?? ''}
@@ -149,7 +150,7 @@ export function ShipmentForm({
           <Button type="submit" disabled={isSubmitting}>{submitLabel}</Button>
           {onDelete ? (
             <Button type="button" className="bg-white text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50" disabled={isDeleting} onClick={onDelete}>
-              Delete
+              Hapus
             </Button>
           ) : null}
         </div>

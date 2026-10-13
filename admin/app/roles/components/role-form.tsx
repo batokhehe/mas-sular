@@ -51,7 +51,7 @@ export function RoleForm({
       <form onSubmit={handleSubmit} className="mt-4 space-y-6">
         <div className="grid gap-4 lg:grid-cols-2">
           <label className="space-y-2 text-sm text-gray-700">
-            <span>Name</span>
+            <span>Nama</span>
             <input
               value={name}
               onChange={(event) => setName(event.target.value)}
@@ -60,7 +60,7 @@ export function RoleForm({
             />
           </label>
           <label className="space-y-2 text-sm text-gray-700 col-span-full">
-            <span>Description</span>
+            <span>Deskripsi</span>
             <textarea
               value={description}
               onChange={(event) => setDescription(event.target.value)}
@@ -71,7 +71,7 @@ export function RoleForm({
         </div>
 
         <div className="space-y-3">
-          <p className="text-xs uppercase tracking-wide text-gray-500">Permissions</p>
+          <p className="text-xs uppercase tracking-wide text-gray-500">Izin</p>
           <div className="grid gap-3 sm:grid-cols-2">
             {permissions.map((permission) => (
               <label

@@ -1,5 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { badgesFor, groupChannels, type PublicPaymentChannel } from './channel-view.ts'
 import { formatCountdown, isExpired, remainingMs } from './countdown.ts'
 
@@ -119,4 +121,27 @@ test('the selector renders exactly what the API returns — no COD injected', ()
 
 test('an empty API response renders no payment options at all (nothing synthetic)', () => {
   assert.deepEqual(groupChannels([]), [])
+})
+
+// ------------------------- payment service fee display -------------------------
+// Page wiring pinned in source (no component-render harness here); the money
+// itself is computed and tested by the backend.
+
+const stripComments = (src: string) => src.replace(/\{\s*\/\*[\s\S]*?\*\/\s*\}/g, '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1')
+const source = (p: string) => stripComments(readFileSync(join(process.cwd(), p), 'utf8'))
+
+test('order detail lists "Biaya Layanan" for every gateway order, straight from Order.paymentServiceFee', () => {
+  const page = source('app/orders/page.tsx')
+  assert.match(page, /order\.paymentMethod === 'GATEWAY' \? \(/)
+  assert.match(page, /<span className="text-muted-foreground">Biaya Layanan<\/span>\s*<span>\{formatIDR\(order\.paymentServiceFee\)\}<\/span>/)
+  assert.match(page, /formatIDR\(order\.totalPrice\)/) // total stays the backend value
+})
+
+test('gateway payment page shows the recorded attempt split, never recomputed', () => {
+  const page = source('app/payment/gateway/[paymentId]/page.tsx')
+  assert.match(page, /gateway\.amountBreakdown \? \(/)
+  for (const field of ['amountBreakdown.baseAmount', 'amountBreakdown.serviceFee', 'amountBreakdown.total']) {
+    assert.ok(page.includes(`formatIDR(gateway.${field})`), `renders ${field}`)
+  }
+  assert.equal(/baseAmount \+|serviceFee \+|\+ gateway\.amountBreakdown/.test(page), false, 'no client-side fee math')
 })

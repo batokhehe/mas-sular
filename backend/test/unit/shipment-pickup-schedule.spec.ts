@@ -92,6 +92,7 @@ function buildTx() {
     order: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     orderEvent: { create: jest.fn().mockResolvedValue({}) },
     notificationOutbox: { create: jest.fn().mockResolvedValue({}) },
+    outboxEvent: { create: jest.fn().mockResolvedValue({}) },
   };
 }
 

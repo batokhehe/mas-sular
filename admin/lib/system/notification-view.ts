@@ -74,28 +74,28 @@ export function buildTimeline(n: {
   nextAttemptAt: string | null;
   lastError: string | null;
 }): TimelineStep[] {
-  const steps: TimelineStep[] = [{ label: 'Queued', at: n.createdAt, tone: 'ok' }];
+  const steps: TimelineStep[] = [{ label: 'Diantrekan', at: n.createdAt, tone: 'ok' }];
 
   if (n.attempts <= 0) {
     // Not picked up by the sender worker yet.
-    steps.push({ label: 'Sending', at: n.nextAttemptAt, tone: 'pending', detail: 'Waiting for the sender worker' });
+    steps.push({ label: 'Mengirim', at: n.nextAttemptAt, tone: 'pending', detail: 'Menunggu worker pengirim' });
     return steps;
   }
 
   for (let attempt = 1; attempt <= n.attempts; attempt += 1) {
-    steps.push({ label: attempt === 1 ? 'Sending' : `Retry #${attempt - 1}`, at: null, tone: 'ok' });
+    steps.push({ label: attempt === 1 ? 'Mengirim' : `Coba ulang #${attempt - 1}`, at: null, tone: 'ok' });
     const isLast = attempt === n.attempts;
-    if (!isLast) steps.push({ label: 'Failed', at: null, tone: 'error' });
+    if (!isLast) steps.push({ label: 'Gagal', at: null, tone: 'error' });
   }
 
   if (n.status === 'SENT') {
-    steps.push({ label: 'Sent', at: n.sentAt, tone: 'ok' });
+    steps.push({ label: 'Terkirim', at: n.sentAt, tone: 'ok' });
   } else if (n.status === 'FAILED') {
-    steps.push({ label: 'Failed', at: null, tone: 'error', detail: n.lastError ?? undefined });
+    steps.push({ label: 'Gagal', at: null, tone: 'error', detail: n.lastError ?? undefined });
   } else {
     // PENDING after ≥1 attempt: last attempt failed, another retry is scheduled.
-    steps.push({ label: 'Failed', at: null, tone: 'error', detail: n.lastError ?? undefined });
-    steps.push({ label: `Retry #${n.attempts}`, at: n.nextAttemptAt, tone: 'pending', detail: 'Scheduled' });
+    steps.push({ label: 'Gagal', at: null, tone: 'error', detail: n.lastError ?? undefined });
+    steps.push({ label: `Coba ulang #${n.attempts}`, at: n.nextAttemptAt, tone: 'pending', detail: 'Terjadwal' });
   }
   return steps;
 }
@@ -106,9 +106,9 @@ export function buildTimeline(n: {
 export function updatedAgoLabel(updatedAtMs: number, nowMs: number): string {
   if (!updatedAtMs) return '—';
   const s = Math.max(0, Math.floor((nowMs - updatedAtMs) / 1000));
-  if (s < 5) return 'just now';
-  if (s < 60) return `${s}s ago`;
-  return `${Math.floor(s / 60)}m ago`;
+  if (s < 5) return 'baru saja';
+  if (s < 60) return `${s} dtk lalu`;
+  return `${Math.floor(s / 60)} mnt lalu`;
 }
 
 // ---------------- Filter persistence ----------------

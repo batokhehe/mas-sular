@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OrderStatus, ShipmentStatus } from '@prisma/client';
+import { paxelStatusDisplayLabel } from './shipment-display-label';
 
 export interface MappedStatus {
   mapped: ShipmentStatus;
@@ -13,36 +14,50 @@ function norm(raw: string): string {
 
 // Provider-specific status dictionaries (keyed by normalized provider status).
 /**
- * Paxel's real status vocabulary, from the webhook examples in the Paxel
- * eCommerce API Postman collection. Each mapping below is backed by the note
- * text Paxel ships with that status; codes whose meaning the collection does
- * NOT establish are deliberately absent so they fall through to UNKNOWN rather
- * than being guessed from the acronym:
+ * Paxel's status vocabulary. Every code below is mapped from Paxel's OWN definition,
+ * onto the EXISTING internal lifecycle (no new ShipmentStatus values):
  *
- *   HAPH, FAILED3PL, ONHOLD3PL, ODL, ODLXL, POLXL
+ *   Paxel documentation (Webhook > Shipment Status Mapping):
+ *     RTP    Courier is on the way to pickup location -> CREATED
+ *     COL    Courier has arrived at pickup location -> WAITING_PICKUP
+ *     PAPV   Courier has picked up your shipment    -> PICKED_UP
+ *     POLXL  Package on Origin Locker               -> IN_TRANSIT
+ *     ODLXL  Package on Destination Locker          -> IN_TRANSIT
+ *     HAPH   Hold at Paxel Home                     -> IN_TRANSIT
+ *     COD    Courier has arrived at destination     -> OUT_FOR_DELIVERY
+ *     ODL    Courier has arrived in Destination Locker -> OUT_FOR_DELIVERY (existing mapping)
+ *     PDO    Delivery is Completed                  -> DELIVERED
+ *     PRJL   Pickup cancelled by courier            -> FAILED
+ *     RAP    Re Attempt Pickup                      -> FAILED (existing mapping)
  *
- * The locker states (ODL/ODLXL/POLXL) are the tempting ones — "shipment on
- * destination locker" could plausibly be OUT_FOR_DELIVERY or DELIVERED, and
- * guessing wrong would either notify a customer early or mark an undelivered
- * parcel as done. UNKNOWN is the honest answer until Paxel documents them.
+ *   Customer-facing Paxel descriptions use the original provider code, so internal
+ *   status mapping remains unchanged and cannot replace a Paxel-specific label.
  *
- * The generic keys are kept alongside: they cost nothing and cover a provider
- * that starts returning plain words.
+ *   FAILED3PL and ONHOLD3PL have display descriptions but no internal lifecycle
+ *   mapping; they remain UNKNOWN / recorded-only until their transition behavior
+ *   is defined.
+ *
+ * The Paxel code-to-display descriptions are defined in shipment-display-label.ts.
  */
 const PAXEL: Record<string, ShipmentStatus> = {
   // --- documented Paxel codes ---
   CONFIRMED: ShipmentStatus.CREATED,
-  RTP: ShipmentStatus.WAITING_PICKUP, // driver on the way to pickup
-  COL: ShipmentStatus.WAITING_PICKUP, // driver arrived at pickup location
-  PAPV: ShipmentStatus.PICKED_UP, // "your shipment received by <driver>"
-  POL: ShipmentStatus.IN_TRANSIT, // "shipment in transit"
-  POD: ShipmentStatus.OUT_FOR_DELIVERY, // "on the way to destination"
-  COD: ShipmentStatus.OUT_FOR_DELIVERY, // "<driver> on destination"
-  PDO: ShipmentStatus.DELIVERED, // "has been delivered by <driver>"
-  PRJL: ShipmentStatus.FAILED, // rejected, shipment not ready
-  RAP: ShipmentStatus.FAILED, // failed pickup, sender uncontactable
-  UNDLM: ShipmentStatus.FAILED, // undelivered, address not found
-  RTN: ShipmentStatus.FAILED, // returning to sender (no RETURNED in the enum)
+  RTP: ShipmentStatus.CREATED, // Display: courier is on the way to pickup location.
+  COL: ShipmentStatus.WAITING_PICKUP, // Paxel doc: "Courier has arrived at pickup location"
+  PAPV: ShipmentStatus.PICKED_UP, // Paxel doc: "Courier has picked up your shipment"
+  POLXL: ShipmentStatus.IN_TRANSIT, // Paxel doc: "Package on Origin Locker"
+  ODLXL: ShipmentStatus.IN_TRANSIT, // Paxel doc: "Package on Destination Locker"
+  HAPH: ShipmentStatus.IN_TRANSIT, // Paxel doc: "Hold at Paxel Home"
+  POL: ShipmentStatus.IN_TRANSIT, // Paxel doc: "Package on Transit"
+  POD: ShipmentStatus.OUT_FOR_DELIVERY, // Paxel doc: "Courier is on the way to destination"
+  COD: ShipmentStatus.OUT_FOR_DELIVERY, // Paxel doc: "Courier has arrived at destination"
+  ODL: ShipmentStatus.OUT_FOR_DELIVERY, // Existing internal mapping; display uses the Paxel code.
+  PDO: ShipmentStatus.DELIVERED, // Paxel doc: "Delivery is completed"
+  PRJL: ShipmentStatus.FAILED, // Paxel doc: "Pickup cancelled by courier"
+  RAP: ShipmentStatus.FAILED, // Existing internal mapping; display uses the Paxel code.
+  UNDLM: ShipmentStatus.FAILED, // Paxel doc: "Shipment Undelivered"
+  RTN: ShipmentStatus.FAILED, // Paxel doc: "Package Returned" (no RETURNED enum)
+  // FAILED3PL and ONHOLD3PL intentionally remain unmapped to an internal state.
   // Confirmed against Paxel staging, not inferred from the acronym: POST
   // /shipments/:awb/cancel returned 200 echoing our cancellation_reason, after
   // which GET /shipments/:awb reported latest_status "CCS" carrying that same
@@ -81,9 +96,33 @@ const JNE: Record<string, ShipmentStatus> = {
   DELIVERED: ShipmentStatus.DELIVERED,
   POD: ShipmentStatus.DELIVERED,
   CANCELLED: ShipmentStatus.CANCELLED,
+  // KNOWN GAP - the tracking poller cannot tell a failed PICKUP from a failed shipment.
+  // The JNE tracking adapter exposes one free-text field, `cnote.pod_status`, and no
+  // JNE tracking status vocabulary exists in this codebase (these generic words carry
+  // no cited JNE source; the only real sample is 'DELIVERED'). So a pod_status of
+  // FAILED / RETURNED / UNDELIVERED stays the terminal FAILED it always was, even though
+  // the JNE WEBHOOK records FAILED PICKUP without a transition. Reconciling the two
+  // needs JNE's documented pod_status values (or a sandbox capture); inventing a
+  // mapping here could either fail a live parcel or hide a real failure.
+  // Pinned by test/unit/jne-poller-failure-vocabulary.spec.ts.
   FAILED: ShipmentStatus.FAILED,
   RETURNED: ShipmentStatus.FAILED,
   UNDELIVERED: ShipmentStatus.FAILED,
+
+  // --- JNE Webhook Status V2 summary statuses (documented) ---
+  // DELIVERED is shared with the list above.
+  SUCCESS_PICKUP: ShipmentStatus.PICKED_UP,
+  SHIPPED: ShipmentStatus.IN_TRANSIT, // in JNE's network, not yet delivered
+  // No returned state exists; FAILED is the existing precedent for a parcel going back
+  // to the sender (Paxel RTN, JNE RETURNED above) - the delivery has definitively failed.
+  RETURN_TO_SHIPPER: ShipmentStatus.FAILED,
+  // Deliberately ABSENT - both fall through to UNKNOWN, so the shipment keeps its last
+  // known state and the JNE webhook records the event instead of guessing:
+  //   FAILED PICKUP     an unsuccessful pickup ATTEMPT, not a failed shipment. FAILED is
+  //                     terminal (tracking stops; a later SUCCESS PICKUP or DELIVERED could
+  //                     never apply) and would tell the customer "gagal dikirim".
+  //   SHIPMENT PROBLEM  JNE does not say whether it is terminal; FAILED would end tracking
+  //                     and an in-transit state would hide the problem.
 };
 
 const DICTIONARIES: Record<string, Record<string, ShipmentStatus>> = { paxel: PAXEL, jne: JNE };
@@ -176,7 +215,7 @@ export class ShipmentStatusMapper {
     return TERMINAL_SHIPMENT_STATUSES.has(status);
   }
 
-  label(status: ShipmentStatus): string {
-    return STATUS_LABEL[status] ?? status;
+  label(status: ShipmentStatus, provider?: string, providerStatus?: string): string {
+    return paxelStatusDisplayLabel(provider, providerStatus) ?? STATUS_LABEL[status] ?? status;
   }
 }

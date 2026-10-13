@@ -35,8 +35,8 @@ export function UploadReceipt({ mode, reference, onUploaded }: UploadReceiptProp
     return (
       <div className="flex flex-col items-center gap-2 rounded-lg border border-green-200 bg-green-50 p-6 text-center">
         <CheckCircle2 className="size-8 text-green-600" />
-        <p className="font-semibold">Receipt submitted</p>
-        <p className="text-sm text-muted-foreground">Your payment is now under review.</p>
+        <p className="font-semibold">Bukti pembayaran terkirim</p>
+        <p className="text-sm text-muted-foreground">Pembayaran Anda sedang diverifikasi.</p>
       </div>
     )
   }
@@ -54,7 +54,7 @@ export function UploadReceipt({ mode, reference, onUploaded }: UploadReceiptProp
       }}
     >
       <div className="space-y-2">
-        <Label htmlFor="receipt">Payment receipt (image)</Label>
+        <Label htmlFor="receipt">Bukti pembayaran (gambar)</Label>
         <Input
           id="receipt"
           type="file"
@@ -66,17 +66,17 @@ export function UploadReceipt({ mode, reference, onUploaded }: UploadReceiptProp
       {preview ? (
         <div className="overflow-hidden rounded-lg border">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={preview} alt="Receipt preview" className="max-h-64 w-full object-contain" />
+          <img src={preview} alt="Pratinjau bukti pembayaran" className="max-h-64 w-full object-contain" />
         </div>
       ) : null}
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="space-y-2">
-          <Label htmlFor="bankName">Bank name (optional)</Label>
+          <Label htmlFor="bankName">Nama bank (opsional)</Label>
           <Input id="bankName" value={bankName} onChange={(e) => setBankName(e.target.value)} />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="accountName">Account name (optional)</Label>
+          <Label htmlFor="accountName">Nama pemilik rekening (opsional)</Label>
           <Input id="accountName" value={accountName} onChange={(e) => setAccountName(e.target.value)} />
         </div>
       </div>
@@ -84,11 +84,11 @@ export function UploadReceipt({ mode, reference, onUploaded }: UploadReceiptProp
       <Button type="submit" className="w-full" disabled={!file || mutation.isPending}>
         {mutation.isPending ? (
           <>
-            <Loader2 className="mr-2 size-4 animate-spin" /> Uploading…
+            <Loader2 className="mr-2 size-4 animate-spin" /> Mengunggah…
           </>
         ) : (
           <>
-            <Upload className="mr-2 size-4" /> Submit receipt
+            <Upload className="mr-2 size-4" /> Kirim bukti pembayaran
           </>
         )}
       </Button>

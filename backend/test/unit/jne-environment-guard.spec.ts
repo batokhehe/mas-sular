@@ -164,7 +164,6 @@ describe('loadShippingConfig — JNE environment', () => {
 describe('assertShippingConfigured applies the guard', () => {
   const shipping = (over: Partial<JneProviderConfig>): ShippingConfig =>
     ({
-      originPostalCode: '40111',
       allowMockRates: false,
       paxel: { enabled: false, baseUrl: 'https://paxel.test', timeoutMs: 500, maxRetry: 0, needInsurance: false, defaultDimension: '30x35x20' },
       jne: jne(over),
@@ -185,7 +184,7 @@ describe('assertShippingConfigured applies the guard', () => {
 describe('validateEnv', () => {
   const VALID: Record<string, string> = {
     NODE_ENV: 'production',
-    DATABASE_URL: 'mysql://u:p@db:3306/app',
+    DATABASE_URL: 'postgresql://u:p@db:5432/app',
     REDIS_URL: 'redis://redis:6379',
     JWT_ACCESS_SECRET: 'a'.repeat(32),
     JWT_REFRESH_SECRET: 'b'.repeat(32),
@@ -194,10 +193,34 @@ describe('validateEnv', () => {
     APP_URL: 'https://shop.example.com',
     CORS_ORIGINS: 'https://shop.example.com',
     CHECKOUT_IDEMPOTENCY_ENABLED: 'true',
+    TRUST_PROXY_HOPS: '1',
     JNE_ENABLED: 'true',
     JNE_API_KEY: 'k',
     JNE_USERNAME: 'u',
     JNE_ORIGIN_CODE: 'BDO10000',
+    // JNE /pickupcashless master data is now required whenever JNE is enabled
+    // (placeholder fixture values, not real JNE data). These cases are about the
+    // environment/endpoint guard, so they carry a complete, valid set.
+    JNE_PICKUP_NAME: 'Pickup Test',
+    JNE_PICKUP_PIC: 'Pic Test',
+    JNE_PICKUP_PIC_PHONE: '081200000001',
+    JNE_PICKUP_ADDRESS: 'Jl. Test 1',
+    JNE_PICKUP_DISTRICT: 'District Test',
+    JNE_PICKUP_CITY: 'City Test',
+    JNE_PICKUP_SERVICE: 'Domestic',
+    JNE_PICKUP_VEHICLE: 'Motor',
+    JNE_BRANCH: 'BRANCH-TEST',
+    JNE_CUST_ID: 'CUST-TEST',
+    JNE_MERCHANT_ID: 'MERCHANT-TEST',
+    JNE_SHIPPER_NAME: 'Shipper Test',
+    JNE_SHIPPER_ADDR1: 'Jl. Test 1',
+    JNE_SHIPPER_ADDR2: 'Kel. Test',
+    JNE_SHIPPER_CITY: 'City Test',
+    JNE_SHIPPER_ZIP: '40111',
+    JNE_SHIPPER_REGION: 'Region Test',
+    JNE_SHIPPER_CONTACT: 'Contact Test',
+    JNE_SHIPPER_PHONE: '081200000002',
+    JNE_TYPE: 'PICKUP',
   };
   const valid = (over: Record<string, string | undefined> = {}) => ({ ...VALID, ...over });
 

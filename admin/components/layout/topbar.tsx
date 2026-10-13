@@ -19,7 +19,7 @@ export function Topbar() {
           <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
           <input
             className="h-11 w-full rounded-xl border border-gray-200 bg-gray-50 pl-11 pr-20 text-sm outline-none transition focus:border-[#465fff] focus:bg-white"
-            placeholder="Search or type command..."
+            placeholder="Cari atau ketik perintah..."
           />
           <span className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-500">
             ⌘ K
@@ -49,7 +49,7 @@ export function Topbar() {
           disabled={logoutMutation.isPending}
         >
           <LogOut className="h-4 w-4" />
-          Logout
+          Keluar
         </button>
       </div>
     </header>

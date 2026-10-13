@@ -6,11 +6,13 @@ import { useRouter } from 'next/navigation'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { AlertCircle, Loader2, MapPin, Banknote, CreditCard, Wallet, ChevronRight, Check } from 'lucide-react'
+import { AlertCircle, Loader2, MapPin, Banknote, CreditCard, Wallet, ChevronRight, Check, Plus } from 'lucide-react'
 import { StorefrontShell } from '@/components/storefront/shell'
 import { Empty } from '@/components/common/empty'
+import { AddressForm } from '@/components/account/address-form'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
@@ -24,13 +26,16 @@ import {
 } from '@/components/ui/select'
 import { useQuery } from '@tanstack/react-query'
 import { paymentsApi } from '@/lib/api/payments.api'
-import { badgesFor, groupChannels } from '@/lib/payments/channel-view'
+import { badgesFor, groupChannels, resolveChannelSelection } from '@/lib/payments/channel-view'
 import { useMe } from '@/lib/query/hooks/use-me'
 import { useCheckout } from '@/lib/query/hooks/use-checkout'
 import { useCheckoutSummary } from '@/lib/query/hooks/use-checkout-summary'
 import { useShippingOptions } from '@/lib/query/hooks/use-shipping-options'
-import { useCartStore } from '@/lib/stores/cart-store'
+import { useCreateAddress } from '@/lib/query/hooks/use-addresses'
+import { useCartStore, selectedLines, toCheckoutItems, lineUnitPrice, lineTotal } from '@/lib/stores/cart-store'
+import { useCheckoutAddressStore } from '@/lib/stores/checkout-address-store'
 import { useLastOrderStore } from '@/lib/stores/last-order-store'
+import { ADDRESS_BOOK_FROM_CHECKOUT, resolveCheckoutAddressId } from '@/lib/address/checkout-address'
 import { ApiError } from '@/lib/api/client'
 import { formatIDR } from '@/lib/utils/format'
 import { formatAddressLine } from '@/lib/address/format-address'
@@ -39,13 +44,13 @@ import { groupShippingOptions, serviceLabel } from '@/lib/checkout/shipping-grou
 import { ProviderLogo } from '@/components/checkout/provider-logo'
 import { cn } from '@/lib/utils'
 import type { CreateOrderInput } from '@/lib/api/orders.api'
-import type { ShippingOption } from '@/lib/types/models'
+import type { Address, ShippingOption } from '@/lib/types/models'
 
 const schema = z.object({
-  address_id: z.string().min(1, 'Select a delivery address'),
+  address_id: z.string().min(1, 'Pilih alamat pengiriman'),
   courier: z.enum(['paxel', 'jne']),
   // The selector works in CHANNEL codes from GET /payments/channels only.
-  payment_channel: z.string().min(1, 'Select a payment method'),
+  payment_channel: z.string().min(1, 'Pilih metode pembayaran'),
   voucher_code: z.string().optional(),
 })
 type FormValues = z.infer<typeof schema>
@@ -69,8 +74,13 @@ export default function CheckoutPage() {
   const router = useRouter()
   const { data: me, isLoading: meLoading } = useMe()
   const lines = useCartStore((s) => s.lines)
-  const clearCart = useCartStore((s) => s.clear)
+  const removeLines = useCartStore((s) => s.removeLines)
   const setLastOrder = useLastOrderStore((s) => s.setOrder)
+  const chosenAddressId = useCheckoutAddressStore((s) => s.addressId)
+  const chooseAddress = useCheckoutAddressStore((s) => s.choose)
+  const clearChosenAddress = useCheckoutAddressStore((s) => s.clear)
+  const createAddress = useCreateAddress()
+  const [addAddressOpen, setAddAddressOpen] = useState(false)
   const checkout = useCheckout()
 
   // Idempotency key — stable across retries; regenerated only on a 422 mismatch.
@@ -87,11 +97,18 @@ export default function CheckoutPage() {
     formState: { errors },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: { courier: 'jne', payment_channel: 'MANUAL_TRANSFER', voucher_code: '' },
+    // No channel until GET /payments/channels answers (P0-3): see the effect below.
+    defaultValues: { courier: 'jne', payment_channel: '', voucher_code: '' },
   })
 
   const addresses = me?.addresses ?? []
-  const checkoutItems = useMemo(() => lines.map((l) => ({ product_id: l.productId, qty: l.qty })), [lines])
+  // P2 #6: checkout is ONLY the lines ticked in the cart. The selection is stored on
+  // the cart lines themselves, so a refresh or Back keeps the same subset; nothing
+  // here ever falls back to the whole cart. Quotes, the summary and the order all
+  // use this one list (ids + quantities - the server prices and validates them).
+  const checkoutLines = useMemo(() => selectedLines(lines), [lines])
+  const checkoutItems = useMemo(() => toCheckoutItems(lines), [lines])
+  const unselectedCount = lines.length - checkoutLines.length
 
   // 1) Shipping availability is the courier's answer, not ours. DeliveryCoverage
   //    is deactivated for this flow: it used to gate the quote request, so a
@@ -133,6 +150,13 @@ export default function CheckoutPage() {
   }, [voucherCodeRaw])
 
   const selectedChannelCode = watch('payment_channel')
+  // P0-3: the selection is always one of the returned channels - manual transfer
+  // is preselected only when the backend offers it (an active bank account exists).
+  useEffect(() => {
+    if (!channelsQuery.data) return
+    const next = resolveChannelSelection(getValues('payment_channel'), channelsQuery.data.channels)
+    if (next !== getValues('payment_channel')) setValue('payment_channel', next)
+  }, [channelsQuery.data, getValues, setValue])
   const selectedChannel = useMemo(
     () => channelSections.flatMap((s) => s.channels).find((c) => c.code === selectedChannelCode),
     [channelSections, selectedChannelCode],
@@ -152,36 +176,51 @@ export default function CheckoutPage() {
   })
   const summaryRows = summaryQuery.data ? checkoutSummaryRows(summaryQuery.data) : []
 
-  // Preselect the default (or only) address once it loads; don't override a later
-  // manual choice.
+  // P2 #7: start from the customer's own choice (kept across an Address Book round
+  // trip), else their default address, else their only one. Runs only while nothing
+  // is selected, so it never overrides a choice made on this page.
   useEffect(() => {
     if (addresses.length > 0 && !getValues('address_id')) {
-      const preselect = addresses.find((a) => a.isDefault) ?? addresses[0]
-      setValue('address_id', preselect.id)
+      const preselect = resolveCheckoutAddressId(addresses, chosenAddressId)
+      if (preselect) setValue('address_id', preselect)
     }
-  }, [addresses, getValues, setValue])
+  }, [addresses, chosenAddressId, getValues, setValue])
+
+  // P2 #18: an address added from Checkout becomes the delivery address right away.
+  const onAddressCreated = (created: Address) => {
+    setValue('address_id', created.id, { shouldValidate: true })
+    chooseAddress(created.id)
+    setAddAddressOpen(false)
+  }
 
   const onSubmit = (values: FormValues) => {
     setConflict(null)
-    if (!selectedShipping) return
+    if (!selectedShipping || checkoutItems.length === 0) return
+    // P0-3: never fall back to a method the customer was not offered.
+    if (!selectedChannel) return
     const input: CreateOrderInput = {
       address_id: values.address_id,
       // courier kept for backward compatibility; provider+service drive the quote.
       courier: (selectedShipping.provider as 'paxel' | 'jne') ?? values.courier,
       shipping_provider: selectedShipping.provider,
       shipping_service: selectedShipping.service,
-      payment_method: (selectedChannel?.method ?? 'BANK_TRANSFER') as CreateOrderInput['payment_method'],
+      payment_method: selectedChannel.method as CreateOrderInput['payment_method'],
       // Only meaningful for GATEWAY; the backend ignores it otherwise.
-      payment_channel: selectedChannel?.method === 'GATEWAY' ? selectedChannel.code : undefined,
+      payment_channel: selectedChannel.method === 'GATEWAY' ? selectedChannel.code : undefined,
       voucher_code: values.voucher_code || undefined,
       items: checkoutItems,
     }
+    // Exactly what this request buys - captured now, so a later selection change
+    // cannot alter which lines are removed. Lines (product + topping set), not product
+    // ids: an unselected "Baso + Keju" must survive buying a plain "Baso".
+    const purchasedLineIds = checkoutLines.map((line) => line.lineId)
     checkout.mutate(
       { input, idempotencyKey: idempotencyKey.current },
       {
         onSuccess: (order) => {
           setLastOrder(order)
-          clearCart()
+          removeLines(purchasedLineIds) // unselected items stay in the cart
+          clearChosenAddress() // the next checkout starts from the default address again
           // A gateway order carries its normalized instructions; send the customer
           // straight to the payment page. Everything else keeps the existing route.
           const gateway = order as unknown as { paymentInstruction?: unknown; payment?: { id?: string } }
@@ -205,7 +244,7 @@ export default function CheckoutPage() {
   if (meLoading) {
     return (
       <StorefrontShell>
-        <div className="mx-auto max-w-2xl px-4 py-16 text-center text-muted-foreground">Loading…</div>
+        <div className="mx-auto max-w-2xl px-4 py-16 text-center text-muted-foreground">Memuat…</div>
       </StorefrontShell>
     )
   }
@@ -214,11 +253,11 @@ export default function CheckoutPage() {
     return (
       <StorefrontShell>
         <Empty
-          title="Please sign in to checkout"
-          description="You need an account to place an order."
+          title="Silakan masuk untuk checkout"
+          description="Anda perlu akun untuk membuat pesanan."
           action={
             <Button asChild className="mt-2">
-              <Link href="/login">Sign in</Link>
+              <Link href="/login">Masuk</Link>
             </Button>
           }
         />
@@ -230,10 +269,27 @@ export default function CheckoutPage() {
     return (
       <StorefrontShell>
         <Empty
-          title="Your cart is empty"
+          title="Keranjang Anda kosong"
           action={
             <Button asChild className="mt-2">
-              <Link href="/catalog">Browse catalog</Link>
+              <Link href="/catalog">Lihat Katalog</Link>
+            </Button>
+          }
+        />
+      </StorefrontShell>
+    )
+  }
+
+  // Items in the cart but none ticked: nothing to buy. Never fall back to the cart.
+  if (checkoutLines.length === 0) {
+    return (
+      <StorefrontShell>
+        <Empty
+          title="Belum ada item yang dipilih"
+          description="Pilih item yang ingin dibeli di keranjang, lalu lanjutkan ke checkout."
+          action={
+            <Button asChild className="mt-2">
+              <Link href="/cart">Kembali ke keranjang</Link>
             </Button>
           }
         />
@@ -254,13 +310,13 @@ export default function CheckoutPage() {
               <Card className="space-y-3 p-4">
                 <div className="flex items-center gap-2">
                   <MapPin className="size-4 text-primary" />
-                  <Label className="text-base font-semibold">Delivery address</Label>
+                  <Label className="text-base font-semibold">Alamat pengiriman</Label>
                 </div>
                 {addresses.length === 0 ? (
                   <div className="space-y-2">
-                    <p className="text-sm text-muted-foreground">You need a delivery address to check out.</p>
-                    <Button asChild variant="outline" size="sm">
-                      <Link href="/account/addresses">Add address first</Link>
+                    <p className="text-sm text-muted-foreground">Tambahkan alamat pengiriman untuk melanjutkan checkout.</p>
+                    <Button type="button" size="sm" onClick={() => setAddAddressOpen(true)}>
+                      <Plus className="mr-1 size-4" /> Tambah alamat
                     </Button>
                   </div>
                 ) : (
@@ -271,9 +327,19 @@ export default function CheckoutPage() {
                       const selected = addresses.find((a) => a.id === field.value)
                       return (
                         <div className="space-y-2">
-                          <Select value={field.value} onValueChange={field.onChange}>
+                          <Select
+                            value={field.value}
+                            onValueChange={(id) => {
+                              // Radix's hidden native <select> reports '' while its options
+                              // are still mounting. That is not a customer choice, and it
+                              // used to wipe the preselected default address (P2 #7).
+                              if (!id) return
+                              field.onChange(id)
+                              chooseAddress(id)
+                            }}
+                          >
                             <SelectTrigger>
-                              <SelectValue placeholder="Select an address" />
+                              <SelectValue placeholder="Pilih alamat" />
                             </SelectTrigger>
                             <SelectContent>
                               {addresses.map((a) => (
@@ -291,6 +357,14 @@ export default function CheckoutPage() {
                               <p className="mt-0.5 text-muted-foreground">{formatAddressLine(selected)}</p>
                             </div>
                           ) : null}
+                          <div className="flex flex-wrap gap-2">
+                            <Button type="button" variant="outline" size="sm" onClick={() => setAddAddressOpen(true)}>
+                              <Plus className="mr-1 size-4" /> Tambah alamat
+                            </Button>
+                            <Button asChild variant="outline" size="sm">
+                              <Link href={ADDRESS_BOOK_FROM_CHECKOUT}>Ubah alamat</Link>
+                            </Button>
+                          </div>
                         </div>
                       )
                     }}
@@ -300,12 +374,22 @@ export default function CheckoutPage() {
 
               </Card>
 
-              {/* Order items (real cart lines) */}
+              {/* Order items (the cart lines selected for this checkout) */}
               <Card className="space-y-3 p-4">
-                <h2 className="font-semibold">Order ({lines.length} items)</h2>
+                <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                  <h2 className="font-semibold">Pesanan ({checkoutLines.length} item)</h2>
+                  {unselectedCount > 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      {unselectedCount} item yang tidak dipilih tetap di keranjang ·{' '}
+                      <Link href="/cart" className="font-medium text-primary hover:underline">
+                        Ubah pilihan
+                      </Link>
+                    </p>
+                  ) : null}
+                </div>
                 <ul className="space-y-3">
-                  {lines.map((line) => (
-                    <li key={line.productId} className="flex items-center gap-3">
+                  {checkoutLines.map((line) => (
+                    <li key={line.lineId} className="flex items-center gap-3">
                       <div className="relative size-14 shrink-0 overflow-hidden rounded-lg bg-muted">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={line.imageUrl} alt={line.name} className="size-full object-cover" />
@@ -315,10 +399,15 @@ export default function CheckoutPage() {
                       </div>
                       <div className="min-w-0 flex-1">
                         <p className="line-clamp-1 text-sm font-medium">{line.name}</p>
-                        <p className="text-xs text-muted-foreground">{formatIDR(line.price)} each</p>
+                        {line.toppings.length > 0 && (
+                          <p className="line-clamp-2 text-xs text-muted-foreground">
+                            + {line.toppings.map((t) => `${t.name} (${formatIDR(t.price)})`).join(', ')}
+                          </p>
+                        )}
+                        <p className="text-xs text-muted-foreground">{formatIDR(lineUnitPrice(line))} / item</p>
                       </div>
-                      {/* Real unit price × real qty (same per-line summation as cartSubtotal). */}
-                      <p className="text-sm font-semibold text-primary">{formatIDR(line.price * line.qty)}</p>
+                      {/* Unit price (product + toppings) × qty (same per-line summation as cartSubtotal). */}
+                      <p className="text-sm font-semibold text-primary">{formatIDR(lineTotal(line))}</p>
                     </li>
                   ))}
                 </ul>
@@ -327,17 +416,17 @@ export default function CheckoutPage() {
               {/* Shipping service + payment */}
               <Card className="space-y-4 p-4">
                 <div className="space-y-2">
-                  <Label>Shipping method</Label>
+                  <Label>Metode pengiriman</Label>
                   {!selectedAddress ? (
-                    <p className="text-sm text-muted-foreground">Select a delivery address first.</p>
+                    <p className="text-sm text-muted-foreground">Pilih alamat pengiriman terlebih dahulu.</p>
                   ) : shippingQuery.isFetching ? (
                     <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Loader2 className="size-4 animate-spin" /> Loading shipping options…
+                      <Loader2 className="size-4 animate-spin" /> Memuat opsi pengiriman…
                     </p>
                   ) : shippingQuery.isError ? (
-                    <p className="text-sm text-destructive">Unable to load shipping options for this address.</p>
+                    <p className="text-sm text-destructive">Gagal memuat opsi pengiriman untuk alamat ini.</p>
                   ) : shippingOptions.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No shipping services available.</p>
+                    <p className="text-sm text-muted-foreground">Tidak ada layanan pengiriman yang tersedia.</p>
                   ) : (
                     // Grouped by the backend's stable `provider` id — presentation
                     // only; each button still selects the exact option object.
@@ -396,6 +485,10 @@ export default function CheckoutPage() {
                         <div key={i} className="h-14 animate-pulse rounded-xl bg-muted" />
                       ))}
                     </div>
+                  ) : channelSections.length === 0 ? (
+                    <p role="status" className="text-sm text-muted-foreground">
+                      Belum ada metode pembayaran yang tersedia. Silakan coba lagi nanti.
+                    </p>
                   ) : (
                     <Controller
                       control={control}
@@ -454,17 +547,17 @@ export default function CheckoutPage() {
             {/* Right column — sticky summary */}
             <div className="space-y-4 lg:sticky lg:top-24 lg:self-start">
               <Card className="space-y-2 p-4">
-                <Label htmlFor="voucher">Voucher code (optional)</Label>
-                <Input id="voucher" placeholder="e.g. WELCOME10" {...register('voucher_code')} />
+                <Label htmlFor="voucher">Kode voucher (opsional)</Label>
+                <Input id="voucher" placeholder="mis. WELCOME10" {...register('voucher_code')} />
               </Card>
 
               <Card className="space-y-3 p-4">
-                <h2 className="font-semibold">Order summary</h2>
+                <h2 className="font-semibold">Ringkasan pesanan</h2>
                 {/* Every amount below is rendered verbatim from the backend
                     /checkout/summary response — the client performs no money math. */}
                 {!canPlaceOrder ? (
                   <p className="text-xs text-muted-foreground">
-                    Select a delivery address and shipping service to see the total.
+                    Pilih alamat dan layanan pengiriman untuk melihat total.
                   </p>
                 ) : summaryQuery.isLoading ? (
                   <div className="space-y-2" aria-busy="true">
@@ -474,7 +567,7 @@ export default function CheckoutPage() {
                   </div>
                 ) : summaryQuery.isError ? (
                   <p className="text-xs text-destructive">
-                    {(summaryQuery.error as Error)?.message ?? 'Unable to load the order total.'}
+                    {(summaryQuery.error as Error)?.message ?? 'Gagal memuat total pesanan.'}
                   </p>
                 ) : (
                   summaryRows.map((row) => (
@@ -499,8 +592,8 @@ export default function CheckoutPage() {
                     <AlertCircle className="mt-0.5 size-4 text-amber-600" />
                     <span>
                       {conflict === 'processing'
-                        ? 'Your order is already being processed. Wait a moment, then retry — it will not create a duplicate.'
-                        : 'Your cart changed since the last attempt. Review and place the order again.'}
+                        ? 'Pesanan Anda sedang diproses. Tunggu sebentar lalu coba lagi — pesanan tidak akan dibuat dua kali.'
+                        : 'Keranjang Anda berubah sejak percobaan terakhir. Periksa kembali lalu buat pesanan lagi.'}
                     </span>
                   </div>
                 ) : null}
@@ -513,11 +606,11 @@ export default function CheckoutPage() {
                 >
                   {checkout.isPending ? (
                     <>
-                      <Loader2 className="mr-2 size-4 animate-spin" /> Placing order…
+                      <Loader2 className="mr-2 size-4 animate-spin" /> Membuat pesanan…
                     </>
                   ) : (
                     <>
-                      Place order
+                      Buat Pesanan
                       <ChevronRight className="ml-1 size-4" />
                     </>
                   )}
@@ -526,6 +619,26 @@ export default function CheckoutPage() {
             </div>
           </div>
         </form>
+
+        {/*
+          Rendered OUTSIDE the checkout <form>: AddressForm is a form of its own, and a
+          portal still bubbles React's submit event to its React parents - inside, saving
+          an address would also submit the order.
+        */}
+        <Dialog open={addAddressOpen} onOpenChange={setAddAddressOpen}>
+          {/* Scrolls on short phones - the form is taller than a 667px screen. */}
+          <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Alamat baru</DialogTitle>
+            </DialogHeader>
+            <AddressForm
+              pending={createAddress.isPending}
+              onSubmit={(values) =>
+                createAddress.mutate({ ...values, isDefault: values.isDefault ?? false }, { onSuccess: onAddressCreated })
+              }
+            />
+          </DialogContent>
+        </Dialog>
       </section>
     </StorefrontShell>
   )

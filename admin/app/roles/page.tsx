@@ -21,32 +21,32 @@ export default function RolesPage() {
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.roles}>
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-xl font-semibold text-gray-900">Role & Permission Management</h2>
-          <p className="mt-1 text-sm text-gray-500">RBAC matrix for admin, manager, staff, and customer capabilities.</p>
+          <h2 className="text-xl font-semibold text-gray-900">Manajemen Peran & Izin</h2>
+          <p className="mt-1 text-sm text-gray-500">Matriks RBAC untuk kemampuan admin, manajer, staf, dan pelanggan.</p>
         </div>
         <PermissionGate permissions={ROUTE_PERMISSIONS.roleCreate}>
           <Link href="/roles/new">
-            <Button>Create Role</Button>
+            <Button>Buat Peran</Button>
           </Link>
         </PermissionGate>
       </div>
       <Card>
-        <CardTitle>Roles</CardTitle>
+        <CardTitle>Peran</CardTitle>
         <div className="mt-4 overflow-x-auto">
           {isLoading ? (
-            <p className="p-6 text-sm text-gray-500">Loading roles...</p>
+            <p className="p-6 text-sm text-gray-500">Memuat peran...</p>
           ) : isError ? (
-            <p className="p-6 text-sm text-red-600">Unable to load roles. Please reauthenticate.</p>
+            <p className="p-6 text-sm text-red-600">Gagal memuat peran. Silakan masuk ulang.</p>
           ) : data?.length === 0 ? (
-            <p className="p-6 text-sm text-gray-500">No roles found.</p>
+            <p className="p-6 text-sm text-gray-500">Tidak ada peran ditemukan.</p>
           ) : (
             <table className="w-full min-w-[760px] text-left text-sm">
               <thead>
                 <tr className="border-b border-gray-100 text-xs uppercase text-gray-400">
-                  <th className="py-3 font-medium">Role</th>
-                  <th className="py-3 font-medium">Description</th>
-                  <th className="py-3 font-medium">Permissions</th>
-                  <th className="py-3 font-medium">Actions</th>
+                  <th className="py-3 font-medium">Peran</th>
+                  <th className="py-3 font-medium">Deskripsi</th>
+                  <th className="py-3 font-medium">Izin</th>
+                  <th className="py-3 font-medium">Aksi</th>
                 </tr>
               </thead>
               <tbody>
@@ -59,7 +59,7 @@ export default function RolesPage() {
                     </td>
                     <td className="py-4">
                       <Link href={`/roles/${role.id}`} className="text-sm font-medium text-[#465fff] hover:text-indigo-700">
-                        View
+                        Lihat
                       </Link>
                     </td>
                   </tr>

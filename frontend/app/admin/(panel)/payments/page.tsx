@@ -7,6 +7,7 @@ import { useVerifyPayment } from '@/lib/query/hooks/use-verify-payment'
 import { useRejectPayment } from '@/lib/query/hooks/use-reject-payment'
 import { usePermissions } from '@/lib/auth/use-permissions'
 import { formatIDR } from '@/lib/utils/format'
+import { paymentStatusLabel } from '@/lib/invoice/labels'
 import {
   confirmVerifyPayment,
   confirmRejectPayment,
@@ -58,15 +59,15 @@ function ReceiptDialog({ url, orderNumber }: { url: string; orderNumber: string 
     <Dialog>
       <DialogTrigger asChild>
         <Button variant="outline" size="sm">
-          <Eye className="mr-1 size-4" /> Receipt
+          <Eye className="mr-1 size-4" /> Bukti
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Receipt · {orderNumber}</DialogTitle>
+          <DialogTitle>Bukti pembayaran · {orderNumber}</DialogTitle>
         </DialogHeader>
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={url} alt="Payment receipt" className="max-h-[70vh] w-full rounded-md object-contain" />
+        <img src={url} alt="Bukti pembayaran" className="max-h-[70vh] w-full rounded-md object-contain" />
       </DialogContent>
     </Dialog>
   )
@@ -80,7 +81,7 @@ export default function AdminPaymentsPage() {
   const reject = useRejectPayment()
 
   if (!can('Payment.read')) {
-    return <Empty title="No access" description="You do not have permission to view payments." />
+    return <Empty title="Tidak ada akses" description="Anda tidak memiliki izin untuk melihat pembayaran." />
   }
 
   const payments: Payment[] = data ?? []
@@ -92,7 +93,7 @@ export default function AdminPaymentsPage() {
     showLoading()
     try {
       await verify.mutateAsync({ id })
-      await showSuccess('Payment Verified', 'Order has moved to PROCESSING.')
+      await showSuccess('Pembayaran terverifikasi', 'Pesanan berpindah ke status Diproses.')
     } catch (error) {
       await showError(error)
     }
@@ -104,7 +105,7 @@ export default function AdminPaymentsPage() {
     showLoading()
     try {
       await reject.mutateAsync({ id, note })
-      await showSuccess('Payment Rejected', 'Inventory has been restored.')
+      await showSuccess('Pembayaran ditolak', 'Stok telah dikembalikan.')
     } catch (error) {
       await showError(error)
     }
@@ -113,7 +114,7 @@ export default function AdminPaymentsPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold">Payment Verification</h1>
+        <h1 className="text-2xl font-bold">Verifikasi Pembayaran</h1>
         <Select value={status} onValueChange={(v) => setStatus(v as PaymentStatus)}>
           <SelectTrigger className="w-56">
             <SelectValue />
@@ -121,7 +122,7 @@ export default function AdminPaymentsPage() {
           <SelectContent>
             {STATUS_OPTIONS.map((s) => (
               <SelectItem key={s} value={s}>
-                {s}
+                {paymentStatusLabel(s)}
               </SelectItem>
             ))}
           </SelectContent>
@@ -137,17 +138,17 @@ export default function AdminPaymentsPage() {
       ) : isError ? (
         <ErrorState onRetry={() => void refetch()} />
       ) : payments.length === 0 ? (
-        <Empty title={`No ${status} payments`} description="Nothing to show for this filter." />
+        <Empty title={`Tidak ada pembayaran berstatus ${paymentStatusLabel(status)}`} description="Tidak ada data untuk filter ini." />
       ) : (
         <div className="overflow-x-auto rounded-lg border">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Order</TableHead>
-                <TableHead>Customer</TableHead>
-                <TableHead>Amount</TableHead>
+                <TableHead>Pesanan</TableHead>
+                <TableHead>Pelanggan</TableHead>
+                <TableHead>Jumlah</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead className="text-right">Aksi</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -158,7 +159,7 @@ export default function AdminPaymentsPage() {
                   <TableCell>{formatIDR(p.amount)}</TableCell>
                   <TableCell>
                     <div className="flex flex-col items-start gap-1">
-                      <Badge variant={statusVariant(p.status)}>{p.status}</Badge>
+                      <Badge variant={statusVariant(p.status)}>{paymentStatusLabel(p.status)}</Badge>
                       {p.firstReminderAt || p.secondReminderAt ? (
                         <Badge variant="outline">REMINDER_SENT</Badge>
                       ) : null}
@@ -176,7 +177,7 @@ export default function AdminPaymentsPage() {
                           ) : (
                             <Check className="mr-1 size-4" />
                           )}
-                          Verify
+                          Verifikasi
                         </Button>
                       ) : null}
                       {UPLOADABLE.has(p.status) && can('Payment.reject') ? (
@@ -191,7 +192,7 @@ export default function AdminPaymentsPage() {
                           ) : (
                             <X className="mr-1 size-4" />
                           )}
-                          Reject
+                          Tolak
                         </Button>
                       ) : null}
                     </div>

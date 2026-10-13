@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import { Plus_Jakarta_Sans, Geist_Mono } from 'next/font/google'
-import { Analytics } from '@vercel/analytics/next'
+import { SiteAnalytics } from '@/components/analytics'
 import { ThemeProvider } from '@/components/theme-provider'
 import { Providers } from '@/app/providers'
 import { Toaster } from 'sonner'
@@ -17,12 +17,12 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'Bakso Mas Sular - Premium Indonesian Meatballs',
-  description: 'Order delicious premium Indonesian meatballs online. Fresh bakso urat, bakso mercon, bakso keju delivered to your door.',
+  title: 'Bakso Mas Sular - Bakso Premium Khas Indonesia',
+  description: 'Pesan bakso premium khas Indonesia secara online. Bakso urat, bakso mercon, dan bakso keju segar diantar sampai ke rumah Anda.',
   keywords: ['bakso', 'meatball', 'indonesian food', 'baso urat', 'delivery'],
   openGraph: {
-    title: 'Bakso Mas Sular - Premium Indonesian Meatballs',
-    description: 'Order delicious premium Indonesian meatballs online.',
+    title: 'Bakso Mas Sular - Bakso Premium Khas Indonesia',
+    description: 'Pesan bakso premium khas Indonesia secara online.',
     type: 'website',
   },
 }
@@ -57,7 +57,7 @@ export default function RootLayout({
             <Toaster position="top-center" richColors />
           </ThemeProvider>
         </Providers>
-        {process.env.NODE_ENV === 'production' && <Analytics />}
+        {process.env.NODE_ENV === 'production' && <SiteAnalytics />}
       </body>
     </html>
   )

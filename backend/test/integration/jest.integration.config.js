@@ -1,6 +1,6 @@
 /**
  * Integration / E2E suite (Phase 10D). Runs the real relay, consumers, and
- * lifecycle worker against real MySQL + RabbitMQ provisioned by Testcontainers.
+ * lifecycle worker against real PostgreSQL + RabbitMQ provisioned by Testcontainers.
  *
  * REQUIRES A RUNNING DOCKER DAEMON. Without Docker these specs cannot start.
  *

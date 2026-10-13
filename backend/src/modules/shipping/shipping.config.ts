@@ -17,25 +17,50 @@ export const JNE_SANDBOX_HOSTS = ['apiv2.jne.co.id:10202'];
 export type JneEnvironment = 'sandbox' | 'production';
 
 /**
- * The GLOBAL automatic pickup policy (PAXELBOX-61AG.3.32).
+ * The shop's single courier pickup rule (PAXELBOX-61AG.3.32, P1 #13).
  *
- * Paxel's create endpoint requires `pickup_datetime`, and until this phase there
- * was nothing in the application from which one could be derived, so Paxel could
- * only be booked by an admin who had chosen a slot. The business has now stated a
- * single rule for the whole shop, and these four values are its entire vocabulary.
+ * One rule for EVERY courier, not one per provider: the shop has one packing
+ * run and one pickup appointment a day. Paxel's create endpoint requires
+ * `pickup_datetime` and is sent the resolved slot. The same slot is recorded on the
+ * JNE shipment and is what JNE /pickupcashless sends as PICKUP_DATE / PICKUP_TIME.
+ *
+ * The cutoff and the pickup are DIFFERENT times and must never be conflated:
+ *   cutoffTime - the latest payment VERIFICATION still eligible for today's run
+ *   pickupTime - the courier appointment itself, deliberately later than the cutoff
  *
  * There is deliberately no START_TIME/END_TIME pair and no operating-hours,
  * weekend or holiday model: none of those exist in this repository, and a
  * placeholder for one would be shipped to a courier as if it were true.
  */
-export interface PaxelAutoPickupConfig {
-  enabled: boolean;
+export interface PickupPolicy {
   /** IANA zone the cutoff and pickup times are wall-clock in (e.g. Asia/Jakarta). */
   timeZone: string;
   /** `HH:mm`. The latest payment VERIFICATION still eligible for today's pickup. */
   cutoffTime: string;
   /** `HH:mm`. The appointment itself — may legitimately fall after the cutoff. */
   pickupTime: string;
+}
+
+/**
+ * THE business rule: cut-off 15:00 WIB, pickup 17:00 WIB. The single source of
+ * truth for both couriers — providers never carry their own copy. The
+ * PAXEL_PICKUP_* variables may override it per environment, but an unset
+ * variable means THIS rule, never "no rule". Wall-clock in `timeZone`, so the
+ * host/container timezone is irrelevant.
+ */
+export const DEFAULT_PICKUP_POLICY: Readonly<PickupPolicy> = Object.freeze({
+  timeZone: 'Asia/Jakarta',
+  cutoffTime: '15:00',
+  pickupTime: '17:00',
+});
+
+/**
+ * Paxel's automatic booking switch plus the shared policy it books against.
+ * `enabled` is Paxel-only - it decides whether Paxel may book on its own - but
+ * the three times are always the shared {@link PickupPolicy}.
+ */
+export interface PaxelAutoPickupConfig extends PickupPolicy {
+  enabled: boolean;
 }
 
 export interface PaxelProviderConfig {
@@ -89,6 +114,109 @@ export interface PaxelProviderConfig {
   autoPickup?: PaxelAutoPickupConfig;
 }
 
+/**
+ * JNE `/pickupcashless` enumerations, exactly as the JNE documentation supplied by
+ * the project owner defines them. Case-sensitive: the documented spelling is sent.
+ */
+export const JNE_PICKUP_SERVICES = ['Domestic', 'Intracity', 'All'] as const;
+export const JNE_PICKUP_VEHICLES = ['Motor', 'Mobil', 'Truck'] as const;
+export const JNE_PICKUP_TYPES = ['DROP', 'PICKUP'] as const;
+
+/**
+ * Static merchant / pickup master data for JNE `/pickupcashless`. It is JNE account
+ * and warehouse configuration, not per-order data, so it lives in the environment
+ * rather than the database. Every value is REQUIRED when JNE is enabled; none has a
+ * default, because each one is either issued by JNE (BRANCH, CUST_ID, MERCHANT_ID)
+ * or is a real-world fact about the shop that must never be invented.
+ */
+export interface JnePickupConfig {
+  pickupName?: string;
+  pickupPic?: string;
+  pickupPicPhone?: string;
+  pickupAddress?: string;
+  pickupDistrict?: string;
+  pickupCity?: string;
+  pickupService?: string;
+  pickupVehicle?: string;
+  branch?: string;
+  custId?: string;
+  merchantId?: string;
+  shipperName?: string;
+  shipperAddr1?: string;
+  shipperAddr2?: string;
+  shipperCity?: string;
+  shipperZip?: string;
+  shipperRegion?: string;
+  shipperContact?: string;
+  shipperPhone?: string;
+  type?: string;
+}
+
+/** Config field → environment variable. The ONE list both validation layers use. */
+export const JNE_PICKUP_ENV: Readonly<Record<keyof JnePickupConfig, string>> = Object.freeze({
+  pickupName: 'JNE_PICKUP_NAME',
+  pickupPic: 'JNE_PICKUP_PIC',
+  pickupPicPhone: 'JNE_PICKUP_PIC_PHONE',
+  pickupAddress: 'JNE_PICKUP_ADDRESS',
+  pickupDistrict: 'JNE_PICKUP_DISTRICT',
+  pickupCity: 'JNE_PICKUP_CITY',
+  pickupService: 'JNE_PICKUP_SERVICE',
+  pickupVehicle: 'JNE_PICKUP_VEHICLE',
+  branch: 'JNE_BRANCH',
+  custId: 'JNE_CUST_ID',
+  merchantId: 'JNE_MERCHANT_ID',
+  shipperName: 'JNE_SHIPPER_NAME',
+  shipperAddr1: 'JNE_SHIPPER_ADDR1',
+  shipperAddr2: 'JNE_SHIPPER_ADDR2',
+  shipperCity: 'JNE_SHIPPER_CITY',
+  shipperZip: 'JNE_SHIPPER_ZIP',
+  shipperRegion: 'JNE_SHIPPER_REGION',
+  shipperContact: 'JNE_SHIPPER_CONTACT',
+  shipperPhone: 'JNE_SHIPPER_PHONE',
+  type: 'JNE_TYPE',
+});
+
+const JNE_PICKUP_ENUMS: Partial<Record<keyof JnePickupConfig, readonly string[]>> = {
+  pickupService: JNE_PICKUP_SERVICES,
+  pickupVehicle: JNE_PICKUP_VEHICLES,
+  type: JNE_PICKUP_TYPES,
+};
+
+/** Trimmed value, or undefined for absent / blank - an empty placeholder means "unset". */
+function presentOrUndefined(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+export function loadJnePickupConfig(env: NodeJS.ProcessEnv = process.env): JnePickupConfig {
+  const out: JnePickupConfig = {};
+  for (const [field, key] of Object.entries(JNE_PICKUP_ENV) as Array<[keyof JnePickupConfig, string]>) {
+    out[field] = presentOrUndefined(env[key]);
+  }
+  return out;
+}
+
+/**
+ * Every missing or invalid `/pickupcashless` configuration value, as the operator
+ * would fix it (env var names). Empty means complete. Used at boot (env.validation)
+ * and again before every booking, so a hand-built config cannot skip the check.
+ */
+export function jnePickupConfigIssues(pickup: JnePickupConfig | undefined): string[] {
+  const issues: string[] = [];
+  for (const [field, key] of Object.entries(JNE_PICKUP_ENV) as Array<[keyof JnePickupConfig, string]>) {
+    const value = pickup?.[field];
+    if (!value) {
+      issues.push(`${key} is required`);
+      continue;
+    }
+    const allowed = JNE_PICKUP_ENUMS[field];
+    if (allowed && !allowed.includes(value)) {
+      issues.push(`${key} must be one of ${allowed.join(' | ')}`);
+    }
+  }
+  return issues;
+}
+
 export interface JneProviderConfig {
   enabled: boolean;
   /**
@@ -107,6 +235,12 @@ export interface JneProviderConfig {
   originCode?: string;
   timeoutMs: number;
   maxRetry: number;
+  /**
+   * `/pickupcashless` merchant and pickup master data. Optional on the TYPE so every
+   * hand-built config keeps compiling; absent or incomplete means booking refuses
+   * before any request is built (see jnePickupConfigIssues).
+   */
+  pickup?: JnePickupConfig;
 }
 
 /**
@@ -126,10 +260,15 @@ export interface RajaOngkirConfig {
 }
 
 export interface ShippingConfig {
-  /** Store origin postal code, used when the request origin is a placeholder. */
-  originPostalCode: string;
   paxel: PaxelProviderConfig;
   jne: JneProviderConfig;
+  /**
+   * The shared courier pickup rule, resolved once by `loadShippingConfig`.
+   * Optional only so a hand-built config (every existing test) stays valid;
+   * consumers read it through {@link pickupPolicyOf}, which falls back to
+   * {@link DEFAULT_PICKUP_POLICY} rather than to "no rule".
+   */
+  pickupPolicy?: PickupPolicy;
   /** RajaOngkir — the RATE source behind the `jne` quotation provider. */
   rajaongkir: RajaOngkirConfig;
   /**
@@ -194,14 +333,35 @@ export function isValidTimeZone(timeZone: string | undefined): boolean {
   }
 }
 
+/**
+ * The effective pickup rule for this environment. Each PAXEL_PICKUP_* variable
+ * is an optional per-environment override (the names predate the rule becoming
+ * shop-wide); unset or blank falls back to {@link DEFAULT_PICKUP_POLICY}. An
+ * override that IS set but invalid is still refused at boot by
+ * `assertShippingConfigured` - it is never silently replaced by the default.
+ */
+export function loadPickupPolicy(env: NodeJS.ProcessEnv = process.env): PickupPolicy {
+  return {
+    timeZone: env.PAXEL_PICKUP_TIMEZONE?.trim() || DEFAULT_PICKUP_POLICY.timeZone,
+    cutoffTime: env.PAXEL_PICKUP_CUTOFF_TIME?.trim() || DEFAULT_PICKUP_POLICY.cutoffTime,
+    pickupTime: env.PAXEL_PICKUP_DEFAULT_TIME?.trim() || DEFAULT_PICKUP_POLICY.pickupTime,
+  };
+}
+
+/** The shared pickup rule a config carries, or the business default when absent. */
+export function pickupPolicyOf(config: Pick<ShippingConfig, 'pickupPolicy'>): PickupPolicy {
+  return config.pickupPolicy ?? DEFAULT_PICKUP_POLICY;
+}
+
 export function loadShippingConfig(env: NodeJS.ProcessEnv = process.env): ShippingConfig {
   // Cast, not parse: an unrecognised value must survive to assertJneEnvironment()
   // and be REJECTED there. Coercing it to a default here would silently downgrade
   // a misspelt "production" into sandbox, which is the failure mode this guard is
   // for. env.validation rejects it at boot; this is the second line.
   const jneEnvironment = env.JNE_ENVIRONMENT as JneEnvironment | undefined;
+  const pickupPolicy = loadPickupPolicy(env);
   return {
-    originPostalCode: env.SHIPPING_ORIGIN_POSTAL_CODE ?? '40111',
+    pickupPolicy,
     allowMockRates: env.NODE_ENV !== 'production',
     paxel: {
       enabled: bool(env.PAXEL_ENABLED),
@@ -214,16 +374,9 @@ export function loadShippingConfig(env: NodeJS.ProcessEnv = process.env): Shippi
       timeoutMs: positiveInt(env.PAXEL_TIMEOUT_MS, 8_000),
       maxRetry: positiveInt(env.PAXEL_MAX_RETRY, 2),
       defaultDimension: env.PAXEL_DEFAULT_DIMENSION ?? '30x35x20',
-      autoPickup: {
-        enabled: bool(env.PAXEL_AUTO_PICKUP_ENABLED),
-        // NO fallbacks. An automatic courier appointment is a real-world
-        // commitment, so every value behind it is stated explicitly or the boot
-        // guard rejects the configuration - a default timezone or a default
-        // cutoff would silently schedule pickups nobody agreed to.
-        timeZone: env.PAXEL_PICKUP_TIMEZONE ?? '',
-        cutoffTime: env.PAXEL_PICKUP_CUTOFF_TIME ?? '',
-        pickupTime: env.PAXEL_PICKUP_DEFAULT_TIME ?? '',
-      },
+      // Same computed policy as the top-level `pickupPolicy` below - one source,
+      // never a second copy. `enabled` stays Paxel's own switch.
+      autoPickup: { enabled: bool(env.PAXEL_AUTO_PICKUP_ENABLED), ...pickupPolicy },
     },
     jne: {
       enabled: bool(env.JNE_ENABLED),
@@ -241,6 +394,7 @@ export function loadShippingConfig(env: NodeJS.ProcessEnv = process.env): Shippi
       originCode: env.JNE_ORIGIN_CODE,
       timeoutMs: positiveInt(env.JNE_TIMEOUT_MS, 8_000),
       maxRetry: positiveInt(env.JNE_MAX_RETRY, 2),
+      pickup: loadJnePickupConfig(env),
     },
     rajaongkir: {
       // Enabled only with an explicit key: without one the provider must not
@@ -331,23 +485,31 @@ export function assertShippingConfigured(config: ShippingConfig): void {
   if (config.paxel.enabled && !isPaxelDimension(config.paxel.defaultDimension)) {
     missing.push('PAXEL_DEFAULT_DIMENSION (expected LxWxH in cm, each side 1-50)');
   }
-  // Automatic pickup scheduling (PAXELBOX-61AG.3.32). Checked whenever it is
-  // switched on, independently of PAXEL_ENABLED: a half-configured schedule is a
-  // boot error, not something to discover at the first settlement of the day.
-  const autoPickup = config.paxel.autoPickup;
-  if (autoPickup?.enabled) {
-    if (!isValidTimeZone(autoPickup.timeZone)) {
-      missing.push('PAXEL_PICKUP_TIMEZONE (expected an IANA timezone, e.g. Asia/Jakarta)');
+  // The shared pickup rule (PAXELBOX-61AG.3.32, P1 #13). Validated whenever it
+  // is in use: ALWAYS for the shop-wide policy, because JNE records the same slot
+  // whether or not Paxel books automatically; and for Paxel's own copy when its
+  // automatic booking is switched on. Unset values already fell back to the
+  // business default in loadPickupPolicy, so only a set-but-invalid override can
+  // fail here - a boot error, not something to discover at the first settlement.
+  const pickupPolicies: PickupPolicy[] = [pickupPolicyOf(config)];
+  if (config.paxel.autoPickup?.enabled) pickupPolicies.push(config.paxel.autoPickup);
+  const addOnce = (message: string) => {
+    if (!missing.includes(message)) missing.push(message);
+  };
+  for (const policy of pickupPolicies) {
+    if (!isValidTimeZone(policy.timeZone)) {
+      addOnce('PAXEL_PICKUP_TIMEZONE (expected an IANA timezone, e.g. Asia/Jakarta)');
     }
-    if (parseHhMm(autoPickup.cutoffTime) === null) {
-      missing.push('PAXEL_PICKUP_CUTOFF_TIME (expected HH:mm, 24-hour)');
+    if (parseHhMm(policy.cutoffTime) === null) {
+      addOnce('PAXEL_PICKUP_CUTOFF_TIME (expected HH:mm, 24-hour)');
     }
-    if (parseHhMm(autoPickup.pickupTime) === null) {
-      missing.push('PAXEL_PICKUP_DEFAULT_TIME (expected HH:mm, 24-hour)');
+    if (parseHhMm(policy.pickupTime) === null) {
+      addOnce('PAXEL_PICKUP_DEFAULT_TIME (expected HH:mm, 24-hour)');
     }
-    // NOT validated: that the pickup time falls after the cutoff. It legitimately
-    // may not - the cutoff is the last eligible VERIFICATION time, not the last
-    // pickup time - so ordering the two would reject the business's own rule.
+    // NOT validated: that the pickup time falls after the cutoff. With the
+    // business rule it does (15:00 -> 17:00), but the cutoff is the last eligible
+    // VERIFICATION time, not the last pickup time, so ordering them is not the
+    // rule and must not be enforced as if it were.
   }
   if (config.jne.enabled) {
     if (!config.jne.apiKey) missing.push('JNE_API_KEY');

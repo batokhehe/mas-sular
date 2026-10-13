@@ -36,14 +36,14 @@ function escapeHtml(value: string): string {
 
 // ---------------- Confirmations ----------------
 
-export async function confirmDelete(entity = 'Item'): Promise<boolean> {
+export async function confirmDelete(entity = 'item'): Promise<boolean> {
   const res = await Swal.fire({
     icon: 'warning',
-    title: `Delete ${entity}?`,
-    text: 'This action cannot be undone.',
+    title: `Hapus ${entity}?`,
+    text: 'Tindakan ini tidak dapat dibatalkan.',
     showCancelButton: true,
-    confirmButtonText: 'Delete',
-    cancelButtonText: 'Cancel',
+    confirmButtonText: 'Hapus',
+    cancelButtonText: 'Batal',
     confirmButtonColor: COLORS.danger,
     cancelButtonColor: COLORS.cancel,
     reverseButtons: true,
@@ -55,11 +55,11 @@ export async function confirmDelete(entity = 'Item'): Promise<boolean> {
 export async function confirmApprove(opts: { title?: string; text?: string } = {}): Promise<boolean> {
   const res = await Swal.fire({
     icon: 'question',
-    title: opts.title ?? 'Approve this item?',
+    title: opts.title ?? 'Setujui item ini?',
     text: opts.text,
     showCancelButton: true,
-    confirmButtonText: 'Confirm',
-    cancelButtonText: 'Cancel',
+    confirmButtonText: 'Konfirmasi',
+    cancelButtonText: 'Batal',
     confirmButtonColor: COLORS.primary,
     cancelButtonColor: COLORS.cancel,
     reverseButtons: true,
@@ -70,11 +70,11 @@ export async function confirmApprove(opts: { title?: string; text?: string } = {
 export async function confirmReject(opts: { title?: string; text?: string } = {}): Promise<boolean> {
   const res = await Swal.fire({
     icon: 'warning',
-    title: opts.title ?? 'Reject this item?',
+    title: opts.title ?? 'Tolak item ini?',
     text: opts.text,
     showCancelButton: true,
-    confirmButtonText: 'Reject',
-    cancelButtonText: 'Cancel',
+    confirmButtonText: 'Tolak',
+    cancelButtonText: 'Batal',
     confirmButtonColor: COLORS.danger,
     cancelButtonColor: COLORS.cancel,
     reverseButtons: true,
@@ -85,11 +85,11 @@ export async function confirmReject(opts: { title?: string; text?: string } = {}
 export async function confirmUpdate(opts: { title?: string; text?: string } = {}): Promise<boolean> {
   const res = await Swal.fire({
     icon: 'question',
-    title: opts.title ?? 'Save changes?',
+    title: opts.title ?? 'Simpan perubahan?',
     text: opts.text,
     showCancelButton: true,
-    confirmButtonText: 'Save',
-    cancelButtonText: 'Cancel',
+    confirmButtonText: 'Simpan',
+    cancelButtonText: 'Batal',
     confirmButtonColor: COLORS.primary,
     cancelButtonColor: COLORS.cancel,
     reverseButtons: true,
@@ -105,15 +105,15 @@ export async function confirmStatusChange(
 ): Promise<boolean> {
   const res = await Swal.fire({
     icon: 'question',
-    title: opts.title ?? 'Update Status?',
+    title: opts.title ?? 'Ubah status?',
     html: `<div style="font-size:15px;letter-spacing:.3px">
         <span style="font-weight:700">${escapeHtml(current)}</span>
         <span style="margin:0 8px;color:${COLORS.cancel}">&rarr;</span>
         <span style="font-weight:700">${escapeHtml(next)}</span>
       </div>`,
     showCancelButton: true,
-    confirmButtonText: 'Update',
-    cancelButtonText: 'Cancel',
+    confirmButtonText: 'Perbarui',
+    cancelButtonText: 'Batal',
     confirmButtonColor: COLORS.primary,
     cancelButtonColor: COLORS.cancel,
     reverseButtons: true,
@@ -125,22 +125,22 @@ export async function confirmStatusChange(
 
 /** Loading-modal titles, one per mutation kind. */
 export const ADMIN_LOADING_MESSAGES = {
-  create: 'Creating...',
-  update: 'Saving...',
-  delete: 'Deleting...',
-  verify: 'Verifying...',
-  reject: 'Rejecting...',
-  statusUpdate: 'Updating...',
+  create: 'Membuat...',
+  update: 'Menyimpan...',
+  delete: 'Menghapus...',
+  verify: 'Memverifikasi...',
+  reject: 'Menolak...',
+  statusUpdate: 'Memperbarui...',
 } as const;
 
 /** Success copy. Entity-specific create/delete are builders; the rest are fixed strings. */
 export const ADMIN_SUCCESS_MESSAGES = {
-  created: (entity: string) => `${entity} created successfully`,
-  updated: 'Changes saved successfully',
-  deleted: (entity: string) => `${entity} deleted successfully`,
-  paymentVerified: 'Payment verified successfully',
-  paymentRejected: 'Payment rejected successfully',
-  orderStatusUpdated: 'Order status updated successfully',
+  created: (entity: string) => `${entity} berhasil dibuat`,
+  updated: 'Perubahan berhasil disimpan',
+  deleted: (entity: string) => `${entity} berhasil dihapus`,
+  paymentVerified: 'Pembayaran berhasil diverifikasi',
+  paymentRejected: 'Pembayaran berhasil ditolak',
+  orderStatusUpdated: 'Status pesanan berhasil diperbarui',
 } as const;
 
 // ---------------- Feedback ----------------
@@ -166,7 +166,7 @@ export function showError(error: unknown): Promise<unknown> {
   Swal.close();
   return Swal.fire({
     icon: 'error',
-    title: 'Operation Failed',
+    title: 'Operasi gagal',
     text: extractErrorMessage(error),
     confirmButtonColor: COLORS.primary,
   });
@@ -226,26 +226,26 @@ export function extractErrorMessage(error: unknown): string {
     const status = (error as ApiError).status;
     if (typeof status === 'number') return statusFallback(status);
   }
-  return 'Something went wrong. Please try again.';
+  return 'Terjadi kesalahan. Silakan coba lagi.';
 }
 
 function statusFallback(status: number): string {
   switch (status) {
     case 400:
-      return 'Invalid request. Please check the form and try again.';
+      return 'Permintaan tidak valid. Periksa kembali formulir lalu coba lagi.';
     case 401:
-      return 'Your session has expired. Please sign in again.';
+      return 'Sesi Anda telah berakhir. Silakan masuk kembali.';
     case 403:
-      return 'You do not have permission to perform this action.';
+      return 'Anda tidak memiliki izin untuk melakukan tindakan ini.';
     case 404:
-      return 'The requested item was not found.';
+      return 'Data yang diminta tidak ditemukan.';
     case 409:
-      return 'This action conflicts with the current state. Please refresh and try again.';
+      return 'Tindakan ini bertentangan dengan kondisi data saat ini. Muat ulang halaman lalu coba lagi.';
     case 422:
-      return 'The submitted data was rejected. Please review and try again.';
+      return 'Data yang dikirim ditolak. Periksa kembali lalu coba lagi.';
     case 500:
-      return 'Something went wrong on our end. Please try again.';
+      return 'Terjadi kesalahan di server. Silakan coba lagi.';
     default:
-      return 'Something went wrong. Please try again.';
+      return 'Terjadi kesalahan. Silakan coba lagi.';
   }
 }

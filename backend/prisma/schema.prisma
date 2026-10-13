@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "mysql"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -143,9 +143,15 @@ model RolePermission {
   @@id([roleId, permissionId])
 }
 
+/// Customer refresh session. The presented token is `<selector>.<secret>`: the
+/// selector finds this row by unique index, and only this row's `tokenHash`
+/// (SHA-256 of the 256-bit secret) is compared - never a scan of other sessions.
+/// Rows issued before the selector existed have `selector` NULL and bcrypt hashes;
+/// they can no longer be presented and simply expire (production-readiness H2).
 model RefreshToken {
   id        String    @id @default(uuid())
   userId    String
+  selector  String?   @unique @db.VarChar(32)
   tokenHash String    @db.VarChar(255)
   familyId  String
   revokedAt DateTime?
@@ -368,7 +374,7 @@ model Category {
 model Product {
   id            String                 @id @default(uuid())
   slug          String                 @unique
-  sku           String                 @unique
+  sku           String?                @unique
   name          String
   description   String                 @db.Text
   price         Int
@@ -388,6 +394,16 @@ model Product {
   isFragile     Boolean                @default(false)
   isBestSeller  Boolean                @default(false)
   isNew         Boolean                @default(false)
+  // P2 #10: shown in the homepage "Promo Spesial Produk" section. Set in the Admin.
+  isPromoSpecial Boolean               @default(false)
+  // P2 #11: shown in the homepage "Trial Pack" section. Set in the Admin.
+  isTrialPack   Boolean                @default(false)
+  /// Canonical catalogue position, set by dragging rows in Admin -> Produk. It is the
+  /// DEFAULT ordering of every product list (sequence ASC) unless the consumer asks for
+  /// an explicit business sort (price, rating, popularity). A reorder rewrites the whole
+  /// live set to 1..N; a soft-deleted product keeps its value and is never renumbered,
+  /// so gaps are normal. Only the reorder endpoint writes it - not product CRUD.
+  sequence      Int                    @default(0)
   status        ProductStatus          @default(ACTIVE)
   stock         Int                    @default(0)
   categoryId    String
@@ -397,13 +413,34 @@ model Product {
   reservations  InventoryReservation[]
   inventories   ProductInventory[]
   transfers     StockTransfer[]
+  /// P2 gallery. images[0] (sortOrder 0) is the cover and always equals imageUrl.
+  images        ProductImage[]
   createdAt     DateTime               @default(now())
   updatedAt     DateTime               @updatedAt
   deletedAt     DateTime?
 
   @@index([categoryId, status])
   @@index([isBestSeller])
+  @@index([isPromoSpecial])
+  @@index([isTrialPack])
   @@index([deletedAt])
+  @@index([sequence])
+}
+
+/// P2 product image gallery. sortOrder is server-generated 0..N-1 (max 8); sortOrder 0
+/// is the cover and is kept equal to Product.imageUrl in the same transaction. Removing
+/// an image removes only this row - the uploaded file is never deleted.
+model ProductImage {
+  id        String   @id @default(uuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  /// New values are app-owned upload URLs (product-image-url.ts); backfilled legacy
+  /// values (e.g. /products/*.jpg) are kept verbatim.
+  url       String
+  sortOrder Int
+  createdAt DateTime @default(now())
+
+  @@unique([productId, sortOrder])
 }
 
 model Topping {
@@ -434,12 +471,12 @@ model Promo {
   description           String         @db.Text
   imageUrl              String?
   voucherType           VoucherType    @default(PERCENTAGE_DISCOUNT)
-  discountPercentage    Int?           @db.UnsignedInt
-  discountAmount        Int?           @db.UnsignedInt
-  maxDiscountAmount     Int?           @db.UnsignedInt
-  freeShippingMaxAmount Int?           @db.UnsignedInt
+  discountPercentage    Int?
+  discountAmount        Int?
+  maxDiscountAmount     Int?
+  freeShippingMaxAmount Int?
   minimumOrderAmount    Int            @default(0)
-  maxUsageCount         Int?           @db.UnsignedInt
+  maxUsageCount         Int?
   currentUsageCount     Int            @default(0)
   isNewUserOnly         Boolean        @default(false)
   isActive              Boolean        @default(true)
@@ -496,8 +533,20 @@ model Order {
   subtotal                 Int
   voucherDiscountAmount    Int                    @default(0)
   deliveryFee              Int
-  /// Immutable customer-borne gateway fee selected at checkout; legacy orders are zero.
+  /// Customer-charged gateway fee ("Biaya Layanan") of the CURRENT payment attempt;
+  /// legacy orders are zero. See payment-service-fee.ts.
   paymentServiceFee        Int                    @default(0)
+  /// Applicable Midtrans fee for the current attempt's channel (recorded in both
+  /// PAYMENT_SERVICE_FEE_ENABLED modes). Invariant: calculated = charged + absorbed.
+  paymentServiceFeeCalculated Int                 @default(0)
+  /// Part of the applicable fee borne by the merchant.
+  paymentServiceFeeAbsorbed   Int                 @default(0)
+  /// PAYMENT_SERVICE_FEE_ENABLED when the fee was calculated; null = not a gateway order / legacy.
+  paymentServiceFeeEnabled    Boolean?
+  /// Channel the fee was calculated for.
+  paymentServiceFeeChannel    String?             @db.VarChar(32)
+  /// Rule snapshot (version, type, rate, fixed part, VAT, pass-through policy).
+  paymentServiceFeeRule       Json?
   totalPrice               Int
   paymentMethod            PaymentMethod
   notes                    String?
@@ -526,6 +575,7 @@ model Order {
   voucherUsage             VoucherUsage?
   reservations             InventoryReservation[]
   internalNotes            OrderNote[]
+  invoiceTokens            OrderInvoiceToken[]
   createdAt                DateTime               @default(now())
   updatedAt                DateTime               @updatedAt
   deletedAt                DateTime?
@@ -643,6 +693,28 @@ model PaymentUploadToken {
   @@index([expiresAt])
 }
 
+/// P2 #14: expiring, revocable capability token for the customer-facing invoice
+/// page (a link an admin sends over WhatsApp). Same primitives as
+/// PaymentUploadToken - a 256-bit random secret of which only the SHA-256 hash is
+/// stored - but deliberately NOT that table: an invoice link is read-only,
+/// re-openable (not single-use), longer-lived, and scoped to an ORDER; an upload
+/// token is a single-use write capability on a payment.
+model OrderInvoiceToken {
+  id          String    @id @default(uuid())
+  tokenHash   String    @unique @db.VarChar(64)
+  orderId     String
+  expiresAt   DateTime
+  /// Set when a newer link is issued for the same order (one active link per order).
+  revokedAt   DateTime?
+  /// Admin who issued the link.
+  createdById String?   @db.VarChar(36)
+  createdAt   DateTime  @default(now())
+  order       Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([expiresAt])
+}
+
 model PaymentAccount {
   id            String   @id @default(uuid())
   bankName      String
@@ -716,6 +788,15 @@ model PaymentGatewayTransaction {
   /// reject an unambiguously older notification (see the webhook fingerprint util).
   providerStatusAt      DateTime?
   grossAmount           Int
+  /// Payment service fee snapshot of THIS attempt (null on attempts created before
+  /// it existed). grossAmount = baseAmount + serviceFeeCustomer; the gateway is
+  /// charged grossAmount and webhooks are validated against it.
+  baseAmount            Int?
+  serviceFeeCalculated  Int                      @default(0)
+  serviceFeeCustomer    Int                      @default(0)
+  serviceFeeAbsorbed    Int                      @default(0)
+  serviceFeeEnabled     Boolean?
+  serviceFeeRule        Json?
   currency              String                   @default("IDR") @db.VarChar(3)
   redirectUrl           String?                  @db.VarChar(512)
   deeplinkUrl           String?                  @db.VarChar(512)
@@ -1000,8 +1081,8 @@ model OutboxEvent {
   payload       Json
   metadata      Json?
   status        OutboxStatus @default(PENDING)
-  attempts      Int          @default(0) @db.UnsignedInt
-  maxAttempts   Int          @default(10) @db.UnsignedInt
+  attempts      Int          @default(0)
+  maxAttempts   Int          @default(10)
   nextAttemptAt DateTime     @default(now())
   lockedUntil   DateTime?
   lockedBy      String?      @db.VarChar(64)
@@ -1032,7 +1113,7 @@ model IdempotencyKey {
   endpoint            String            @db.VarChar(128)
   requestFingerprint  String            @db.VarChar(64)
   status              IdempotencyStatus @default(PROCESSING)
-  fenceToken          Int               @default(1) @db.UnsignedInt
+  fenceToken          Int               @default(1)
   ownerId             String?           @db.VarChar(64)
   ownershipAcquiredAt DateTime?
   responseStatusCode  Int?
@@ -1189,7 +1270,7 @@ model PushSubscription {
   lastSeenAt DateTime @default(now())
   createdAt  DateTime @default(now())
 
-  @@unique([adminId, token(length: 191)])
+  @@unique([adminId, token])
   @@index([adminId])
   @@index([lastSeenAt])
 }
@@ -1244,7 +1325,7 @@ model NotificationOutbox {
   template          String              @db.VarChar(128)
   payload           Json
   status            NotificationStatus  @default(PENDING)
-  attempts          Int                 @default(0) @db.UnsignedInt
+  attempts          Int                 @default(0)
   nextAttemptAt     DateTime            @default(now())
   lockedUntil       DateTime?
   lockedBy          String?             @db.VarChar(64)
@@ -1402,4 +1483,98 @@ enum JneMappingMethod {
   EXACT_NAME
   REVIEWED_ALIAS
   MANUAL
+}
+
+/// Which external system the call belongs to. An enum (not free text) so the
+/// admin filter and the retention policies can never drift from a typo.
+enum IntegrationProvider {
+  PAXEL
+  JNE
+  MIDTRANS
+}
+
+/// OUTBOUND: we called the provider. INBOUND: the provider called us (webhook).
+enum IntegrationDirection {
+  OUTBOUND
+  INBOUND
+}
+
+/// What the APPLICATION made of the exchange, which HTTP status alone cannot say:
+/// a JNE `generatecnote` answers 200 and still returns no cnote (PARSE_FAILED).
+enum IntegrationOutcome {
+  OK
+  HTTP_ERROR
+  NETWORK_ERROR
+  TIMEOUT
+  PARSE_FAILED
+  REJECTED
+}
+
+/// One record per ACTUAL external HTTP exchange — one per retry attempt outbound,
+/// one per received webhook inbound, plus (where the provider response still has to
+/// be interpreted) one application-outcome record sharing the same `operationId`.
+///
+/// Deliberately NOT SystemLog: the Performance Profiler aggregates every SystemLog
+/// row with a durationMs and no module filter, so provider latencies would corrupt
+/// the request percentiles an existing admin page shows.
+///
+/// Payloads are SANITIZED before they arrive here (integration-log.sanitizer.ts):
+/// headers are never stored at all, credentials and unnecessary PII are replaced,
+/// and oversized bodies are truncated with an explicit marker. Written best-effort —
+/// a failed insert never fails the payment, shipment, quote or webhook.
+model IntegrationApiLog {
+  id                 String               @id @default(uuid())
+  createdAt          DateTime             @default(now())
+  provider           IntegrationProvider
+  /// Provider's own vocabulary, kept verbatim: RATE / GENERATE_CNOTE / CANCEL_CNOTE
+  /// / TRACK / WEBHOOK (JNE), charge / status / cancel / expire (Midtrans).
+  operation          String               @db.VarChar(48)
+  direction          IntegrationDirection
+  /// Groups every attempt AND the application-outcome record of ONE logical call.
+  operationId        String               @db.VarChar(36)
+  /// 1-based HTTP attempt; null on the application-outcome record.
+  attempt            Int?
+  maxAttempts        Int?
+  /// Correlation with the inbound HTTP request that triggered the call (null in workers).
+  requestId          String?              @db.VarChar(64)
+  /// Provider-side correlator when one exists (Midtrans order_id, JNE AWB, …).
+  correlationId      String?              @db.VarChar(128)
+  orderId            String?              @db.VarChar(36)
+  paymentId          String?              @db.VarChar(36)
+  shipmentId         String?              @db.VarChar(36)
+  method             String?              @db.VarChar(8)
+  /// Host + path only, run through redactSensitivePath — never a raw query string.
+  endpoint           String?              @db.VarChar(512)
+  httpStatus         Int?
+  durationMs         Int?
+  applicationOutcome IntegrationOutcome
+  /// The transport's own classification, unchanged: network / timeout / rate_limited
+  /// / provider_5xx / permanent_4xx / transient_exhausted / parse_failed.
+  errorClass         String?              @db.VarChar(32)
+  errorMessage       String?              @db.VarChar(512)
+  sanitizedRequest   Json?
+  sanitizedResponse  Json?
+  /// EXACT exchange as captured - no redaction, masking, truncation or reformatting.
+  /// Holds provider credentials and personal data. Returned ONLY by the SUPER_ADMIN
+  /// detail endpoint (GET /admin/integration-logs/:id); omitted from list/operation
+  /// queries and never exposed through any customer/storefront/public API.
+  /// Null on rows written before capture existed and on records with no raw text
+  /// (e.g. an application outcome built from an already-parsed payload).
+  rawEndpoint        String?              @db.Text
+  rawRequestBody     String?              @db.Text
+  rawResponseBody    String?              @db.Text
+
+  @@index([createdAt])
+  @@index([provider, createdAt])
+  @@index([operation, createdAt])
+  @@index([applicationOutcome, createdAt])
+  @@index([httpStatus, createdAt])
+  @@index([operationId])
+  /// Free-text admin search matches this column (order number, AWB, Midtrans
+  /// order_id) — the identifier an operator actually pastes into the filter.
+  @@index([correlationId])
+  @@index([orderId])
+  @@index([paymentId])
+  @@index([shipmentId])
+  @@index([requestId])
 }

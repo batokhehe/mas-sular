@@ -70,21 +70,39 @@ export interface Address {
 export interface Product {
   id: string
   slug: string
-  sku: string
+  // No `sku`: it is internal (the courier item code) and the public catalog API
+  // does not send it (P2 #5).
   name: string
   description: string
   price: number
   originalPrice?: number | null
   imageUrl: string
+  /** P2 gallery, sortOrder ASC; returned by the product DETAIL endpoint only (not the list). */
+  images?: ProductImage[]
   rating: string
   reviewCount: number
   spicyLevel?: number | null
   isBestSeller: boolean
   isNew: boolean
+  isPromoSpecial: boolean // P2 #10: homepage "Promo Spesial Produk" section
+  isTrialPack: boolean // P2 #11: homepage "Trial Pack" section
+  /**
+   * Canonical catalogue position set in the Admin. The API already returns the lists in
+   * this order (sequence ASC) unless an explicit sort is requested, so nothing here
+   * sorts by it - it is part of the contract, not a client-side rule.
+   */
+  sequence: number
   status: ProductStatus
   stock: number
   categoryId: string
   category?: Category // included by the catalog list/detail endpoints
+}
+
+/** P2: one gallery image. sortOrder 0 is the cover and equals Product.imageUrl. */
+export interface ProductImage {
+  id: string
+  url: string
+  sortOrder: number
 }
 
 export interface Category {
@@ -185,7 +203,10 @@ export interface CheckoutSummary {
   subtotal: number
   shipping_cost: number
   discount: number
+  /** Customer-charged "Biaya Layanan" (Rp0 when the merchant absorbs it). */
   payment_service_fee: number
+  /** True for gateway payments: the "Biaya Layanan" row is shown, even at Rp0. */
+  payment_service_fee_applies?: boolean
   grand_total: number
   estimated_days?: string
   voucher?: Promo | null
@@ -250,6 +271,8 @@ export interface Shipment {
   provider: string
   service: string
   status: ShipmentStatus
+  /** Server-derived Indonesian display text; preserves provider-specific detail. */
+  displayStatusLabel?: string
   cost: number
   trackingNumber?: string | null
   trackingUrl?: string | null

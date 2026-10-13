@@ -45,14 +45,14 @@ export function PrepareShipmentPanel({ selected, onDone, onClear }: Props) {
 
   async function submit() {
     setFormError(null);
-    if (!selected.length) return setFormError('Select at least one order.');
-    if (!pickupDate) return setFormError('Pickup date is required.');
-    if (!pickupTime) return setFormError('Pickup time is required.');
+    if (!selected.length) return setFormError('Pilih minimal satu pesanan.');
+    if (!pickupDate) return setFormError('Tanggal pickup wajib diisi.');
+    if (!pickupTime) return setFormError('Waktu pickup wajib diisi.');
 
     // Local wall-clock -> instant. The operator picks a time in their own
     // timezone; the server stores and sends exactly this instant.
     const pickupAt = new Date(`${pickupDate}T${pickupTime}`);
-    if (Number.isNaN(pickupAt.getTime())) return setFormError('Pickup date and time are invalid.');
+    if (Number.isNaN(pickupAt.getTime())) return setFormError('Tanggal dan waktu pickup tidak valid.');
 
     setSubmitting(true);
     try {
@@ -66,7 +66,7 @@ export function PrepareShipmentPanel({ selected, onDone, onClear }: Props) {
       // Refresh regardless: a partial batch changed some orders.
       onDone();
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : 'Unable to create shipments.');
+      setFormError(error instanceof Error ? error.message : 'Gagal membuat pengiriman.');
     } finally {
       setSubmitting(false);
     }
@@ -79,16 +79,16 @@ export function PrepareShipmentPanel({ selected, onDone, onClear }: Props) {
     <div className="mb-4 rounded-2xl border border-[#465fff]/30 bg-[#465fff]/5 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm font-semibold text-gray-800">
-          Prepare Shipment · {selected.length} order{selected.length === 1 ? '' : 's'} selected
+          Siapkan Pengiriman · {selected.length} pesanan dipilih
         </p>
         <button type="button" onClick={onClear} className="text-xs font-medium text-gray-500 hover:text-gray-700">
-          Clear selection
+          Hapus pilihan
         </button>
       </div>
 
       <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <label className="text-xs font-medium text-gray-500">
-          Courier
+          Kurir
           <input
             value="Paxel"
             readOnly
@@ -96,7 +96,7 @@ export function PrepareShipmentPanel({ selected, onDone, onClear }: Props) {
           />
         </label>
         <label className="text-xs font-medium text-gray-500">
-          Service
+          Layanan
           {/* Read-only: the customer chose and paid for this at checkout, and it
               is what gets booked. Shown the same way as Courier so it never
               looks like an editable control. */}
@@ -104,14 +104,14 @@ export function PrepareShipmentPanel({ selected, onDone, onClear }: Props) {
             value={
               serviceNames.length === 1
                 ? serviceNames[0]
-                : `${serviceNames.length} services — per order`
+                : `${serviceNames.length} layanan — per pesanan`
             }
             readOnly
             className="mt-1 h-10 w-full rounded-xl border border-gray-200 bg-gray-100 px-3 text-sm text-gray-700"
           />
         </label>
         <label className="text-xs font-medium text-gray-500">
-          Pickup date <span className="text-red-500">*</span>
+          Tanggal pickup <span className="text-red-500">*</span>
           <input
             type="date"
             value={pickupDate}
@@ -120,7 +120,7 @@ export function PrepareShipmentPanel({ selected, onDone, onClear }: Props) {
           />
         </label>
         <label className="text-xs font-medium text-gray-500">
-          Pickup time <span className="text-red-500">*</span>
+          Waktu pickup <span className="text-red-500">*</span>
           <input
             type="time"
             value={pickupTime}
@@ -131,11 +131,11 @@ export function PrepareShipmentPanel({ selected, onDone, onClear }: Props) {
       </div>
 
       <p className="mt-3 text-xs text-gray-500">
-        Insurance: <span className="font-medium text-gray-700">OFF</span> — set by server configuration.
+        Asuransi: <span className="font-medium text-gray-700">NONAKTIF</span> — diatur oleh konfigurasi server.
       </p>
 
       <div className="mt-3 rounded-xl border border-gray-200 bg-white p-3">
-        <p className="text-xs font-medium text-gray-500">Review</p>
+        <p className="text-xs font-medium text-gray-500">Tinjau</p>
         <ul className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-700">
           {selected.map((order) => (
             <li key={order.id}>
@@ -157,7 +157,7 @@ export function PrepareShipmentPanel({ selected, onDone, onClear }: Props) {
           disabled={!canSubmit}
           className="h-10 rounded-xl bg-[#465fff] px-4 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-gray-300"
         >
-          {submitting ? 'Creating…' : 'Create Shipment'}
+          {submitting ? 'Membuat…' : 'Buat Pengiriman'}
         </button>
       </div>
 
@@ -165,7 +165,7 @@ export function PrepareShipmentPanel({ selected, onDone, onClear }: Props) {
         <div className="mt-4 space-y-2">
           {booked.length > 0 ? (
             <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
-              <p className="font-medium">{booked.length} shipment{booked.length === 1 ? '' : 's'} created</p>
+              <p className="font-medium">{booked.length} pengiriman dibuat</p>
               <ul className="mt-1 space-y-0.5">
                 {booked.map((result) => (
                   <li key={result.orderId}>AWB {result.trackingNumber}</li>
@@ -177,7 +177,7 @@ export function PrepareShipmentPanel({ selected, onDone, onClear }: Props) {
               itself and its reason so the operator can fix that one order. */}
           {failed.length > 0 ? (
             <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-              <p className="font-medium">{failed.length} shipment{failed.length === 1 ? '' : 's'} not created</p>
+              <p className="font-medium">{failed.length} pengiriman gagal dibuat</p>
               <ul className="mt-1 space-y-0.5">
                 {failed.map((result) => (
                   <li key={result.orderId}>

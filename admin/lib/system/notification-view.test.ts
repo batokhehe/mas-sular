@@ -50,30 +50,30 @@ test('provider mapping: Qontak serves WhatsApp, Resend serves Email, none otherw
 
 test('timeline: not yet picked up → Queued then pending Sending', () => {
   const steps = buildTimeline({ status: 'PENDING', attempts: 0, createdAt: '2026-07-08T01:00:00.000Z', sentAt: null, nextAttemptAt: '2026-07-08T01:00:05.000Z', lastError: null });
-  assert.deepEqual(steps.map((s) => [s.label, s.tone]), [['Queued', 'ok'], ['Sending', 'pending']]);
+  assert.deepEqual(steps.map((s) => [s.label, s.tone]), [['Diantrekan', 'ok'], ['Mengirim', 'pending']]);
 });
 
 test('timeline: first-attempt success → Queued, Sending, Sent', () => {
   const steps = buildTimeline({ status: 'SENT', attempts: 1, createdAt: '2026-07-08T01:00:00.000Z', sentAt: '2026-07-08T01:00:07.000Z', nextAttemptAt: null, lastError: null });
-  assert.deepEqual(steps.map((s) => s.label), ['Queued', 'Sending', 'Sent']);
+  assert.deepEqual(steps.map((s) => s.label), ['Diantrekan', 'Mengirim', 'Terkirim']);
   assert.equal(steps.at(-1)?.at, '2026-07-08T01:00:07.000Z');
 });
 
 test('timeline: sent after two retries → Failed/Retry pairs then Sent', () => {
   const steps = buildTimeline({ status: 'SENT', attempts: 3, createdAt: '2026-07-08T01:00:00.000Z', sentAt: '2026-07-08T01:05:00.000Z', nextAttemptAt: null, lastError: null });
-  assert.deepEqual(steps.map((s) => s.label), ['Queued', 'Sending', 'Failed', 'Retry #1', 'Failed', 'Retry #2', 'Sent']);
+  assert.deepEqual(steps.map((s) => s.label), ['Diantrekan', 'Mengirim', 'Gagal', 'Coba ulang #1', 'Gagal', 'Coba ulang #2', 'Terkirim']);
 });
 
 test('timeline: terminal failure carries the last error', () => {
   const steps = buildTimeline({ status: 'FAILED', attempts: 2, createdAt: '2026-07-08T01:00:00.000Z', sentAt: null, nextAttemptAt: null, lastError: 'HTTP 500' });
-  assert.deepEqual(steps.map((s) => s.label), ['Queued', 'Sending', 'Failed', 'Retry #1', 'Failed']);
+  assert.deepEqual(steps.map((s) => s.label), ['Diantrekan', 'Mengirim', 'Gagal', 'Coba ulang #1', 'Gagal']);
   assert.equal(steps.at(-1)?.tone, 'error');
   assert.equal(steps.at(-1)?.detail, 'HTTP 500');
 });
 
 test('timeline: pending mid-retry schedules the next retry step', () => {
   const steps = buildTimeline({ status: 'PENDING', attempts: 1, createdAt: '2026-07-08T01:00:00.000Z', sentAt: null, nextAttemptAt: '2026-07-08T01:02:00.000Z', lastError: 'timeout' });
-  assert.deepEqual(steps.map((s) => s.label), ['Queued', 'Sending', 'Failed', 'Retry #1']);
+  assert.deepEqual(steps.map((s) => s.label), ['Diantrekan', 'Mengirim', 'Gagal', 'Coba ulang #1']);
   assert.equal(steps.at(-1)?.tone, 'pending');
   assert.equal(steps.at(-1)?.at, '2026-07-08T01:02:00.000Z');
 });
@@ -81,9 +81,9 @@ test('timeline: pending mid-retry schedules the next retry step', () => {
 test('updated-ago label: just now, seconds, minutes', () => {
   const now = 1_000_000_000;
   assert.equal(updatedAgoLabel(0, now), '—');
-  assert.equal(updatedAgoLabel(now - 2_000, now), 'just now');
-  assert.equal(updatedAgoLabel(now - 42_000, now), '42s ago');
-  assert.equal(updatedAgoLabel(now - 3 * 60_000, now), '3m ago');
+  assert.equal(updatedAgoLabel(now - 2_000, now), 'baru saja');
+  assert.equal(updatedAgoLabel(now - 42_000, now), '42 dtk lalu');
+  assert.equal(updatedAgoLabel(now - 3 * 60_000, now), '3 mnt lalu');
 });
 
 test('sanitizeFilters: keeps valid keys, drops junk and invalid enums', () => {

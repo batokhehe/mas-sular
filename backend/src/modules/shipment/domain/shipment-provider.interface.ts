@@ -56,6 +56,22 @@ export interface CreateShipmentInput {
    */
   pickupAtIso?: string;
   items?: ShipmentItem[];
+  /**
+   * Merchandise value - Order.subtotal: goods and toppings, WITHOUT delivery fee,
+   * payment service fee or voucher. Distinct from `invoiceValue` (the order total).
+   * Couriers that declare a goods value use this one (JNE GOODS_AMOUNT).
+   */
+  goodsAmount?: number;
+  /**
+   * The receiver address's district id, so a courier that addresses on its own
+   * destination master (JNE) can resolve its verified code. Never a postal code.
+   */
+  destinationDistrictId?: string | null;
+  /**
+   * The pickup slot RECORDED on the shipment for THIS courier (metadata[courier]),
+   * as an ISO instant. Today only JNE's. Paxel keeps using `pickupAtIso` above.
+   */
+  recordedPickupAtIso?: string;
 }
 
 export interface CreateShipmentResult {

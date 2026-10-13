@@ -40,13 +40,13 @@ export default function SystemDashboardPage() {
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.systemLogs}>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold text-gray-900">System Dashboard</h2>
-          <p className="mt-1 text-sm text-gray-500">Live observability — requests, errors, queues, workers, database, cache.</p>
+          <h2 className="text-xl font-semibold text-gray-900">Dasbor Sistem</h2>
+          <p className="mt-1 text-sm text-gray-500">Observabilitas langsung — request, error, antrean, worker, database, cache.</p>
         </div>
         <div className="flex items-center gap-3">
-          {d ? <span className="text-xs text-gray-400">Updated {new Date(d.generatedAt).toLocaleTimeString('id-ID')}</span> : null}
+          {d ? <span className="text-xs text-gray-400">Diperbarui {new Date(d.generatedAt).toLocaleTimeString('id-ID')}</span> : null}
           <Button onClick={() => void query.refetch()} disabled={query.isFetching} className="gap-2">
-            <RefreshCw className={`h-4 w-4 ${query.isFetching ? 'animate-spin' : ''}`} /> Refresh
+            <RefreshCw className={`h-4 w-4 ${query.isFetching ? 'animate-spin' : ''}`} /> Muat ulang
           </Button>
         </div>
       </div>
@@ -57,8 +57,8 @@ export default function SystemDashboardPage() {
         <Card>
           <div className="flex flex-col items-center gap-3 p-10 text-center">
             <AlertTriangle className="h-6 w-6 text-red-500" />
-            <p className="text-sm text-red-600">Unable to load the system dashboard.</p>
-            <Button onClick={() => void query.refetch()}>Retry</Button>
+            <p className="text-sm text-red-600">Gagal memuat dasbor sistem.</p>
+            <Button onClick={() => void query.refetch()}>Coba ulang</Button>
           </div>
         </Card>
       ) : (
@@ -85,12 +85,12 @@ export default function SystemDashboardPage() {
                   ))}
                 </div>
               </div>
-              {chartPoints.length === 0 ? <p className="py-10 text-center text-sm text-gray-500">No request activity yet.</p> : <TrendChart points={chartPoints} color={metric === 'requests' ? '#465fff' : '#f59e0b'} />}
+              {chartPoints.length === 0 ? <p className="py-10 text-center text-sm text-gray-500">Belum ada aktivitas request.</p> : <TrendChart points={chartPoints} color={metric === 'requests' ? '#465fff' : '#f59e0b'} />}
             </Card>
             <Card>
               <CardTitle>Errors (24h)</CardTitle>
               {d.errorMetrics.byHour.length === 0 ? (
-                <p className="py-10 text-center text-sm text-gray-500">No errors — nice.</p>
+                <p className="py-10 text-center text-sm text-gray-500">Tidak ada error.</p>
               ) : (
                 <div className="mt-4"><BarChart values={errorBars(d.errorMetrics.byHour)} /></div>
               )}
@@ -105,13 +105,13 @@ export default function SystemDashboardPage() {
           {/* Top endpoints + Recurring errors */}
           <div className="grid gap-6 xl:grid-cols-2">
             <Card>
-              <CardTitle>Top / Slowest Endpoints</CardTitle>
+              <CardTitle>Endpoint Teratas / Paling Lambat</CardTitle>
               <div className="mt-4 overflow-x-auto">
                 <table className="w-full min-w-[420px] text-left text-sm">
-                  <thead><tr className="border-b border-gray-100 text-xs uppercase text-gray-400"><th className="py-2 font-medium">Endpoint</th><th className="py-2 text-right font-medium">Count</th><th className="py-2 text-right font-medium">Avg</th><th className="py-2 text-right font-medium">Max</th></tr></thead>
+                  <thead><tr className="border-b border-gray-100 text-xs uppercase text-gray-400"><th className="py-2 font-medium">Endpoint</th><th className="py-2 text-right font-medium">Jumlah</th><th className="py-2 text-right font-medium">Rata-rata</th><th className="py-2 text-right font-medium">Maks</th></tr></thead>
                   <tbody>
                     {d.requestMetrics.slowestEndpoints.length === 0 ? (
-                      <tr><td colSpan={4} className="py-6 text-center text-sm text-gray-500">No data.</td></tr>
+                      <tr><td colSpan={4} className="py-6 text-center text-sm text-gray-500">Tidak ada data.</td></tr>
                     ) : d.requestMetrics.slowestEndpoints.map((e) => (
                       <tr key={e.endpoint} className="border-b border-gray-50 last:border-0">
                         <td className="py-2 font-mono text-xs text-gray-700">{e.endpoint}</td>
@@ -125,9 +125,9 @@ export default function SystemDashboardPage() {
               </div>
             </Card>
             <Card>
-              <CardTitle>Top Recurring Errors</CardTitle>
+              <CardTitle>Error Berulang Teratas</CardTitle>
               <div className="mt-4 space-y-2">
-                {d.errorMetrics.topRecurring.length === 0 ? <p className="py-6 text-center text-sm text-gray-500">No recurring errors.</p> : d.errorMetrics.topRecurring.map((e, i) => (
+                {d.errorMetrics.topRecurring.length === 0 ? <p className="py-6 text-center text-sm text-gray-500">Tidak ada error berulang.</p> : d.errorMetrics.topRecurring.map((e, i) => (
                   <div key={i} className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2 text-sm">
                     <span className="truncate pr-3 text-gray-700" title={e.message}>{e.message}</span>
                     <span className="shrink-0 rounded bg-red-100 px-2 py-0.5 font-semibold text-red-700">{rp(e.count)}</span>
@@ -140,35 +140,35 @@ export default function SystemDashboardPage() {
           {/* Queue + Notifications */}
           <div className="grid gap-6 xl:grid-cols-2">
             <Card>
-              <CardTitle>Queues</CardTitle>
+              <CardTitle>Antrean</CardTitle>
               <div className="mt-4 grid grid-cols-2 gap-4">
                 {([['Outbox', d.queueMetrics.outbox], ['Notification', d.queueMetrics.notification]] as const).map(([name, q]) => (
                   <div key={name} className="rounded-xl border border-gray-100 p-3">
                     <p className="text-sm font-medium text-gray-800">{name}</p>
                     <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
-                      <Stat label="Pending" value={q.pending} tone={q.pending > 0 ? 'warn' : undefined} />
-                      <Stat label="Processing" value={q.processing} />
-                      <Stat label="Failed" value={q.failed} tone={q.failed > 0 ? 'error' : undefined} />
-                      <Stat label="Retry" value={q.retryCount} />
+                      <Stat label="Menunggu" value={q.pending} tone={q.pending > 0 ? 'warn' : undefined} />
+                      <Stat label="Diproses" value={q.processing} />
+                      <Stat label="Gagal" value={q.failed} tone={q.failed > 0 ? 'error' : undefined} />
+                      <Stat label="Coba ulang" value={q.retryCount} />
                     </div>
-                    <p className="mt-2 text-xs text-gray-400">Oldest pending: {dt(q.oldestPending)}</p>
+                    <p className="mt-2 text-xs text-gray-400">Tertunda paling lama: {dt(q.oldestPending)}</p>
                   </div>
                 ))}
               </div>
             </Card>
             <Card>
-              <CardTitle>Notifications</CardTitle>
+              <CardTitle>Notifikasi</CardTitle>
               <div className="mt-4 grid grid-cols-2 gap-4">
                 {([['WhatsApp', d.notificationMetrics.whatsapp], ['Email', d.notificationMetrics.email]] as const).map(([name, ch]) => (
                   <div key={name} className="rounded-xl border border-gray-100 p-3">
                     <p className="text-sm font-medium text-gray-800">{name}</p>
-                    <p className="mt-1 text-2xl font-semibold text-emerald-600">{successRate(ch)}%<span className="ml-1 text-xs font-normal text-gray-400">success</span></p>
-                    <p className="text-xs text-red-500">{failureRate(ch)}% failure</p>
+                    <p className="mt-1 text-2xl font-semibold text-emerald-600">{successRate(ch)}%<span className="ml-1 text-xs font-normal text-gray-400">berhasil</span></p>
+                    <p className="text-xs text-red-500">{failureRate(ch)}% gagal</p>
                     <div className="mt-2 grid grid-cols-2 gap-1 text-xs text-gray-500">
-                      <span>Sent: {rp(ch.success)}</span><span>Failed: {rp(ch.failed)}</span>
-                      <span>Retry: {rp(ch.retry)}</span><span>Avg: {rp(ch.avgSendSec)}s</span>
+                      <span>Terkirim: {rp(ch.success)}</span><span>Gagal: {rp(ch.failed)}</span>
+                      <span>Coba ulang: {rp(ch.retry)}</span><span>Rata-rata: {rp(ch.avgSendSec)} dtk</span>
                     </div>
-                    <p className="mt-1 text-xs text-gray-400">Last OK: {dt(ch.lastSuccess)}</p>
+                    <p className="mt-1 text-xs text-gray-400">Terakhir OK: {dt(ch.lastSuccess)}</p>
                   </div>
                 ))}
               </div>
@@ -177,7 +177,7 @@ export default function SystemDashboardPage() {
 
           {/* Workers */}
           <Card>
-            <CardTitle>Workers</CardTitle>
+            <CardTitle>Worker</CardTitle>
             <div className="mt-4 divide-y divide-gray-50">
               {d.workerMetrics.map((w) => (
                 <div key={w.key} className="flex flex-wrap items-center justify-between gap-3 py-2.5 text-sm">
@@ -188,9 +188,9 @@ export default function SystemDashboardPage() {
                   </span>
                   <span className="flex items-center gap-4 text-xs text-gray-500">
                     <span>OK {rp(w.success)}</span>
-                    <span className={w.failure > 0 ? 'text-red-500' : ''}>Fail {rp(w.failure)}</span>
-                    <span>Avg {rp(w.avgMs)}ms</span>
-                    <span>Last {dt(w.lastExecution)}</span>
+                    <span className={w.failure > 0 ? 'text-red-500' : ''}>Gagal {rp(w.failure)}</span>
+                    <span>Rata-rata {rp(w.avgMs)}ms</span>
+                    <span>Terakhir {dt(w.lastExecution)}</span>
                   </span>
                 </div>
               ))}
@@ -202,24 +202,24 @@ export default function SystemDashboardPage() {
             <Card>
               <CardTitle>Database</CardTitle>
               <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
-                <Stat label="Orders today" value={d.databaseMetrics.todayOrders} big />
-                <Stat label="Payments today" value={d.databaseMetrics.todayPayments} big />
-                <Stat label="Shipments today" value={d.databaseMetrics.todayShipments} big />
-                <Stat label="Total orders" value={d.databaseMetrics.totalOrders} big />
-                <Stat label="Customers" value={d.databaseMetrics.totalCustomers} big />
-                <Stat label="Avg checkout" value={`${rp(d.databaseMetrics.avgCheckoutMs)}ms`} big />
+                <Stat label="Pesanan hari ini" value={d.databaseMetrics.todayOrders} big />
+                <Stat label="Pembayaran hari ini" value={d.databaseMetrics.todayPayments} big />
+                <Stat label="Pengiriman hari ini" value={d.databaseMetrics.todayShipments} big />
+                <Stat label="Total pesanan" value={d.databaseMetrics.totalOrders} big />
+                <Stat label="Pelanggan" value={d.databaseMetrics.totalCustomers} big />
+                <Stat label="Rata-rata checkout" value={`${rp(d.databaseMetrics.avgCheckoutMs)}ms`} big />
               </div>
             </Card>
             <Card>
               <CardTitle>Redis</CardTitle>
               <div className="mt-4 space-y-3 text-sm">
                 <div className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2.5">
-                  <span className="text-gray-600">Connected</span>
-                  <span className="flex items-center gap-2"><span className={`h-2.5 w-2.5 rounded-full ${d.cacheMetrics.connected ? 'bg-emerald-500' : 'bg-red-500'}`} />{d.cacheMetrics.connected ? 'Yes' : 'No'}</span>
+                  <span className="text-gray-600">Terhubung</span>
+                  <span className="flex items-center gap-2"><span className={`h-2.5 w-2.5 rounded-full ${d.cacheMetrics.connected ? 'bg-emerald-500' : 'bg-red-500'}`} />{d.cacheMetrics.connected ? 'Ya' : 'Tidak'}</span>
                 </div>
-                <div className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2.5"><span className="text-gray-600">Latency</span><span className="font-semibold text-gray-800">{rp(d.cacheMetrics.latencyMs)}ms</span></div>
-                <div className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2.5"><span className="text-gray-600">Last ping</span><span className="text-gray-500">{dt(d.cacheMetrics.lastPing)}</span></div>
-                {d.cacheMetrics.memory ? <div className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2.5"><span className="text-gray-600">Memory</span><span className="text-gray-500">{d.cacheMetrics.memory}</span></div> : null}
+                <div className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2.5"><span className="text-gray-600">Latensi</span><span className="font-semibold text-gray-800">{rp(d.cacheMetrics.latencyMs)}ms</span></div>
+                <div className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2.5"><span className="text-gray-600">Ping terakhir</span><span className="text-gray-500">{dt(d.cacheMetrics.lastPing)}</span></div>
+                {d.cacheMetrics.memory ? <div className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2.5"><span className="text-gray-600">Memori</span><span className="text-gray-500">{d.cacheMetrics.memory}</span></div> : null}
               </div>
             </Card>
           </div>

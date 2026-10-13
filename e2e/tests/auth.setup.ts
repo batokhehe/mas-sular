@@ -53,9 +53,11 @@ setup('mint customer session', async () => {
 });
 
 /**
- * ADMIN — email/password login is fully automatable (no OAuth). We call the real
- * endpoint and persist the token the standalone admin app expects in localStorage
- * (mas-sular-admin-token) for the ADMIN_URL origin.
+ * ADMIN — email/password login is fully automatable (no OAuth). Since the H4
+ * hardening the API returns NO token in the body: it sets the httpOnly
+ * ms_admin_access cookie (host-only, API host) plus the JS-readable
+ * ms_admin_session marker. We persist exactly the cookies the browser would hold,
+ * and the (non-secret) permission list the admin UI caches for its menus.
  */
 setup('login admin', async () => {
   setup.skip(!ADMIN_EMAIL || !ADMIN_PASSWORD, 'ADMIN_EMAIL/ADMIN_PASSWORD not provided');
@@ -65,18 +67,16 @@ setup('login admin', async () => {
   });
   expect(res.ok(), `admin login failed: ${res.status()}`).toBeTruthy();
   const body = await res.json();
-  const token: string = body.accessToken;
+  expect(body.accessToken, 'the admin token must not be in the login body').toBeUndefined();
+  const { cookies } = await ctx.storageState();
+  expect(cookies.some((c) => c.name === 'ms_admin_access' && c.httpOnly), 'httpOnly admin session cookie').toBeTruthy();
   const perms = JSON.stringify(body.permissions ?? []);
-  const origin = ADMIN_URL;
   save(STORAGE.admin, {
-    cookies: [],
+    cookies,
     origins: [
       {
-        origin,
-        localStorage: [
-          { name: 'mas-sular-admin-token', value: token },
-          { name: 'mas-sular-admin-permissions', value: perms },
-        ],
+        origin: ADMIN_URL,
+        localStorage: [{ name: 'mas-sular-admin-permissions', value: perms }],
       },
     ],
   });

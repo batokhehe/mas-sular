@@ -6,24 +6,32 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { PermissionGate } from '@/components/auth/permission-gate';
 import { AdminShell } from '@/components/layout/admin-shell';
 import { Badge } from '@/components/ui/badge';
+import { shipmentStatusLabel } from '@/lib/status-labels';
 import { Button } from '@/components/ui/button';
 import { Card, CardTitle } from '@/components/ui/card';
 import { Pagination } from '@/components/ui/pagination';
 import { ROUTE_PERMISSIONS } from '@/lib/access';
 import { fetchAdminShipments, AdminShipment } from '@/lib/admin';
-import { shipmentServiceDisplay, shipmentServiceSearchTerms } from '@/lib/shipments/service-display';
-
-const statusOptions = ['ALL', 'PENDING', 'RATE_SELECTED', 'PICKED_UP', 'IN_TRANSIT', 'DELIVERED', 'FAILED'] as const;
+import { shipmentServiceDisplay } from '@/lib/shipments/service-display';
+import {
+  matchesShipmentSearch,
+  SHIPPING_LIST_SCOPE,
+  SHIPPING_STATUS_FILTER_OPTIONS,
+  ShippingStatusFilter,
+} from '@/lib/shipments/shipping-list';
 
 export default function ShippingPage() {
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<typeof statusOptions[number]>('ALL');
+  const [statusFilter, setStatusFilter] = useState<ShippingStatusFilter>('ALL');
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['admin-shipments', statusFilter, page, limit],
-    queryFn: () => fetchAdminShipments({ status: statusFilter === 'ALL' ? undefined : statusFilter, page, limit }),
+    // Only active / actionable shipments (not delivered or cancelled, order not final):
+    // the server applies the rule, so paging and totals match what is shown.
+    queryKey: ['admin-shipments', SHIPPING_LIST_SCOPE, statusFilter, page, limit],
+    queryFn: () =>
+      fetchAdminShipments({ scope: SHIPPING_LIST_SCOPE, status: statusFilter === 'ALL' ? undefined : statusFilter, page, limit }),
     placeholderData: keepPreviousData,
     retry: false,
   });
@@ -32,30 +40,19 @@ export default function ShippingPage() {
   // and paging are handled server-side.
   const shipments = useMemo(() => {
     if (!data) return [];
-    return data.items.filter((shipment: AdminShipment) =>
-      [
-        shipment.order.orderNumber,
-        shipment.provider,
-        // Search every representation: legacy rows hold a label, the order
-        // holds the paid code. Read-time compatibility, never a migration.
-        ...shipmentServiceSearchTerms(shipment),
-        shipment.trackingNumber ?? '',
-      ].some((field) =>
-        field.toLowerCase().includes(search.toLowerCase()),
-      ),
-    );
+    return data.items.filter((shipment: AdminShipment) => matchesShipmentSearch(shipment, search));
   }, [data, search]);
 
   return (
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.shipments}>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold text-gray-900">Shipping Management</h2>
-          <p className="mt-1 text-sm text-gray-500">Provider rates, shipment status, and tracking updates.</p>
+          <h2 className="text-xl font-semibold text-gray-900">Manajemen Pengiriman</h2>
+          <p className="mt-1 text-sm text-gray-500">Tarif penyedia, status pengiriman, dan pembaruan pelacakan.</p>
         </div>
         <PermissionGate permissions={ROUTE_PERMISSIONS.shipmentCreate}>
           <Link href="/shipping/new">
-            <Button>New Shipment</Button>
+            <Button>Pengiriman Baru</Button>
           </Link>
         </PermissionGate>
       </div>
@@ -64,43 +61,43 @@ export default function ShippingPage() {
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search shipments by order, provider, or tracking"
+            placeholder="Cari pengiriman berdasarkan pesanan, penyedia, atau resi"
             className="h-11 w-full rounded-xl border border-gray-200 bg-gray-50 px-4 text-sm outline-none focus:border-[#465fff] focus:bg-white"
           />
           <select
             value={statusFilter}
             onChange={(event) => {
-              setStatusFilter(event.target.value as typeof statusOptions[number]);
+              setStatusFilter(event.target.value as ShippingStatusFilter);
               setPage(1);
             }}
             className="h-11 rounded-xl border border-gray-200 bg-white px-4 text-sm outline-none focus:border-[#465fff]"
           >
-            {statusOptions.map((status) => (
+            {SHIPPING_STATUS_FILTER_OPTIONS.map((status) => (
               <option key={status} value={status}>
-                {status}
+                {status === 'ALL' ? 'Semua' : shipmentStatusLabel(status)}
               </option>
             ))}
           </select>
         </div>
 
-        <CardTitle>Shipments</CardTitle>
+        <CardTitle>Pengiriman</CardTitle>
         <div className="mt-4 overflow-x-auto">
           {isLoading ? (
-            <p className="p-6 text-sm text-gray-500">Loading shipments...</p>
+            <p className="p-6 text-sm text-gray-500">Memuat pengiriman...</p>
           ) : isError ? (
-            <p className="p-6 text-sm text-red-600">Unable to load shipments. Please reauthenticate.</p>
+            <p className="p-6 text-sm text-red-600">Gagal memuat pengiriman. Silakan masuk ulang.</p>
           ) : shipments.length === 0 ? (
-            <p className="p-6 text-sm text-gray-500">No shipments match the current filters.</p>
+            <p className="p-6 text-sm text-gray-500">Tidak ada pengiriman yang cocok dengan filter.</p>
           ) : (
             <table className="w-full min-w-[760px] text-left text-sm">
               <thead>
                 <tr className="border-b border-gray-100 text-xs uppercase text-gray-400">
-                  <th className="py-3 font-medium">Order</th>
-                  <th className="py-3 font-medium">Provider</th>
-                  <th className="py-3 font-medium">Service</th>
-                  <th className="py-3 font-medium">Tracking</th>
+                  <th className="py-3 font-medium">Pesanan</th>
+                  <th className="py-3 font-medium">Penyedia</th>
+                  <th className="py-3 font-medium">Layanan</th>
+                  <th className="py-3 font-medium">No. Resi</th>
                   <th className="py-3 font-medium">Status</th>
-                  <th className="py-3 font-medium">Actions</th>
+                  <th className="py-3 font-medium">Aksi</th>
                 </tr>
               </thead>
               <tbody>
@@ -111,11 +108,11 @@ export default function ShippingPage() {
                     <td className="py-4 text-gray-500">{shipmentServiceDisplay(shipment)}</td>
                     <td className="py-4 text-gray-500">{shipment.trackingNumber ?? '-'}</td>
                     <td className="py-4">
-                      <Badge tone={shipment.status === 'DELIVERED' ? 'success' : 'brand'}>{shipment.status}</Badge>
+                      <Badge tone={shipment.status === 'DELIVERED' ? 'success' : 'brand'}>{shipmentStatusLabel(shipment.status)}</Badge>
                     </td>
                     <td className="py-4">
                       <Link href={`/shipping/${shipment.id}`} className="text-sm font-medium text-[#465fff] hover:text-indigo-700">
-                        View
+                        Lihat
                       </Link>
                     </td>
                   </tr>

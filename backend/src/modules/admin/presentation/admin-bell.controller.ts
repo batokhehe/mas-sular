@@ -1,28 +1,19 @@
 import {
-  BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, Res, UnauthorizedException, UseGuards,
+  BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, Res, UseGuards,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
-import { JwtService } from '@nestjs/jwt';
-import { hasAllPermissions } from '../../../common/auth/permission-check.util';
+import { RejectUrlCredentialsGuard } from '../../../common/guards/reject-url-credentials.guard';
 import { AdminUser, CurrentAdmin } from '../../../common/decorators/current-admin.decorator';
 import { Permissions } from '../../../common/decorators/permissions.decorator';
 import { AdminGuard } from '../../../common/guards/admin.guard';
 import { PermissionGuard } from '../../../common/guards/permission.guard';
-import { PrismaService } from '../../../database/prisma.service';
 import { buildAdminNotification } from '../../../infrastructure/admin-notifications/admin-notification.builder';
 import { AdminNotificationDispatcher } from '../../../infrastructure/admin-notifications/admin-notification.dispatcher';
 import { AdminNotificationMetrics } from '../../../infrastructure/admin-notifications/admin-notification.metrics';
 import { AdminNotificationRepository } from '../../../infrastructure/admin-notifications/admin-notification.repository';
 import { SseHubService } from '../../../infrastructure/admin-notifications/sse-hub.service';
 import { BellListQueryDto, ManualNotificationDto, RegisterPushDto } from '../application/dto/bell-query.dto';
-
-/** Claims carried by the admin access token (mirrors AdminJwtPayload). */
-interface StreamTokenClaims {
-  sub?: string;
-  role?: string | null;
-  permissions?: string[];
-}
 
 /**
  * Admin notification platform API: bell feed (cursor pagination), unread badge,
@@ -31,15 +22,11 @@ interface StreamTokenClaims {
 @ApiTags('admin-bell')
 @Controller({ path: 'admin/notifications', version: '1' })
 export class AdminBellController {
-  // Standalone verifier (same secret + checks as the admin-jwt strategy).
-  private readonly jwt = new JwtService({});
-
   constructor(
     private readonly repository: AdminNotificationRepository,
     private readonly dispatcher: AdminNotificationDispatcher,
     private readonly sseHub: SseHubService,
     private readonly metrics: AdminNotificationMetrics,
-    private readonly prisma: PrismaService,
   ) {}
 
   @UseGuards(AdminGuard, PermissionGuard)
@@ -70,29 +57,20 @@ export class AdminBellController {
   }
 
   /**
-   * SSE stream. EventSource cannot send Authorization headers, so the admin JWT
-   * arrives as ?token= and is verified EXACTLY like the admin-jwt strategy
-   * (same secret + active-admin check) before the connection is registered.
+   * SSE stream (H2). Authenticated exactly like every sibling endpoint: the httpOnly
+   * admin session cookie (EventSource `withCredentials: true`) through AdminGuard,
+   * then PermissionGuard against the admin's LIVE database permissions.
+   *
+   * The former `?token=<JWT>` authentication is gone. The URL carried the admin
+   * access token into the nginx access log and the pino request log on every
+   * (re)connect; RejectUrlCredentialsGuard now refuses such a request outright, even
+   * when a valid cookie is also present, so no client can keep leaking a token.
    */
+  @UseGuards(RejectUrlCredentialsGuard, AdminGuard, PermissionGuard)
+  @Permissions('Notification.read')
   @Get('stream')
-  async stream(@Req() req: Request, @Res() res: Response, @Query('token') token?: string) {
-    const secret = process.env.JWT_ADMIN_ACCESS_SECRET;
-    if (!token || !secret) throw new UnauthorizedException('Missing stream token');
-    let claims: StreamTokenClaims;
-    try {
-      claims = this.jwt.verify<StreamTokenClaims>(token, { secret });
-      if (!claims.sub) throw new Error('no sub');
-    } catch {
-      throw new UnauthorizedException('Invalid stream token');
-    }
-    // Same RBAC as every sibling endpoint (guards can't run here — the JWT rides
-    // as a query param). Claims are the same source PermissionGuard reads.
-    if (!hasAllPermissions(claims, ['Notification.read'])) {
-      throw new UnauthorizedException('Missing Notification.read permission');
-    }
-    const admin = await this.prisma.admin.findFirst({ where: { id: claims.sub, isActive: true }, select: { id: true } });
-    if (!admin) throw new UnauthorizedException('Admin account is no longer active');
-    this.sseHub.register(claims.sub, res);
+  stream(@CurrentAdmin() admin: AdminUser, @Res() res: Response) {
+    this.sseHub.register(admin.sub, res);
   }
 
   @UseGuards(AdminGuard, PermissionGuard)

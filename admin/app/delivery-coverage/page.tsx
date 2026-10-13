@@ -29,9 +29,9 @@ import {
 const rupiah = formatRupiahExact;
 
 const coverageBadge = (type: CoverageType) => {
-  if (type === 'DELIVERY') return <Badge tone="success">Delivery</Badge>;
-  if (type === 'PICKUP_ONLY') return <Badge tone="brand">Pickup Only</Badge>;
-  return <Badge tone="danger">Disabled</Badge>;
+  if (type === 'DELIVERY') return <Badge tone="success">Diantar</Badge>;
+  if (type === 'PICKUP_ONLY') return <Badge tone="brand">Hanya Ambil Sendiri</Badge>;
+  return <Badge tone="danger">Nonaktif</Badge>;
 };
 
 export default function DeliveryCoveragePage() {
@@ -57,8 +57,8 @@ export default function DeliveryCoveragePage() {
   const handleToggle = (row: AdminDeliveryCoverage) =>
     runWithFeedback({
       confirm: () =>
-        confirmStatusChange(row.isActive ? 'Active' : 'Disabled', row.isActive ? 'Disabled' : 'Active', {
-          title: row.isActive ? 'Disable this coverage?' : 'Enable this coverage?',
+        confirmStatusChange(row.isActive ? 'Aktif' : 'Nonaktif', row.isActive ? 'Nonaktif' : 'Aktif', {
+          title: row.isActive ? 'Nonaktifkan jangkauan ini?' : 'Aktifkan jangkauan ini?',
         }),
       loading: ADMIN_LOADING_MESSAGES.update,
       success: ADMIN_SUCCESS_MESSAGES.updated,
@@ -67,9 +67,9 @@ export default function DeliveryCoveragePage() {
 
   const handleDelete = (id: string) =>
     runWithFeedback({
-      confirm: () => confirmDelete('Delivery Coverage'),
+      confirm: () => confirmDelete('Jangkauan Pengiriman'),
       loading: ADMIN_LOADING_MESSAGES.delete,
-      success: ADMIN_SUCCESS_MESSAGES.deleted('Delivery Coverage'),
+      success: ADMIN_SUCCESS_MESSAGES.deleted('Jangkauan Pengiriman'),
       action: () => deleteMutation.mutateAsync(id),
     });
 
@@ -77,12 +77,12 @@ export default function DeliveryCoveragePage() {
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.deliveryCoverage}>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold text-gray-900">Delivery Coverage</h2>
-          <p className="mt-1 text-sm text-gray-500">Configure which areas can receive delivery, pickup-only, or are disabled.</p>
+          <h2 className="text-xl font-semibold text-gray-900">Jangkauan Pengiriman</h2>
+          <p className="mt-1 text-sm text-gray-500">Atur area mana yang bisa menerima pengiriman, hanya ambil sendiri, atau dinonaktifkan.</p>
         </div>
         <PermissionGate permissions={ROUTE_PERMISSIONS.deliveryCoverageCreate}>
           <Link href="/delivery-coverage/new">
-            <Button>Add Coverage</Button>
+            <Button>Tambah Jangkauan</Button>
           </Link>
         </PermissionGate>
       </div>
@@ -90,7 +90,7 @@ export default function DeliveryCoveragePage() {
       <Card>
         <div className="flex flex-wrap items-end gap-3">
           <label className="space-y-1 text-sm text-gray-600">
-            <span className="block text-xs uppercase text-gray-400">Search</span>
+            <span className="block text-xs uppercase text-gray-400">Cari</span>
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -99,16 +99,16 @@ export default function DeliveryCoveragePage() {
             />
           </label>
           <label className="space-y-1 text-sm text-gray-600">
-            <span className="block text-xs uppercase text-gray-400">Type</span>
+            <span className="block text-xs uppercase text-gray-400">Tipe</span>
             <select
               value={coverageType}
               onChange={(e) => setCoverageType(e.target.value as CoverageType | '')}
               className="h-11 rounded-xl border border-gray-200 bg-white px-4 text-sm outline-none focus:border-[#465fff]"
             >
-              <option value="">All types</option>
-              <option value="DELIVERY">Delivery</option>
-              <option value="PICKUP_ONLY">Pickup Only</option>
-              <option value="DISABLED">Disabled</option>
+              <option value="">Semua tipe</option>
+              <option value="DELIVERY">Diantar</option>
+              <option value="PICKUP_ONLY">Hanya Ambil Sendiri</option>
+              <option value="DISABLED">Nonaktif</option>
             </select>
           </label>
           <label className="space-y-1 text-sm text-gray-600">
@@ -118,34 +118,34 @@ export default function DeliveryCoveragePage() {
               onChange={(e) => setIsActive(e.target.value as 'true' | 'false' | '')}
               className="h-11 rounded-xl border border-gray-200 bg-white px-4 text-sm outline-none focus:border-[#465fff]"
             >
-              <option value="">All statuses</option>
-              <option value="true">Active</option>
-              <option value="false">Inactive</option>
+              <option value="">Semua status</option>
+              <option value="true">Aktif</option>
+              <option value="false">Nonaktif</option>
             </select>
           </label>
         </div>
 
         <div className="mt-5 overflow-x-auto">
           {isLoading ? (
-            <p className="p-6 text-sm text-gray-500">Loading coverage rules…</p>
+            <p className="p-6 text-sm text-gray-500">Memuat aturan jangkauan…</p>
           ) : isError ? (
-            <p className="p-6 text-sm text-red-600">Unable to load coverage rules. Please reauthenticate.</p>
+            <p className="p-6 text-sm text-red-600">Gagal memuat aturan jangkauan. Silakan masuk ulang.</p>
           ) : (data?.length ?? 0) === 0 ? (
-            <p className="p-6 text-sm text-gray-500">No coverage rules match your filters.</p>
+            <p className="p-6 text-sm text-gray-500">Tidak ada aturan jangkauan yang cocok dengan filter.</p>
           ) : (
             <table className="w-full min-w-[960px] text-left text-sm">
               <thead>
                 <tr className="border-b border-gray-100 text-xs uppercase text-gray-400">
-                  <th className="py-3 font-medium">Province</th>
-                  <th className="py-3 font-medium">City</th>
-                  <th className="py-3 font-medium">District</th>
-                  <th className="py-3 font-medium">Village</th>
-                  <th className="py-3 font-medium">Type</th>
-                  <th className="py-3 font-medium">Delivery Fee</th>
-                  <th className="py-3 font-medium">Min. Order</th>
-                  <th className="py-3 font-medium">Est. Delivery</th>
+                  <th className="py-3 font-medium">Provinsi</th>
+                  <th className="py-3 font-medium">Kota</th>
+                  <th className="py-3 font-medium">Kecamatan</th>
+                  <th className="py-3 font-medium">Kelurahan</th>
+                  <th className="py-3 font-medium">Tipe</th>
+                  <th className="py-3 font-medium">Ongkos Kirim</th>
+                  <th className="py-3 font-medium">Min. Pesanan</th>
+                  <th className="py-3 font-medium">Estimasi tiba</th>
                   <th className="py-3 font-medium">Status</th>
-                  <th className="py-3 font-medium">Actions</th>
+                  <th className="py-3 font-medium">Aksi</th>
                 </tr>
               </thead>
               <tbody>
@@ -153,14 +153,14 @@ export default function DeliveryCoveragePage() {
                   <tr key={row.id} className="border-b border-gray-50 last:border-0">
                     <td className="py-4 text-gray-800">{row.province?.name ?? '—'}</td>
                     <td className="py-4 text-gray-800">{row.city?.name ?? '—'}</td>
-                    <td className="py-4 text-gray-500">{row.district?.name ?? 'All'}</td>
-                    <td className="py-4 text-gray-500">{row.village?.name ?? 'All'}</td>
+                    <td className="py-4 text-gray-500">{row.district?.name ?? 'Semua'}</td>
+                    <td className="py-4 text-gray-500">{row.village?.name ?? 'Semua'}</td>
                     <td className="py-4">{coverageBadge(row.coverageType)}</td>
                     <td className="py-4 text-gray-500">{row.coverageType === 'DELIVERY' ? rupiah(row.deliveryFee) : '—'}</td>
                     <td className="py-4 text-gray-500">{row.coverageType === 'DELIVERY' ? rupiah(row.minimumOrder) : '—'}</td>
-                    <td className="py-4 text-gray-500">{row.estimatedMinutes} min</td>
+                    <td className="py-4 text-gray-500">{row.estimatedMinutes} menit</td>
                     <td className="py-4">
-                      {row.isActive ? <Badge tone="success">Active</Badge> : <Badge tone="brand">Inactive</Badge>}
+                      {row.isActive ? <Badge tone="success">Aktif</Badge> : <Badge tone="brand">Nonaktif</Badge>}
                     </td>
                     <td className="py-4">
                       <div className="flex items-center gap-2">
@@ -169,7 +169,7 @@ export default function DeliveryCoveragePage() {
                             onClick={() => handleToggle(row)}
                             className="rounded-lg px-3 py-1.5 text-xs font-medium text-[#465fff] ring-1 ring-gray-200 hover:bg-gray-50"
                           >
-                            {row.isActive ? 'Disable' : 'Enable'}
+                            {row.isActive ? 'Nonaktifkan' : 'Aktifkan'}
                           </button>
                         </PermissionGate>
                         <PermissionGate permissions={ROUTE_PERMISSIONS.deliveryCoverageUpdate}>
@@ -177,7 +177,7 @@ export default function DeliveryCoveragePage() {
                             href={`/delivery-coverage/${row.id}`}
                             className="rounded-lg px-3 py-1.5 text-xs font-medium text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50"
                           >
-                            Edit
+                            Ubah
                           </Link>
                         </PermissionGate>
                         <PermissionGate permissions={ROUTE_PERMISSIONS.deliveryCoverageDelete}>
@@ -185,7 +185,7 @@ export default function DeliveryCoveragePage() {
                             onClick={() => handleDelete(row.id)}
                             className="rounded-lg px-3 py-1.5 text-xs font-medium text-red-600 ring-1 ring-gray-200 hover:bg-gray-50"
                           >
-                            Delete
+                            Hapus
                           </button>
                         </PermissionGate>
                       </div>

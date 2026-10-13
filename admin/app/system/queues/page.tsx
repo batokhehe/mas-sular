@@ -16,7 +16,7 @@ import {
   OutboxRow, QueueNotificationRow, OutboxFilters, QueueNotificationFilters, QueueWorker,
 } from '@/lib/admin';
 import {
-  QUEUE_TABS, QueueTab, HEALTH_BADGE, HEALTH_LABEL, statusBadge, formatAge, relatedLinks, rowJson,
+  QUEUE_TABS, QUEUE_TAB_LABEL, QueueTab, HEALTH_BADGE, HEALTH_LABEL, statusBadge, formatAge, relatedLinks, rowJson,
 } from '@/lib/system/queue-center-view';
 import { ADMIN_LOADING_MESSAGES, runWithFeedback } from '@/lib/admin-alert';
 
@@ -50,17 +50,17 @@ export default function QueueCenterPage() {
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.queues}>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold text-gray-900">Queue Center</h2>
-          <p className="mt-1 text-sm text-gray-500">Outbox events, notifications, broker, and workers — live.</p>
+          <h2 className="text-xl font-semibold text-gray-900">Pusat Antrean</h2>
+          <p className="mt-1 text-sm text-gray-500">Event outbox, notifikasi, broker, dan worker — langsung.</p>
         </div>
         <div className="flex items-center gap-3">
           <span className="flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">
             <span className={`h-2 w-2 rounded-full ${overview.isFetching ? 'animate-pulse bg-emerald-500' : 'bg-emerald-400'}`} />
-            Live · 15s
+            Langsung · 15 dtk
           </span>
-          {d ? <span className="text-xs text-gray-400">Updated {new Date(d.generatedAt).toLocaleTimeString('id-ID')}</span> : null}
+          {d ? <span className="text-xs text-gray-400">Diperbarui {new Date(d.generatedAt).toLocaleTimeString('id-ID')}</span> : null}
           <Button onClick={refreshAll} disabled={overview.isFetching} className="gap-2">
-            <RefreshCw className={`h-4 w-4 ${overview.isFetching ? 'animate-spin' : ''}`} /> Refresh
+            <RefreshCw className={`h-4 w-4 ${overview.isFetching ? 'animate-spin' : ''}`} /> Muat ulang
           </Button>
         </div>
       </div>
@@ -75,23 +75,23 @@ export default function QueueCenterPage() {
         <Card>
           <div className="flex flex-col items-center gap-3 p-10 text-center">
             <AlertTriangle className="h-6 w-6 text-red-500" />
-            <p className="text-sm text-red-600">Unable to load the queue center.</p>
-            <Button onClick={() => void overview.refetch()}>Retry</Button>
+            <p className="text-sm text-red-600">Gagal memuat pusat antrean.</p>
+            <Button onClick={() => void overview.refetch()}>Coba ulang</Button>
           </div>
         </Card>
       ) : (
         <div className="space-y-6">
           {/* Summary cards */}
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-            <Stat label="Pending Events" value={rp(d.summary.pendingEvents)} tone={d.summary.pendingEvents > 0 ? 'warn' : undefined} />
-            <Stat label="Processing" value={rp(d.summary.processing)} />
-            <Stat label="Published" value={rp(d.summary.published)} />
-            <Stat label="Failed" value={rp(d.summary.failed)} tone={d.summary.failed > 0 ? 'error' : undefined} />
+            <Stat label="Event Tertunda" value={rp(d.summary.pendingEvents)} tone={d.summary.pendingEvents > 0 ? 'warn' : undefined} />
+            <Stat label="Diproses" value={rp(d.summary.processing)} />
+            <Stat label="Terpublikasi" value={rp(d.summary.published)} />
+            <Stat label="Gagal" value={rp(d.summary.failed)} tone={d.summary.failed > 0 ? 'error' : undefined} />
             <Stat label="Retrying" value={rp(d.summary.retrying)} tone={d.summary.retrying > 0 ? 'warn' : undefined} />
             <Stat label="Dead Letters" value={rp(d.summary.deadLetters)} tone={d.summary.deadLetters > 0 ? 'error' : undefined} />
-            <Stat label="Avg Publish Time" value={`${rp(d.summary.avgPublishMs)}ms`} />
+            <Stat label="Rata-rata Waktu Publish" value={`${rp(d.summary.avgPublishMs)}ms`} />
             <Card>
-              <p className="text-sm text-gray-500">Queue Health</p>
+              <p className="text-sm text-gray-500">Kesehatan Antrean</p>
               <span className={`mt-2 inline-flex rounded-lg px-2.5 py-1 text-sm font-semibold ${HEALTH_BADGE[d.summary.health]}`}>{HEALTH_LABEL[d.summary.health]}</span>
             </Card>
           </div>
@@ -100,7 +100,7 @@ export default function QueueCenterPage() {
           <div className="flex flex-wrap gap-1 rounded-xl bg-gray-100 p-1 text-sm">
             {QUEUE_TABS.map((t) => (
               <button key={t} onClick={() => setTab(t)} className={`rounded-lg px-4 py-1.5 font-medium ${tab === t ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-800'}`}>
-                {t}
+                {QUEUE_TAB_LABEL[t]}
                 {t === 'Failed' && d.summary.failed > 0 ? <span className="ml-1.5 rounded-full bg-red-100 px-1.5 text-xs font-semibold text-red-700">{d.summary.failed}</span> : null}
               </button>
             ))}
@@ -116,7 +116,7 @@ export default function QueueCenterPage() {
               onRetryAll={(target) =>
                 runWithFeedback({
                   loading: ADMIN_LOADING_MESSAGES.update,
-                  success: 'Retry queued for all failed rows',
+                  success: 'Percobaan ulang diantrekan untuk semua baris yang gagal',
                   action: () => retryAllM.mutateAsync(target),
                 })
               }
@@ -150,26 +150,26 @@ function OutboxTab({ onOpen }: { onOpen: (row: OutboxRow) => void }) {
   return (
     <Card>
       <div className="flex flex-wrap items-end gap-3">
-        <Filter label="Search"><input defaultValue={filters.search ?? ''} onChange={(e) => patch({ search: e.target.value || undefined })} placeholder="ID, order number, payload…" className="h-10 w-72 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm outline-none focus:border-[#465fff] focus:bg-white" /></Filter>
+        <Filter label="Cari"><input defaultValue={filters.search ?? ''} onChange={(e) => patch({ search: e.target.value || undefined })} placeholder="ID, nomor pesanan, payload…" className="h-10 w-72 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm outline-none focus:border-[#465fff] focus:bg-white" /></Filter>
         <Filter label="Status">
           <select value={filters.status ?? ''} onChange={(e) => patch({ status: e.target.value || undefined })} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]">
-            <option value="">All</option>{['PENDING', 'PUBLISHED', 'FAILED'].map((s) => <option key={s} value={s}>{s}</option>)}
+            <option value="">Semua</option>{['PENDING', 'PUBLISHED', 'FAILED'].map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
         </Filter>
         <Filter label="Event"><input defaultValue={filters.event ?? ''} onChange={(e) => patch({ event: e.target.value || undefined })} placeholder="payment.paid" className="h-10 w-40 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
-        <Filter label="Aggregate"><input defaultValue={filters.aggregate ?? ''} onChange={(e) => patch({ aggregate: e.target.value || undefined })} placeholder="order" className="h-10 w-32 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
-        <Filter label="From"><input type="datetime-local" onChange={(e) => patch({ dateFrom: e.target.value ? new Date(e.target.value).toISOString() : undefined })} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
-        <Filter label="To"><input type="datetime-local" onChange={(e) => patch({ dateTo: e.target.value ? new Date(e.target.value).toISOString() : undefined })} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
+        <Filter label="Agregat"><input defaultValue={filters.aggregate ?? ''} onChange={(e) => patch({ aggregate: e.target.value || undefined })} placeholder="order" className="h-10 w-32 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
+        <Filter label="Dari"><input type="datetime-local" onChange={(e) => patch({ dateFrom: e.target.value ? new Date(e.target.value).toISOString() : undefined })} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
+        <Filter label="Sampai"><input type="datetime-local" onChange={(e) => patch({ dateTo: e.target.value ? new Date(e.target.value).toISOString() : undefined })} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
       </div>
 
       <div className="mt-4 overflow-x-auto">
-        <TableState loading={query.isLoading} error={query.isError} retry={() => void query.refetch()} empty={(data?.items.length ?? 0) === 0} emptyText="No outbox events found.">
+        <TableState loading={query.isLoading} error={query.isError} retry={() => void query.refetch()} empty={(data?.items.length ?? 0) === 0} emptyText="Tidak ada event outbox ditemukan.">
           <table className="w-full min-w-[1050px] text-left text-sm">
             <thead>
               <tr className="border-b border-gray-100 text-xs uppercase text-gray-400">
-                <th className="py-2 font-medium">Created</th><th className="py-2 font-medium">Event</th><th className="py-2 font-medium">Aggregate</th>
-                <th className="py-2 font-medium">Aggregate ID</th><th className="py-2 font-medium">Status</th><th className="py-2 text-right font-medium">Retries</th>
-                <th className="py-2 font-medium">Published</th><th className="py-2 font-medium">Last Error</th><th className="py-2 font-medium">Refs</th>
+                <th className="py-2 font-medium">Dibuat</th><th className="py-2 font-medium">Event</th><th className="py-2 font-medium">Agregat</th>
+                <th className="py-2 font-medium">ID Agregat</th><th className="py-2 font-medium">Status</th><th className="py-2 text-right font-medium">Percobaan ulang</th>
+                <th className="py-2 font-medium">Terpublikasi</th><th className="py-2 font-medium">Error terakhir</th><th className="py-2 font-medium">Referensi</th>
               </tr>
             </thead>
             <tbody>
@@ -214,28 +214,28 @@ function NotificationsTab({ onOpen }: { onOpen: (row: QueueNotificationRow) => v
   return (
     <Card>
       <div className="flex flex-wrap items-end gap-3">
-        <Filter label="Search"><input defaultValue={filters.search ?? ''} onChange={(e) => patch({ search: e.target.value || undefined })} placeholder="Recipient, phone, email, order…" className="h-10 w-72 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm outline-none focus:border-[#465fff] focus:bg-white" /></Filter>
-        <Filter label="Channel">
+        <Filter label="Cari"><input defaultValue={filters.search ?? ''} onChange={(e) => patch({ search: e.target.value || undefined })} placeholder="Penerima, telepon, email, pesanan…" className="h-10 w-72 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm outline-none focus:border-[#465fff] focus:bg-white" /></Filter>
+        <Filter label="Kanal">
           <select value={filters.channel ?? ''} onChange={(e) => patch({ channel: e.target.value || undefined })} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]">
-            <option value="">All</option>{['WHATSAPP', 'EMAIL'].map((c) => <option key={c} value={c}>{c}</option>)}
+            <option value="">Semua</option>{['WHATSAPP', 'EMAIL'].map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
         </Filter>
         <Filter label="Status">
           <select value={filters.status ?? ''} onChange={(e) => patch({ status: e.target.value || undefined })} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]">
-            <option value="">All</option>{['PENDING', 'SENT', 'FAILED'].map((s) => <option key={s} value={s}>{s}</option>)}
+            <option value="">Semua</option>{['PENDING', 'SENT', 'FAILED'].map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
         </Filter>
         <Filter label="Template"><input defaultValue={filters.template ?? ''} onChange={(e) => patch({ template: e.target.value || undefined })} placeholder="order.transfer" className="h-10 w-44 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
       </div>
 
       <div className="mt-4 overflow-x-auto">
-        <TableState loading={query.isLoading} error={query.isError} retry={() => void query.refetch()} empty={(data?.items.length ?? 0) === 0} emptyText="No notifications found.">
+        <TableState loading={query.isLoading} error={query.isError} retry={() => void query.refetch()} empty={(data?.items.length ?? 0) === 0} emptyText="Tidak ada notifikasi ditemukan.">
           <table className="w-full min-w-[960px] text-left text-sm">
             <thead>
               <tr className="border-b border-gray-100 text-xs uppercase text-gray-400">
-                <th className="py-2 font-medium">Created</th><th className="py-2 font-medium">Channel</th><th className="py-2 font-medium">Template</th>
-                <th className="py-2 font-medium">Recipient</th><th className="py-2 font-medium">Status</th><th className="py-2 text-right font-medium">Retries</th>
-                <th className="py-2 font-medium">Sent</th><th className="py-2 font-medium">Last Error</th>
+                <th className="py-2 font-medium">Dibuat</th><th className="py-2 font-medium">Kanal</th><th className="py-2 font-medium">Template</th>
+                <th className="py-2 font-medium">Penerima</th><th className="py-2 font-medium">Status</th><th className="py-2 text-right font-medium">Percobaan ulang</th>
+                <th className="py-2 font-medium">Terkirim</th><th className="py-2 font-medium">Error terakhir</th>
               </tr>
             </thead>
             <tbody>
@@ -267,18 +267,18 @@ function RabbitTab({ rabbit }: { rabbit: { configured: boolean; connected: boole
     <Card>
       <CardTitle>RabbitMQ</CardTitle>
       {!rabbit.configured ? (
-        <p className="mt-4 text-sm text-gray-500">RabbitMQ is not configured (RABBITMQ_URL unset).</p>
+        <p className="mt-4 text-sm text-gray-500">RabbitMQ belum dikonfigurasi (RABBITMQ_URL belum diatur).</p>
       ) : (
         <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
           <div className="rounded-xl border border-gray-100 p-3">
-            <p className="text-xs text-gray-400">Connected</p>
+            <p className="text-xs text-gray-400">Terhubung</p>
             <p className="mt-1 flex items-center gap-2 text-lg font-semibold text-gray-900">
               <span className={`h-2.5 w-2.5 rounded-full ${rabbit.connected ? 'bg-emerald-500' : 'bg-red-500'}`} />
-              {rabbit.connected ? 'Healthy' : 'Unreachable'}
+              {rabbit.connected ? 'Sehat' : 'Tidak terjangkau'}
             </p>
           </div>
-          <div className="rounded-xl border border-gray-100 p-3"><p className="text-xs text-gray-400">Ping Latency</p><p className="mt-1 text-lg font-semibold text-gray-900">{rabbit.latencyMs != null ? `${rabbit.latencyMs}ms` : '—'}</p></div>
-          <div className="rounded-xl border border-gray-100 p-3"><p className="text-xs text-gray-400">Last Ping</p><p className="mt-1 text-lg font-semibold text-gray-900">{dt(rabbit.lastPing)}</p></div>
+          <div className="rounded-xl border border-gray-100 p-3"><p className="text-xs text-gray-400">Latensi Ping</p><p className="mt-1 text-lg font-semibold text-gray-900">{rabbit.latencyMs != null ? `${rabbit.latencyMs}ms` : '—'}</p></div>
+          <div className="rounded-xl border border-gray-100 p-3"><p className="text-xs text-gray-400">Ping Terakhir</p><p className="mt-1 text-lg font-semibold text-gray-900">{dt(rabbit.lastPing)}</p></div>
         </div>
       )}
       {rabbit.configured && !rabbit.metricsAvailable ? (
@@ -291,20 +291,20 @@ function RabbitTab({ rabbit }: { rabbit: { configured: boolean; connected: boole
 function WorkersTab({ workers }: { workers: QueueWorker[] }) {
   return (
     <Card>
-      <CardTitle>Workers</CardTitle>
+      <CardTitle>Worker</CardTitle>
       <div className="mt-4 divide-y divide-gray-50">
         {workers.map((w) => (
           <div key={w.key} className="flex flex-wrap items-center justify-between gap-3 py-2.5 text-sm">
             <span className="flex items-center gap-2.5">
               <span className={`h-2.5 w-2.5 rounded-full ${!w.enabled ? 'bg-gray-300' : w.running ? 'bg-emerald-500' : 'bg-amber-400'}`} />
               <span className="font-medium text-gray-800">{w.name}</span>
-              <span className="text-xs text-gray-400">{!w.enabled ? 'Disabled' : w.running ? 'Running' : 'Idle'}</span>
+              <span className="text-xs text-gray-400">{!w.enabled ? 'Disabled' : w.running ? 'Berjalan' : 'Diam'}</span>
             </span>
             <span className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
               <span>Heartbeat {dt(w.heartbeat)}</span>
-              <span>Last OK {dt(w.lastSuccess)}</span>
-              <span className={w.lastFailure ? 'text-red-500' : ''}>Last fail {dt(w.lastFailure)}</span>
-              <span>Avg {rp(w.avgMs)}ms</span>
+              <span>Terakhir OK {dt(w.lastSuccess)}</span>
+              <span className={w.lastFailure ? 'text-red-500' : ''}>Terakhir gagal {dt(w.lastFailure)}</span>
+              <span>Rata-rata {rp(w.avgMs)}ms</span>
             </span>
           </div>
         ))}
@@ -326,19 +326,19 @@ function FailedTab({ deadLetters, onRetryAll, retrying }: {
     <div className="space-y-5">
       <Card>
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <CardTitle>Failed Events</CardTitle>
+          <CardTitle>Event Gagal</CardTitle>
           <PermissionGate permissions={ROUTE_PERMISSIONS.queueRetry}>
-            <Button onClick={() => onRetryAll('all')} disabled={retrying} className="gap-2"><RotateCcw className="h-4 w-4" /> Retry All Failed</Button>
+            <Button onClick={() => onRetryAll('all')} disabled={retrying} className="gap-2"><RotateCcw className="h-4 w-4" /> Coba Ulang Semua yang Gagal</Button>
           </PermissionGate>
         </div>
         <div className="mt-4 grid gap-5 xl:grid-cols-2">
           <div>
             <p className="mb-2 text-xs font-semibold uppercase text-gray-400">Failed Outbox ({deadLetters.outboxCount})</p>
-            {deadLetters.outbox.length === 0 ? <p className="text-sm text-gray-500">No failed outbox events.</p> : (
+            {deadLetters.outbox.length === 0 ? <p className="text-sm text-gray-500">Tidak ada event outbox yang gagal.</p> : (
               <ul className="space-y-2">
                 {deadLetters.outbox.map((r) => (
                   <li key={r.id} className="rounded-lg border border-red-100 bg-red-50/50 p-2.5 text-sm">
-                    <div className="flex items-center justify-between"><span className="font-medium text-gray-800">{r.eventName}</span><span className="text-xs text-gray-400">{formatAge(r.ageMs)} old · {r.attempts} retries</span></div>
+                    <div className="flex items-center justify-between"><span className="font-medium text-gray-800">{r.eventName}</span><span className="text-xs text-gray-400">{formatAge(r.ageMs)} lalu · {r.attempts} percobaan ulang</span></div>
                     <p className="mt-0.5 truncate text-xs text-red-600" title={r.lastError ?? ''}>{r.lastError ?? '—'}</p>
                   </li>
                 ))}
@@ -347,11 +347,11 @@ function FailedTab({ deadLetters, onRetryAll, retrying }: {
           </div>
           <div>
             <p className="mb-2 text-xs font-semibold uppercase text-gray-400">Failed Notifications ({deadLetters.notificationCount})</p>
-            {deadLetters.notifications.length === 0 ? <p className="text-sm text-gray-500">No failed notifications.</p> : (
+            {deadLetters.notifications.length === 0 ? <p className="text-sm text-gray-500">Tidak ada notifikasi yang gagal.</p> : (
               <ul className="space-y-2">
                 {deadLetters.notifications.map((r) => (
                   <li key={r.id} className="rounded-lg border border-red-100 bg-red-50/50 p-2.5 text-sm">
-                    <div className="flex items-center justify-between"><span className="font-medium text-gray-800">{r.channel} · {r.template}</span><span className="text-xs text-gray-400">{formatAge(r.ageMs)} old · {r.attempts} retries</span></div>
+                    <div className="flex items-center justify-between"><span className="font-medium text-gray-800">{r.channel} · {r.template}</span><span className="text-xs text-gray-400">{formatAge(r.ageMs)} lalu · {r.attempts} percobaan ulang</span></div>
                     <p className="mt-0.5 truncate text-xs text-red-600" title={r.lastError ?? ''}>{r.lastError ?? '—'} · {r.recipient}</p>
                   </li>
                 ))}
@@ -390,7 +390,7 @@ function QueueDrawer({ item, onClose, onRetried }: { item: DrawerRow; onClose: (
         ['Event', (row as OutboxRow).eventName], ['Aggregate', `${(row as OutboxRow).aggregateType} · ${(row as OutboxRow).aggregateId}`],
         ['Exchange / Key', `${(row as OutboxRow).exchange} / ${(row as OutboxRow).routingKey}`],
         ['Status', row.status], ['Retries', `${row.attempts}/${(row as OutboxRow).maxAttempts}`],
-        ['Created', dt(row.createdAt)], ['Published', dt((row as OutboxRow).publishedAt)], ['Next attempt', dt(row.nextAttemptAt)],
+        ['Created', dt(row.createdAt)], ['Published', dt((row as OutboxRow).publishedAt)], ['Percobaan berikutnya', dt(row.nextAttemptAt)],
       ]
     : [
         ['Channel', (row as QueueNotificationRow).channel], ['Template', (row as QueueNotificationRow).template],
@@ -404,20 +404,20 @@ function QueueDrawer({ item, onClose, onRetried }: { item: DrawerRow; onClose: (
       <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />
       <aside className="fixed inset-y-0 right-0 z-50 flex w-full max-w-lg flex-col bg-white shadow-2xl">
         <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
-          <h3 className="font-semibold text-gray-900">{item.kind === 'outbox' ? 'Outbox event' : 'Notification'}</h3>
+          <h3 className="font-semibold text-gray-900">{item.kind === 'outbox' ? 'Event outbox' : 'Notifikasi'}</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-700"><X className="h-5 w-5" /></button>
         </div>
         <div className="flex-1 space-y-5 overflow-y-auto p-5 text-sm">
           {row.status === 'FAILED' ? (
             <PermissionGate permissions={ROUTE_PERMISSIONS.queueRetry}>
               <Button onClick={() => retryM.mutate()} disabled={retryM.isPending} className="w-full gap-2">
-                <RotateCcw className="h-4 w-4" /> {retryM.isPending ? 'Retrying…' : 'Retry (reset to PENDING)'}
+                <RotateCcw className="h-4 w-4" /> {retryM.isPending ? 'Mencoba ulang…' : 'Coba ulang (reset ke PENDING)'}
               </Button>
             </PermissionGate>
           ) : null}
 
           <section>
-            <p className="mb-2 text-xs font-semibold uppercase text-gray-400">General</p>
+            <p className="mb-2 text-xs font-semibold uppercase text-gray-400">Umum</p>
             <dl className="space-y-1.5">
               {general.map(([label, value]) => (
                 <div key={label} className="flex items-start justify-between gap-4">
@@ -430,7 +430,7 @@ function QueueDrawer({ item, onClose, onRetried }: { item: DrawerRow; onClose: (
 
           {links.length > 0 ? (
             <section>
-              <p className="mb-2 text-xs font-semibold uppercase text-gray-400">Related</p>
+              <p className="mb-2 text-xs font-semibold uppercase text-gray-400">Terkait</p>
               <div className="flex flex-wrap gap-2">
                 {links.map((l) => (
                   <Link key={l.label} href={l.href} className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 hover:border-[#465fff] hover:text-[#465fff]">
@@ -444,8 +444,8 @@ function QueueDrawer({ item, onClose, onRetried }: { item: DrawerRow; onClose: (
           {row.lastError ? (
             <section>
               <div className="mb-2 flex items-center justify-between">
-                <p className="text-xs font-semibold uppercase text-gray-400">Last Error</p>
-                <button onClick={() => copy(row.lastError ?? '')} className="inline-flex items-center gap-1 text-xs font-medium text-[#465fff]"><Copy className="h-3.5 w-3.5" /> Copy</button>
+                <p className="text-xs font-semibold uppercase text-gray-400">Error terakhir</p>
+                <button onClick={() => copy(row.lastError ?? '')} className="inline-flex items-center gap-1 text-xs font-medium text-[#465fff]"><Copy className="h-3.5 w-3.5" /> Salin</button>
               </div>
               <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-lg bg-red-50 p-3 text-xs text-red-800">{row.lastError}</pre>
             </section>
@@ -455,8 +455,8 @@ function QueueDrawer({ item, onClose, onRetried }: { item: DrawerRow; onClose: (
             <div className="mb-2 flex items-center justify-between">
               <p className="text-xs font-semibold uppercase text-gray-400">Payload JSON</p>
               <span className="flex gap-3">
-                <button onClick={() => copy(json)} className="inline-flex items-center gap-1 text-xs font-medium text-[#465fff]"><Copy className="h-3.5 w-3.5" /> Copy JSON</button>
-                <button onClick={download} className="inline-flex items-center gap-1 text-xs font-medium text-[#465fff]"><Download className="h-3.5 w-3.5" /> Download JSON</button>
+                <button onClick={() => copy(json)} className="inline-flex items-center gap-1 text-xs font-medium text-[#465fff]"><Copy className="h-3.5 w-3.5" /> Salin JSON</button>
+                <button onClick={download} className="inline-flex items-center gap-1 text-xs font-medium text-[#465fff]"><Download className="h-3.5 w-3.5" /> Unduh JSON</button>
               </span>
             </div>
             <pre className="max-h-72 overflow-auto rounded-lg bg-gray-50 p-3 text-xs text-gray-700">{JSON.stringify(row.payload ?? {}, null, 2)}</pre>
@@ -509,8 +509,8 @@ function TableState({ loading, error, retry, empty, emptyText, children }: {
     return (
       <div className="flex flex-col items-center gap-3 p-10 text-center">
         <AlertTriangle className="h-6 w-6 text-red-500" />
-        <p className="text-sm text-red-600">Unable to load.</p>
-        <Button onClick={retry}>Retry</Button>
+        <p className="text-sm text-red-600">Gagal memuat.</p>
+        <Button onClick={retry}>Coba ulang</Button>
       </div>
     );
   }

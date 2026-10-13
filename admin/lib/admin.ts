@@ -1,4 +1,5 @@
-import { api, apiBaseUrl, getAuthToken } from './api';
+import { api, apiBaseUrl, csrfHeaders } from './api';
+import type { ServiceFeeRuleSnapshot } from './orders/service-fee-view';
 
 /** Standard paginated envelope returned by admin list endpoints. */
 export type Paginated<T> = {
@@ -25,9 +26,13 @@ export type AdminCategory = {
   icon?: string | null;
 };
 
+import type { AdminTopping, ToppingPayload } from './toppings/topping-form';
+export type { AdminTopping, ToppingPayload };
+
+// No `sku` (P2 #5): the API still returns it (it is the courier item code), but it is
+// internal and must never be rendered - omitting it here makes any attempt a compile error.
 export type AdminProduct = {
   id: string;
-  sku: string;
   slug: string;
   name: string;
   description?: string | null;
@@ -38,6 +43,8 @@ export type AdminProduct = {
   status: string;
   isBestSeller: boolean;
   isNew: boolean;
+  isPromoSpecial: boolean; // P2 #10: homepage "Promo Spesial Produk" section
+  isTrialPack: boolean; // P2 #11: homepage "Trial Pack" section
   price: number;
   spicyLevel?: number | null;
   // Real physical attributes of the PRODUCT itself, sent to Paxel as
@@ -50,8 +57,22 @@ export type AdminProduct = {
   widthCm?: number | null;
   heightCm?: number | null;
   isFragile?: boolean | null;
+  /** P2 gallery (admin detail only; the list does not load it). sortOrder 0 = cover = imageUrl. */
+  images?: { id: string; url: string; sortOrder: number }[];
+  /**
+   * Canonical catalogue position (1-based). Read-only here: it is set by dragging rows
+   * in the product list, never by the product form - see reorderAdminProducts.
+   */
+  sequence: number;
   createdAt: string;
 };
+
+/**
+ * Create/update body: the product fields plus the ordered gallery as urls (images[0] =
+ * cover). `sequence` is excluded on purpose - the API rejects unknown fields, and the
+ * order is changed only through the reorder endpoint.
+ */
+export type AdminProductInput = Omit<Partial<AdminProduct>, 'images' | 'sequence'> & { images?: string[] };
 
 export type AdminPromo = {
   id: string;
@@ -336,6 +357,34 @@ export function deleteAdminCategory(id: string) {
   });
 }
 
+export function fetchAdminToppings() {
+  return api<AdminTopping[]>('/admin/catalog/toppings');
+}
+
+export function fetchAdminTopping(id: string) {
+  return api<AdminTopping>(`/admin/catalog/toppings/${id}`);
+}
+
+export function createAdminTopping(input: ToppingPayload) {
+  return api<AdminTopping>('/admin/catalog/toppings', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateAdminTopping(id: string, input: Partial<ToppingPayload>) {
+  return api<AdminTopping>(`/admin/catalog/toppings/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+}
+
+export function deleteAdminTopping(id: string) {
+  return api<void>(`/admin/catalog/toppings/${id}`, {
+    method: 'DELETE',
+  });
+}
+
 export function fetchAdminProducts() {
   return api<AdminProduct[]>('/admin/catalog/products');
 }
@@ -405,9 +454,11 @@ export function rejectAdminPayment(paymentId: string) {
   });
 }
 
-export function fetchAdminShipments(params: PageParams & { status?: string } = {}) {
+export function fetchAdminShipments(params: PageParams & { status?: string; scope?: 'active' } = {}) {
   const q = new URLSearchParams();
   if (params.status) q.set('status', params.status);
+  // `active` = the Admin → Shipping list rule, applied server-side (lib/shipments/shipping-list.ts).
+  if (params.scope) q.set('scope', params.scope);
   appendPage(q, params);
   const query = q.toString();
   return api<Paginated<AdminShipment>>(`/admin/shipments${query ? `?${query}` : ''}`);
@@ -457,6 +508,14 @@ export type AdminOrderDetail = AdminOrder & {
   voucherDiscountAmount?: number;
   voucherCode?: string | null;
   outletId?: string | null;
+  // Payment service fee (gateway orders): the customer-charged "Biaya Layanan"
+  // plus the merchant-side accounting, recorded in both fee modes.
+  paymentServiceFee?: number;
+  paymentServiceFeeCalculated?: number;
+  paymentServiceFeeAbsorbed?: number;
+  paymentServiceFeeEnabled?: boolean | null;
+  paymentServiceFeeChannel?: string | null;
+  paymentServiceFeeRule?: ServiceFeeRuleSnapshot | null;
   items: Array<{
     id: string;
     productId: string;
@@ -465,8 +524,9 @@ export type AdminOrderDetail = AdminOrder & {
     quantity: number;
     spicyLevel?: number | null;
     notes?: string | null;
-    toppings: Array<{ id: string; name: string; price: number }>;
-    product?: { id: string; sku: string; imageUrl: string } | null;
+    // OrderItemTopping rows: name + price are snapshotted at checkout.
+    toppings: Array<{ toppingId: string; name: string; price: number }>;
+    product?: { id: string; imageUrl: string } | null; // `sku` intentionally omitted (P2 #5)
   }>;
   reservations?: Array<{
     id: string;
@@ -495,6 +555,13 @@ export type AdminOrderDetail = AdminOrder & {
       provider: string;
       channelCode: string;
       status: string;
+      // The attempt's recorded amount and fee snapshot (what the gateway was charged).
+      grossAmount?: number;
+      baseAmount?: number | null;
+      serviceFeeCalculated?: number;
+      serviceFeeCustomer?: number;
+      serviceFeeAbsorbed?: number;
+      serviceFeeEnabled?: boolean | null;
       providerReference?: string | null;
       providerTransactionId?: string | null;
       vaNumber?: string | null;
@@ -518,6 +585,40 @@ export type AdminOrderDetail = AdminOrder & {
 
 export function fetchAdminOrder(id: string) {
   return api<AdminOrderDetail>(`/admin/orders/${id}`);
+}
+
+/** P3 packing slip: read-only print view (no prices, no payment data). Order.read. */
+export type PackingSlipView = {
+  orderNumber: string;
+  orderDate: string;
+  outlet: string;
+  recipient: { name: string; address: string; regionLines: string[]; postalCode: string; phone: string };
+  items: Array<{ no: number; productName: string; quantity: number; toppings: string[] }>;
+  shipment: { trackingNumber: string | null; awbLabel: string; status: string | null; statusLabel: string };
+};
+
+export function fetchPackingSlip(orderId: string) {
+  return api<PackingSlipView>(`/admin/orders/${encodeURIComponent(orderId)}/packing-slip`);
+}
+
+// ---------------- Customer invoice link (P2 #14) ----------------
+
+/** Only metadata: the link itself is shown once, in the response that created it. */
+export type InvoiceLinkStatus = { active: { createdAt: string; expiresAt: string } | null };
+export type IssuedInvoiceLink = { invoiceUrl: string; createdAt: string; expiresAt: string };
+/** `notification.status` is the queue state (PENDING) - acceptance, not WhatsApp delivery. */
+export type SentInvoiceLink = IssuedInvoiceLink & { notification: { id: string; status: string; createdAt: string } };
+
+export function fetchInvoiceLinkStatus(orderId: string) {
+  return api<InvoiceLinkStatus>(`/admin/orders/${orderId}/invoice-link`);
+}
+
+export function createInvoiceLink(orderId: string) {
+  return api<IssuedInvoiceLink>(`/admin/orders/${orderId}/invoice-link`, { method: 'POST' });
+}
+
+export function sendInvoiceLinkWhatsApp(orderId: string) {
+  return api<SentInvoiceLink>(`/admin/orders/${orderId}/invoice-link/whatsapp`, { method: 'POST' });
 }
 
 // ---------------- Order operations center (read-only bundle + internal notes) ----------------
@@ -593,14 +694,14 @@ export function fetchAdminProduct(id: string) {
   return api<AdminProduct>(`/admin/catalog/products/${id}`);
 }
 
-export function createAdminProduct(input: Partial<AdminProduct>) {
+export function createAdminProduct(input: AdminProductInput) {
   return api<AdminProduct>('/admin/catalog/products', {
     method: 'POST',
     body: JSON.stringify(input),
   });
 }
 
-export function updateAdminProduct(id: string, input: Partial<AdminProduct>) {
+export function updateAdminProduct(id: string, input: AdminProductInput) {
   return api<AdminProduct>(`/admin/catalog/products/${id}`, {
     method: 'PATCH',
     body: JSON.stringify(input),
@@ -610,6 +711,18 @@ export function updateAdminProduct(id: string, input: Partial<AdminProduct>) {
 export function deleteAdminProduct(id: string) {
   return api<void>(`/admin/catalog/products/${id}`, {
     method: 'DELETE',
+  });
+}
+
+/**
+ * Rewrite the catalogue order. The body is the COMPLETE list of non-deleted products in
+ * its new order, numbered 1..N (see lib/products/product-sequence.reorderPayload); the
+ * server refuses a stale or partial snapshot with 409. Returns the stored order.
+ */
+export function reorderAdminProducts(items: { id: string; sequence: number }[]) {
+  return api<AdminProduct[]>('/admin/catalog/products/reorder', {
+    method: 'PATCH',
+    body: JSON.stringify({ items }),
   });
 }
 
@@ -1711,7 +1824,6 @@ export function fetchAuditEntry(id: string) {
 
 /** CSV export — raw fetch (the JSON api client cannot stream text/csv). */
 export async function exportAuditCsv(f: AuditFilters = {}): Promise<Blob> {
-  const token = getAuthToken();
   const base = apiBaseUrl();
   const body: Record<string, string> = {};
   auditQueryString(f).forEach((v, k) => {
@@ -1719,9 +1831,96 @@ export async function exportAuditCsv(f: AuditFilters = {}): Promise<Blob> {
   });
   const res = await fetch(`${base}/admin/system/audit/export`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', ...(await csrfHeaders('POST')) },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`Export failed (${res.status})`);
+  if (!res.ok) throw new Error(`Ekspor gagal (${res.status})`);
   return res.blob();
+}
+
+// ---------------------------------------------------------------------------
+// Integration API logs (P1) — external calls to Paxel / JNE / Midtrans.
+// The list carries the sanitized columns only. The detail (SUPER_ADMIN) also carries
+// the exchange EXACTLY as captured — credentials and personal data included — and
+// the view shows it verbatim: never redact, reformat or trim it here.
+// ---------------------------------------------------------------------------
+
+export type IntegrationProvider = 'PAXEL' | 'JNE' | 'MIDTRANS';
+export type IntegrationDirection = 'OUTBOUND' | 'INBOUND';
+export type IntegrationOutcome = 'OK' | 'HTTP_ERROR' | 'NETWORK_ERROR' | 'TIMEOUT' | 'PARSE_FAILED' | 'REJECTED';
+
+export type IntegrationLog = {
+  id: string;
+  createdAt: string;
+  provider: IntegrationProvider;
+  operation: string;
+  direction: IntegrationDirection;
+  operationId: string;
+  attempt: number | null;
+  maxAttempts: number | null;
+  requestId: string | null;
+  correlationId: string | null;
+  orderId: string | null;
+  paymentId: string | null;
+  shipmentId: string | null;
+  method: string | null;
+  endpoint: string | null;
+  httpStatus: number | null;
+  durationMs: number | null;
+  applicationOutcome: IntegrationOutcome;
+  errorClass: string | null;
+  errorMessage: string | null;
+  sanitizedRequest: unknown;
+  sanitizedResponse: unknown;
+};
+
+/** GET /admin/integration-logs/:id — the row plus the exact exchange (null = not captured). */
+export type IntegrationLogDetail = IntegrationLog & {
+  rawEndpoint: string | null;
+  rawRequestBody: string | null;
+  rawResponseBody: string | null;
+};
+
+export type IntegrationLogFilters = {
+  search?: string;
+  provider?: IntegrationProvider | '';
+  operation?: string;
+  direction?: IntegrationDirection | '';
+  applicationOutcome?: IntegrationOutcome | '';
+  httpStatus?: string;
+  operationId?: string;
+  orderId?: string;
+  paymentId?: string;
+  shipmentId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  sort?: 'asc' | 'desc';
+} & PageParams;
+
+export function fetchIntegrationLogs(filters: IntegrationLogFilters = {}) {
+  const q = new URLSearchParams();
+  const set = (k: string, v?: string) => {
+    if (v) q.set(k, v);
+  };
+  set('search', filters.search);
+  set('provider', filters.provider || undefined);
+  set('operation', filters.operation);
+  set('direction', filters.direction || undefined);
+  set('applicationOutcome', filters.applicationOutcome || undefined);
+  set('httpStatus', filters.httpStatus);
+  set('operationId', filters.operationId);
+  set('orderId', filters.orderId);
+  set('paymentId', filters.paymentId);
+  set('shipmentId', filters.shipmentId);
+  set('dateFrom', filters.dateFrom);
+  set('dateTo', filters.dateTo);
+  set('sort', filters.sort);
+  appendPage(q, filters);
+  const query = q.toString();
+  return api<Paginated<IntegrationLog>>(`/admin/integration-logs${query ? `?${query}` : ''}`);
+}
+
+export function fetchIntegrationLog(id: string) {
+  return api<IntegrationLogDetail>(`/admin/integration-logs/${id}`);
 }

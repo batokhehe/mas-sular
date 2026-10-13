@@ -1,5 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
+import { AdminUser, CurrentAdmin } from '../../../common/decorators/current-admin.decorator';
 import { AdminGuard } from '../../../common/guards/admin.guard';
 import { PermissionGuard } from '../../../common/guards/permission.guard';
 import { Permissions } from '../../../common/decorators/permissions.decorator';
@@ -7,9 +8,12 @@ import { AdminService } from '../admin.service';
 import { CreateCategoryDto } from '../application/dto/create-category.dto';
 import { CreateProductDto } from '../application/dto/create-product.dto';
 import { CreatePromoDto } from '../application/dto/create-promo.dto';
+import { CreateToppingDto } from '../application/dto/create-topping.dto';
+import { ReorderProductsDto } from '../application/dto/reorder-products.dto';
 import { UpdateCategoryDto } from '../application/dto/update-category.dto';
 import { UpdateProductDto } from '../application/dto/update-product.dto';
 import { UpdatePromoDto } from '../application/dto/update-promo.dto';
+import { UpdateToppingDto } from '../application/dto/update-topping.dto';
 
 @ApiTags('admin-catalog')
 @UseGuards(AdminGuard, PermissionGuard)
@@ -33,6 +37,17 @@ export class AdminCatalogController {
   @Get('products/:id')
   getProduct(@Param('id') id: string) {
     return this.adminService.getProduct(id);
+  }
+
+  /**
+   * Catalogue order (Admin -> Produk drag & drop). Declared BEFORE `products/:id` so
+   * the literal path is matched first and never swallowed as an id. Reuses
+   * Product.update: whoever may edit a product may order the catalogue.
+   */
+  @Permissions('Product.update')
+  @Patch('products/reorder')
+  reorderProducts(@Body() dto: ReorderProductsDto, @CurrentAdmin() admin: AdminUser) {
+    return this.adminService.reorderProducts(dto.items, admin?.sub);
   }
 
   @Permissions('Product.update')
@@ -105,5 +120,39 @@ export class AdminCatalogController {
   @Delete('promos/:id')
   deletePromo(@Param('id') id: string) {
     return this.adminService.deletePromo(id);
+  }
+
+  // Toppings are product add-ons, so they reuse the Product.* permissions: whoever
+  // may change product prices may change topping prices (ADMIN), the read-only
+  // roles (MANAGER, STAFF) may list them. No new RBAC subject.
+
+  @Permissions('Product.create')
+  @Post('toppings')
+  createTopping(@Body() dto: CreateToppingDto) {
+    return this.adminService.createTopping(dto);
+  }
+
+  @Permissions('Product.read')
+  @Get('toppings')
+  listToppings() {
+    return this.adminService.listToppings();
+  }
+
+  @Permissions('Product.read')
+  @Get('toppings/:id')
+  getTopping(@Param('id') id: string) {
+    return this.adminService.getTopping(id);
+  }
+
+  @Permissions('Product.update')
+  @Patch('toppings/:id')
+  updateTopping(@Param('id') id: string, @Body() dto: UpdateToppingDto) {
+    return this.adminService.updateTopping(id, dto);
+  }
+
+  @Permissions('Product.delete')
+  @Delete('toppings/:id')
+  deleteTopping(@Param('id') id: string) {
+    return this.adminService.deleteTopping(id);
   }
 }

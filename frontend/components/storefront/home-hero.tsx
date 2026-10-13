@@ -11,20 +11,20 @@ export function HomeHero() {
     <section className="relative overflow-hidden border-b bg-gradient-to-br from-primary/10 via-background to-secondary/30">
       <div className="mx-auto grid max-w-6xl items-center gap-8 px-4 py-12 lg:grid-cols-2 lg:py-16">
         <div className="text-center lg:text-left">
-          <span className="mb-4 inline-flex items-center gap-2 rounded-full bg-primary/10 px-4 py-1.5 text-sm font-medium text-primary">
+          {/* <span className="mb-4 inline-flex items-center gap-2 rounded-full bg-primary/10 px-4 py-1.5 text-sm font-medium text-primary">
             <span className="relative flex size-2">
               <span className="absolute inline-flex size-full animate-ping rounded-full bg-primary opacity-75" />
               <span className="relative inline-flex size-2 rounded-full bg-primary" />
             </span>
             Diantar fresh setiap hari
-          </span>
+          </span> */}
 
           <h1 className="text-balance text-3xl font-bold tracking-tight sm:text-4xl lg:text-5xl">
-            Bakso Premium <span className="text-primary">Asli Nusantara</span>
+            Bakso Bumbu Rujak <span className="text-primary">Favorit Keluarga</span>
           </h1>
 
           <p className="mx-auto mt-4 max-w-lg text-pretty text-muted-foreground lg:mx-0">
-            Nikmati kelezatan bakso berkualitas tinggi dengan daging sapi pilihan, langsung diantar ke rumah Anda.
+            Gak pake kuah, Bakso mas sular hadir dengan sensasi kenikmatan yang beda, gak gitu aja.
           </p>
 
           <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row lg:justify-start">

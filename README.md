@@ -15,7 +15,7 @@ The backend contracts were generated around those flows.
 
 ## Architecture Plan
 
-- Backend: NestJS, Clean Architecture module boundaries, Prisma/MySQL persistence, Redis cache/session/rate-limit/queue backing, RabbitMQ domain events.
+- Backend: NestJS, Clean Architecture module boundaries, Prisma/PostgreSQL persistence, Redis cache/session/rate-limit/queue backing, RabbitMQ domain events.
 - Admin: Next.js App Router, Tailwind, TanStack Query, Zustand, CMS/operations screens.
 - Modules: `auth`, `users`, `catalog`, `cart`, `orders`, `payments`, `shipping`, `cms`, `audit`.
 - Boundaries: each business module is prepared for CQRS by separating DTOs, domain contracts, infrastructure repositories/providers, and presentation controllers.
@@ -42,57 +42,98 @@ The backend contracts were generated around those flows.
 
 ## Local Setup
 
+Local development runs PostgreSQL 16, Redis and RabbitMQ in Docker
+(`docker-compose.yml`, project `mas-sular-dev`). Nothing local depends on the
+retired shared infrastructure (the old MySQL, Upstash Redis or CloudAMQP).
+
 1. Install dependencies:
 
    ```bash
    pnpm install
    ```
 
-2. Copy env files:
+### Option A: everything in Docker
 
-   ```bash
-   cp .env.example .env
-   cp backend/.env.example backend/.env
-   cp admin/.env.example admin/.env
-   ```
+No env file is required. The backend container loads the committed
+`backend/.env.example` (placeholders only), and Compose injects the service-DNS
+`DATABASE_URL` / `REDIS_URL` / `RABBITMQ_URL`.
 
-3. Start infrastructure:
+```bash
+docker compose up -d        # postgres, redis, rabbitmq, migrations, backend, storefront, admin
+docker compose run --rm --no-deps backend-migrate node node_modules/tsx/dist/cli.mjs prisma/seed.ts   # optional dev seed
+```
 
-   ```bash
-   docker compose up -d mysql redis rabbitmq
-   ```
+Optional overrides, all gitignored:
 
-4. Prepare database:
+- `.env` (from `.env.example`): local Postgres/RabbitMQ credentials, host ports and
+  storefront/admin build args. Every value has the same default in `docker-compose.yml`.
+- `backend/.env.docker`: your own backend values on top of `backend/.env.example`
+  (e.g. Midtrans/courier **sandbox** keys). List only the keys you change. Never
+  commit it.
 
-   ```bash
-   pnpm --filter backend prisma:generate
-   pnpm --filter backend prisma:migrate
-   pnpm --filter backend prisma:seed
-   ```
+### Option B: apps on the host, infrastructure in Docker
 
-5. Start infrastructure services:
+```bash
+cp backend/.env.example backend/.env
+cp frontend/.env.example frontend/.env
+cp admin/.env.example admin/.env
 
-   ```bash
-   pnpm infra:up
-   ```
+docker compose up -d postgres redis rabbitmq
+pnpm --filter ./backend prisma:generate
+pnpm --filter ./backend prisma:deploy   # apply committed migrations (prisma:migrate is for authoring new ones)
+pnpm --filter ./backend prisma:seed     # optional dev seed
+pnpm dev                                # backend + admin + storefront in parallel
+```
 
-6. Run apps individually:
+Stop the Docker `backend`, `frontend` and `admin` containers first if they are
+running; they publish the same ports (3001/3000/3002). If you already have a
+`backend/.env` from before the PostgreSQL migration, recreate it from the
+template. An old file may still point at the retired shared MySQL/Redis/RabbitMQ.
 
-   ```bash
-   pnpm --filter backend dev
-   pnpm --filter admin dev
-   pnpm --filter frontend dev
-   ```
+### Env files at a glance
 
-7. Run all apps at once from project root:
+| File | Used by | Notes |
+|---|---|---|
+| `backend/.env.example` | backend (`backend/.env` on the host; loaded directly by local Docker) | Local values. `CHANGE_ME` placeholders boot locally and are refused in staging/production |
+| `frontend/.env.example` | storefront `next dev` (copy to `frontend/.env`) | `NEXT_PUBLIC_*` only (public, never secrets) |
+| `admin/.env.example` | admin `next dev` (copy to `admin/.env`) | `NEXT_PUBLIC_API_URL` only |
+| `.env.example` | `docker compose` interpolation only | Credentials, host ports, build args |
+| `production.env.example` | **production only** (copy to `production.env`) | See [Production configuration](#production-configuration) |
 
-   ```bash
-   pnpm dev:all
-   ```
+**The two apps use different API URL contracts:**
+
+- Storefront `NEXT_PUBLIC_API_URL` is the **bare origin**: `http://localhost:3001`.
+  The storefront appends `/api/v1` itself; its image build refuses a value ending in `/api/v1`.
+- Admin `NEXT_PUBLIC_API_URL` **includes the prefix**: `http://localhost:3001/api/v1`.
+  The admin appends paths directly; its image build refuses anything else. In
+  Compose files the admin's value is named `NEXT_PUBLIC_ADMIN_API_URL`.
+
+Customer Google Sign-In needs a real OAuth client id in both the backend's
+`GOOGLE_CLIENT_ID` and the storefront's `NEXT_PUBLIC_GOOGLE_CLIENT_ID` (the same
+value). Everything else works with the template values.
+
+## Production configuration
+
+Production does **not** read `backend/.env.example`, `frontend/.env.example`,
+`admin/.env.example` or the root `.env`. It uses one file, `production.env`, created
+from `production.env.example` and never committed:
+
+```bash
+cp production.env.example production.env && chmod 600 production.env
+# fill in every CHANGE_ME / <PLACEHOLDER>
+docker compose --env-file ./production.env -f docker-compose.production.yml up -d --build
+```
+
+- The backend receives it as `env_file`. `NODE_ENV=production` refuses to boot
+  while any `CHANGE_ME` / `<PLACEHOLDER>` value remains.
+- The storefront and admin receive their `NEXT_PUBLIC_*` values as **build args**
+  from the same file. `NEXT_PUBLIC_API_URL` (storefront, bare origin) and
+  `NEXT_PUBLIC_ADMIN_API_URL` (admin, `/api/v1`) are both required. Changing one
+  means rebuilding (`up -d --build <service>`), not restarting.
 
 ## Root Command Reference
 
-- `pnpm infra:up` – start MySQL, Redis, and RabbitMQ services
+- `pnpm infra:up` – start PostgreSQL, Redis, and RabbitMQ services
 - `pnpm infra:down` – stop Docker Compose services
 - `pnpm dev` – start infrastructure and run backend + admin + frontend in parallel
 - `pnpm dev:all` – start infrastructure and run backend + admin + frontend in parallel
@@ -104,7 +145,8 @@ The backend contracts were generated around those flows.
 
 ## Deploying Standalone Projects
 
-Each app can be deployed independently.
+Each app can be built and started independently. The supported production deployment is
+`docker-compose.production.yml` with `production.env` (see [Production configuration](#production-configuration)).
 
 ### Backend
 
@@ -143,7 +185,7 @@ pnpm start
 
 ## Production Notes
 
-- Replace all secrets in env files before deployment.
+- Configure production only through `production.env`. The API refuses to boot while a `CHANGE_ME` / `<PLACEHOLDER>` value remains.
 - Configure real Google OAuth verification for `POST /auth/google`.
 - Add object storage for receipt/product/banner uploads.
 - Add worker processes for queues if async volume grows.

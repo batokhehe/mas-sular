@@ -7,17 +7,11 @@ import { qk } from '@/lib/query/keys'
 import { hasCustomerSession } from '@/lib/auth/tokens'
 
 export function useAddresses() {
-  const q = useQuery({
+  return useQuery({
     queryKey: qk.addresses,
     queryFn: addressesApi.list,
     enabled: hasCustomerSession(),
   })
-  // ── TEMP RCA instrumentation — remove after verification ───────────────────
-  if (typeof window !== 'undefined') {
-    console.debug('[RCA useAddresses]', { enabled: hasCustomerSession(), status: q.status, fetchStatus: q.fetchStatus, length: q.data?.length })
-  }
-  // ───────────────────────────────────────────────────────────────────────────
-  return q
 }
 
 function useAddressInvalidate() {
@@ -33,7 +27,7 @@ export function useCreateAddress() {
   return useMutation({
     mutationFn: (body: AddressInput) => addressesApi.create(body),
     onSuccess: () => {
-      toast.success('Address added')
+      toast.success('Alamat ditambahkan')
       invalidate()
     },
   })
@@ -44,7 +38,7 @@ export function useUpdateAddress() {
   return useMutation({
     mutationFn: ({ id, body }: { id: string; body: AddressUpdate }) => addressesApi.update(id, body),
     onSuccess: () => {
-      toast.success('Address updated')
+      toast.success('Alamat diperbarui')
       invalidate()
     },
   })
@@ -55,7 +49,7 @@ export function useDeleteAddress() {
   return useMutation({
     mutationFn: (id: string) => addressesApi.remove(id),
     onSuccess: () => {
-      toast.success('Address removed')
+      toast.success('Alamat dihapus')
       invalidate()
     },
   })

@@ -1,4 +1,4 @@
-import { api, apiBaseUrl, getAuthToken } from './api';
+import { api, apiBaseUrl, hasAdminSessionMarker } from './api';
 
 /** Admin bell / notification platform API client. */
 
@@ -51,9 +51,14 @@ export function unregisterPushToken(token: string) {
   return api(`/admin/push/register/${encodeURIComponent(token)}`, { method: 'DELETE' });
 }
 
-/** SSE endpoint URL (EventSource cannot send headers → JWT rides as ?token=). */
+/**
+ * SSE endpoint URL. Credentials NEVER go in the URL (H2): the stream authenticates
+ * with the httpOnly session cookie, so the EventSource must be opened with
+ * `{ withCredentials: true }`. The API rejects any ?token= outright.
+ */
 export function bellStreamUrl(): string | null {
-  const token = getAuthToken();
-  if (!token) return null;
-  return `${apiBaseUrl()}/admin/notifications/stream?token=${encodeURIComponent(token)}`;
+  if (!hasAdminSessionMarker()) return null;
+  return `${apiBaseUrl()}/admin/notifications/stream`;
 }
+
+export const BELL_STREAM_INIT: EventSourceInit = { withCredentials: true };

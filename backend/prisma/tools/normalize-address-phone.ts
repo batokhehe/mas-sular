@@ -96,7 +96,7 @@ function classify(phone: string): { action: Action; reason: string; canonical: s
  * Prove the target is disposable before any write.
  *
  * Multiple independent checks, because one is a single point of failure: the
- * environment, an explicit deny list, and the live `SELECT DATABASE()` name —
+ * environment, an explicit deny list, and the live `current_database()` name —
  * not the hostname, which is trivially the same for a dev and a prod instance.
  */
 async function assertWritable(
@@ -107,7 +107,7 @@ async function assertWritable(
     throw new Error('refusing to apply: NODE_ENV=production');
   }
 
-  const rows = await prisma.$queryRawUnsafe<Array<{ db: string | null }>>('SELECT DATABASE() AS db');
+  const rows = await prisma.$queryRawUnsafe<Array<{ db: string | null }>>('SELECT current_database() AS db');
   const database = rows[0]?.db ?? null;
   if (!database) {
     throw new Error('refusing to apply: could not determine the connected database');
@@ -154,7 +154,7 @@ export async function run(argv: string[] = process.argv.slice(2)): Promise<numbe
   const prisma = new PrismaClient();
 
   try {
-    const database = (await prisma.$queryRawUnsafe<Array<{ db: string | null }>>('SELECT DATABASE() AS db'))[0]?.db;
+    const database = (await prisma.$queryRawUnsafe<Array<{ db: string | null }>>('SELECT current_database() AS db'))[0]?.db;
     console.log(`[normalize-address-phone] database=${database ?? '(unknown)'} mode=${apply ? 'APPLY' : 'DRY RUN'}`);
     if (ids.length) console.log(`allowlist: ${ids.length} explicit row id(s)`);
 

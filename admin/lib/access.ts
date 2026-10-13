@@ -6,6 +6,11 @@ export const ROUTE_PERMISSIONS = {
   categories: ['Category.read'],
   categoryCreate: ['Category.create'],
   categoryUpdate: ['Category.update'],
+  // Toppings are product add-ons: they reuse the Product.* permissions (see the API).
+  toppings: ['Product.read'],
+  toppingCreate: ['Product.create'],
+  toppingUpdate: ['Product.update'],
+  toppingDelete: ['Product.delete'],
   banners: ['Banner.read'],
   bannerCreate: ['Banner.create'],
   bannerUpdate: ['Banner.update'],
@@ -46,6 +51,8 @@ export const ROUTE_PERMISSIONS = {
   stockTransferCreate: ['StockTransfer.create'],
   stockTransferUpdate: ['StockTransfer.update'],
   systemLogs: ['SystemLog.read'],
+  // External API call log (Paxel / JNE / Midtrans) — SUPER_ADMIN only for now.
+  integrationLogs: ['IntegrationLog.read'],
   queues: ['Queue.read'],
   queueRetry: ['Queue.retry'],
   incidents: ['Incident.read'],

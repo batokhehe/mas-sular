@@ -5,6 +5,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import { PermissionGate } from '@/components/auth/permission-gate';
 import { AdminShell } from '@/components/layout/admin-shell';
 import { Badge } from '@/components/ui/badge';
+import { stockTransferStatusLabel } from '@/lib/status-labels';
 import { Button } from '@/components/ui/button';
 import { Card, CardTitle } from '@/components/ui/card';
 import { Pagination } from '@/components/ui/pagination';
@@ -72,58 +73,58 @@ export default function StockTransferPage() {
   return (
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.stockTransfers}>
       <div className="mb-6">
-        <h2 className="text-xl font-semibold text-gray-900">Stock Transfer</h2>
-        <p className="mt-1 text-sm text-gray-500">Move stock between outlets. Requested → Approved → Completed.</p>
+        <h2 className="text-xl font-semibold text-gray-900">Transfer Stok</h2>
+        <p className="mt-1 text-sm text-gray-500">Pindahkan stok antar-outlet. Diajukan → Disetujui → Selesai.</p>
       </div>
 
       <PermissionGate permissions={ROUTE_PERMISSIONS.stockTransferCreate}>
         <Card className="mb-5">
-          <CardTitle>New transfer</CardTitle>
+          <CardTitle>Transfer baru</CardTitle>
           <div className="mt-4 grid gap-3 lg:grid-cols-5">
             <select value={form.productId} onChange={(e) => setForm({ ...form, productId: e.target.value })} className="h-11 rounded-xl border border-gray-200 px-3 text-sm">
-              <option value="">Product…</option>
+              <option value="">Produk…</option>
               {products.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
             </select>
             <select value={form.fromOutletId} onChange={(e) => setForm({ ...form, fromOutletId: e.target.value })} className="h-11 rounded-xl border border-gray-200 px-3 text-sm">
-              <option value="">From outlet…</option>
+              <option value="">Dari outlet…</option>
               {outlets.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
             </select>
             <select value={form.toOutletId} onChange={(e) => setForm({ ...form, toOutletId: e.target.value })} className="h-11 rounded-xl border border-gray-200 px-3 text-sm">
-              <option value="">To outlet…</option>
+              <option value="">Ke outlet…</option>
               {outlets.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
             </select>
-            <input value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value.replace(/\D/g, '') })} placeholder="Qty" className="h-11 rounded-xl border border-gray-200 px-3 text-sm" />
-            <Button onClick={submit} disabled={requestM.isPending || !form.productId || !form.fromOutletId || !form.toOutletId || !form.quantity}>Request</Button>
+            <input value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value.replace(/\D/g, '') })} placeholder="Jumlah" className="h-11 rounded-xl border border-gray-200 px-3 text-sm" />
+            <Button onClick={submit} disabled={requestM.isPending || !form.productId || !form.fromOutletId || !form.toOutletId || !form.quantity}>Ajukan</Button>
           </div>
         </Card>
       </PermissionGate>
 
       <Card>
-        <CardTitle>Transfers</CardTitle>
+        <CardTitle>Daftar Transfer</CardTitle>
         <div className="mt-4 space-y-3">
           {isLoading ? (
-            <p className="p-6 text-sm text-gray-500">Loading…</p>
+            <p className="p-6 text-sm text-gray-500">Memuat…</p>
           ) : (data?.items.length ?? 0) === 0 ? (
-            <p className="p-6 text-sm text-gray-500">No transfers yet.</p>
+            <p className="p-6 text-sm text-gray-500">Belum ada transfer.</p>
           ) : (
             data?.items.map((t) => (
               <div key={t.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-100 p-4">
                 <div>
                   <p className="font-medium text-gray-800">
-                    {t.product?.name ?? t.productId} · {t.quantity} units
+                    {t.product?.name ?? t.productId} · {t.quantity} unit
                   </p>
                   <p className="text-sm text-gray-500">
                     {t.fromOutlet?.name ?? '—'} → {t.toOutlet?.name ?? '—'}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Badge tone={tone[t.status]}>{t.status}</Badge>
+                  <Badge tone={tone[t.status]}>{stockTransferStatusLabel(t.status)}</Badge>
                   <PermissionGate permissions={ROUTE_PERMISSIONS.stockTransferUpdate}>
                     {t.status === 'REQUESTED' ? (
-                      <Button onClick={() => act(() => approveM.mutateAsync(t.id), 'Transfer approved')}>Approve</Button>
+                      <Button onClick={() => act(() => approveM.mutateAsync(t.id), 'Transfer disetujui')}>Setujui</Button>
                     ) : null}
                     {t.status === 'APPROVED' ? (
-                      <Button onClick={() => act(() => completeM.mutateAsync(t.id), 'Transfer completed')}>Complete</Button>
+                      <Button onClick={() => act(() => completeM.mutateAsync(t.id), 'Transfer selesai')}>Selesaikan</Button>
                     ) : null}
                   </PermissionGate>
                 </div>

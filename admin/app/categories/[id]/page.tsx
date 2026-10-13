@@ -17,7 +17,7 @@ export default function CategoryDetailPage() {
 
   const categoryQuery = useQuery({
     queryKey: ['admin-category', categoryId],
-    queryFn: () => (categoryId ? fetchAdminCategory(categoryId) : Promise.reject(new Error('Missing category id'))),
+    queryFn: () => (categoryId ? fetchAdminCategory(categoryId) : Promise.reject(new Error('ID kategori tidak ada'))),
     enabled: Boolean(categoryId),
     retry: false,
   });
@@ -34,7 +34,7 @@ export default function CategoryDetailPage() {
 
   const deleteCategory = useMutation({
     mutationFn: () => {
-      if (!categoryId) throw new Error('Missing category id');
+      if (!categoryId) throw new Error('ID kategori tidak ada');
       return deleteAdminCategory(categoryId);
     },
     onSuccess: () => {
@@ -46,7 +46,7 @@ export default function CategoryDetailPage() {
   if (categoryQuery.isLoading) {
     return (
       <AdminShell requiredPermissions={ROUTE_PERMISSIONS.categoryUpdate}>
-        <p className="p-6 text-sm text-gray-500">Loading category details...</p>
+        <p className="p-6 text-sm text-gray-500">Memuat detail kategori...</p>
       </AdminShell>
     );
   }
@@ -55,9 +55,9 @@ export default function CategoryDetailPage() {
     return (
       <AdminShell requiredPermissions={ROUTE_PERMISSIONS.categoryUpdate}>
         <div className="space-y-3 rounded-2xl border border-red-100 bg-red-50 p-6 text-sm text-red-700">
-          <p>Unable to load category details. Please try again later.</p>
+          <p>Gagal memuat detail kategori. Silakan coba lagi nanti.</p>
           <Link href="/categories" className="font-medium text-[#465fff] underline">
-            Back to categories
+            Kembali ke kategori
           </Link>
         </div>
       </AdminShell>
@@ -68,11 +68,11 @@ export default function CategoryDetailPage() {
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.categoryUpdate}>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold text-gray-900">Edit Category</h2>
-          <p className="mt-1 text-sm text-gray-500">Update category display details and ordering.</p>
+          <h2 className="text-xl font-semibold text-gray-900">Ubah Kategori</h2>
+          <p className="mt-1 text-sm text-gray-500">Perbarui detail tampilan dan urutan kategori.</p>
         </div>
         <Link href="/categories" className="text-sm font-medium text-[#465fff] hover:text-indigo-700">
-          Back to categories
+          Kembali ke kategori
         </Link>
       </div>
       <CategoryForm
@@ -87,13 +87,13 @@ export default function CategoryDetailPage() {
         }}
         onDelete={async () => {
           await runWithFeedback({
-            confirm: () => confirmDelete('Category'),
+            confirm: () => confirmDelete('Kategori'),
             loading: ADMIN_LOADING_MESSAGES.delete,
-            success: ADMIN_SUCCESS_MESSAGES.deleted('Category'),
+            success: ADMIN_SUCCESS_MESSAGES.deleted('Kategori'),
             action: () => deleteCategory.mutateAsync(),
           });
         }}
-        submitLabel={updateCategory.isPending ? 'Saving...' : 'Save Category'}
+        submitLabel={updateCategory.isPending ? 'Menyimpan...' : 'Simpan Kategori'}
         isSubmitting={updateCategory.isPending}
         isDeleting={deleteCategory.isPending}
       />

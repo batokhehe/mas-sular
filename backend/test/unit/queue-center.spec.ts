@@ -28,9 +28,9 @@ const NOTIF_ROW = {
 
 function queryRaw(arg: unknown): Promise<unknown[]> {
   const t = sqlText(arg);
-  if (t.includes('FROM `OutboxEvent`') && t.includes('avgPublishMs'))
+  if (t.includes('FROM "OutboxEvent"') && t.includes('avgPublishMs'))
     return Promise.resolve([{ pending: 4, processing: 1, published: 100, failed: 2, retrying: 3, oldestPending: RECENT, lastActivity: RECENT, lastFailure: RECENT, avgPublishMs: 250 }]);
-  if (t.includes('FROM `NotificationOutbox`') && t.includes('avgPublishMs'))
+  if (t.includes('FROM "NotificationOutbox"') && t.includes('avgPublishMs'))
     return Promise.resolve([{ pending: 6, processing: 0, published: 50, failed: 1, retrying: 2, oldestPending: RECENT, lastActivity: RECENT, lastFailure: null, avgPublishMs: 900 }]);
   if (t.includes("module LIKE 'worker.%'"))
     return Promise.resolve([{ module: 'worker.payment-lifecycle', success: 12, failure: 0, lastSuccess: RECENT, lastFailure: null, heartbeat: RECENT, avgMs: 20 }]);

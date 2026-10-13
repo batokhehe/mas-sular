@@ -33,7 +33,7 @@ test('entity links: known entities route to their admin pages', () => {
 });
 
 test('table summary: diff count, else entity name, else humanized action', () => {
-  assert.equal(entrySummary({ diff: [{ field: 'a', before: 1, after: 2 }], action: 'UPDATE', entityName: null }), '1 field changed');
+  assert.equal(entrySummary({ diff: [{ field: 'a', before: 1, after: 2 }], action: 'UPDATE', entityName: null }), '1 field diubah');
   assert.equal(entrySummary({ diff: [], action: 'VERIFY_PAYMENT', entityName: 'BMS-1' }), 'BMS-1');
   assert.equal(entrySummary({ diff: null, action: 'CANCEL_ORDER', entityName: null }), 'cancel order');
 });

@@ -112,11 +112,11 @@ export class SystemDashboardService {
     try {
       const rows = await this.prisma.$queryRaw<Array<{ requests: unknown; avgMs: unknown; warnings: unknown; errors: unknown }>>(Prisma.sql`
         SELECT
-          SUM(module = 'http') AS requests,
-          AVG(CASE WHEN module = 'http' THEN durationMs END) AS avgMs,
-          SUM(level = 'WARN') AS warnings,
-          SUM(level = 'ERROR') AS errors
-        FROM \`SystemLog\` WHERE createdAt >= ${todayStart}
+          COUNT(*) FILTER (WHERE module = 'http') AS requests,
+          AVG("durationMs") FILTER (WHERE module = 'http') AS "avgMs",
+          COUNT(*) FILTER (WHERE level = 'WARN') AS warnings,
+          COUNT(*) FILTER (WHERE level = 'ERROR') AS errors
+        FROM "SystemLog" WHERE "createdAt" >= ${todayStart}
       `);
       const r = rows[0] ?? {};
       return { requests: num(r.requests), avgMs: Math.round(num(r.avgMs)), warnings: num(r.warnings), errors: num(r.errors) };
@@ -139,11 +139,11 @@ export class SystemDashboardService {
 
   private async requestP95(since: Date): Promise<number> {
     try {
-      const cnt = await this.prisma.$queryRaw<Array<{ n: unknown }>>(Prisma.sql`SELECT COUNT(*) n FROM \`SystemLog\` WHERE module='http' AND durationMs IS NOT NULL AND createdAt >= ${since}`);
+      const cnt = await this.prisma.$queryRaw<Array<{ n: unknown }>>(Prisma.sql`SELECT COUNT(*) n FROM "SystemLog" WHERE module='http' AND "durationMs" IS NOT NULL AND "createdAt" >= ${since}`);
       const total = num(cnt[0]?.n);
       if (total === 0) return 0;
       const offset = Math.min(total - 1, Math.floor(total * 0.95));
-      const rows = await this.prisma.$queryRaw<Array<{ d: unknown }>>(Prisma.sql`SELECT durationMs d FROM \`SystemLog\` WHERE module='http' AND durationMs IS NOT NULL AND createdAt >= ${since} ORDER BY durationMs ASC LIMIT 1 OFFSET ${offset}`);
+      const rows = await this.prisma.$queryRaw<Array<{ d: unknown }>>(Prisma.sql`SELECT "durationMs" d FROM "SystemLog" WHERE module='http' AND "durationMs" IS NOT NULL AND "createdAt" >= ${since} ORDER BY "durationMs" ASC LIMIT 1 OFFSET ${offset}`);
       return num(rows[0]?.d);
     } catch {
       return 0;
@@ -154,12 +154,12 @@ export class SystemDashboardService {
     try {
       // Normalize concrete ids (UUID / numeric segments) → :id so routes group together.
       const rows = await this.prisma.$queryRaw<Array<{ endpoint: string; c: unknown; avgMs: unknown; maxMs: unknown }>>(Prisma.sql`
-        SELECT CONCAT(method, ' ', REGEXP_REPLACE(REGEXP_REPLACE(COALESCE(path, ''), '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', ':id'), '/[0-9]+', '/:id')) AS endpoint,
-               COUNT(*) c, AVG(durationMs) avgMs, MAX(durationMs) maxMs
-        FROM \`SystemLog\`
-        WHERE module = 'http' AND createdAt >= ${since}
+        SELECT CONCAT(method, ' ', REGEXP_REPLACE(REGEXP_REPLACE(COALESCE(path, ''), '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', ':id', 'g'), '/[0-9]+', '/:id', 'g')) AS endpoint,
+               COUNT(*) c, AVG("durationMs") "avgMs", MAX("durationMs") "maxMs"
+        FROM "SystemLog"
+        WHERE module = 'http' AND "createdAt" >= ${since}
         GROUP BY endpoint
-        ORDER BY ${mode === 'slow' ? Prisma.sql`AVG(durationMs) DESC` : Prisma.sql`c DESC`}
+        ORDER BY ${mode === 'slow' ? Prisma.sql`AVG("durationMs") DESC` : Prisma.sql`c DESC`}
         LIMIT 10
       `);
       return rows.map((r) => ({ endpoint: r.endpoint, count: num(r.c), avgMs: Math.round(num(r.avgMs)), maxMs: num(r.maxMs) }));
@@ -183,8 +183,8 @@ export class SystemDashboardService {
   private async groupCount(since: Date, col: 'module' | 'action') {
     try {
       const rows = await this.prisma.$queryRaw<Array<{ k: string; c: unknown }>>(Prisma.sql`
-        SELECT ${Prisma.raw(`\`${col}\``)} k, COUNT(*) c FROM \`SystemLog\`
-        WHERE level = 'ERROR' AND createdAt >= ${since} GROUP BY k ORDER BY c DESC LIMIT 20
+        SELECT ${Prisma.raw(`"${col}"`)} k, COUNT(*) c FROM "SystemLog"
+        WHERE level = 'ERROR' AND "createdAt" >= ${since} GROUP BY k ORDER BY c DESC LIMIT 20
       `);
       return rows.map((r) => ({ key: r.k, count: num(r.c) }));
     } catch {
@@ -195,8 +195,8 @@ export class SystemDashboardService {
   private async topMessages(since: Date) {
     try {
       const rows = await this.prisma.$queryRaw<Array<{ message: string; c: unknown }>>(Prisma.sql`
-        SELECT LEFT(message, 200) message, COUNT(*) c FROM \`SystemLog\`
-        WHERE level = 'ERROR' AND createdAt >= ${since} GROUP BY LEFT(message, 200) ORDER BY c DESC LIMIT 10
+        SELECT LEFT(message, 200) message, COUNT(*) c FROM "SystemLog"
+        WHERE level = 'ERROR' AND "createdAt" >= ${since} GROUP BY LEFT(message, 200) ORDER BY c DESC LIMIT 10
       `);
       return rows.map((r) => ({ message: r.message, count: num(r.c) }));
     } catch {
@@ -213,18 +213,21 @@ export class SystemDashboardService {
   private async queueOne(table: 'OutboxEvent' | 'NotificationOutbox', now: Date) {
     const empty = { pending: 0, processing: 0, failed: 0, published: 0, oldestPending: null as string | null, retryCount: 0, lastActivity: null as string | null };
     try {
-      const t = Prisma.raw(`\`${table}\``);
-      const lastCol = table === 'OutboxEvent' ? Prisma.raw('publishedAt') : Prisma.raw('sentAt');
+      const t = Prisma.raw(`"${table}"`);
+      const lastCol = table === 'OutboxEvent' ? Prisma.raw('"publishedAt"') : Prisma.raw('"sentAt"');
+      // status is a NATIVE enum in PostgreSQL, so a bound parameter must be cast
+      // to the enum type belonging to THIS table.
+      const enumT = Prisma.raw(table === 'OutboxEvent' ? '"OutboxStatus"' : '"NotificationStatus"');
       const successState = table === 'OutboxEvent' ? 'PUBLISHED' : 'SENT';
       const rows = await this.prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
         SELECT
-          SUM(status = 'PENDING') pending,
-          SUM(status = 'PENDING' AND lockedUntil IS NOT NULL AND lockedUntil > ${now}) processing,
-          SUM(status = 'FAILED') failed,
-          SUM(status = ${successState}) published,
-          MIN(CASE WHEN status = 'PENDING' THEN createdAt END) oldestPending,
-          SUM(attempts > 0) retryCount,
-          MAX(${lastCol}) lastActivity
+          COUNT(*) FILTER (WHERE status = 'PENDING') pending,
+          COUNT(*) FILTER (WHERE status = 'PENDING' AND "lockedUntil" IS NOT NULL AND "lockedUntil" > ${now}) processing,
+          COUNT(*) FILTER (WHERE status = 'FAILED') failed,
+          COUNT(*) FILTER (WHERE status = ${successState}::${enumT}) published,
+          MIN("createdAt") FILTER (WHERE status = 'PENDING') "oldestPending",
+          COUNT(*) FILTER (WHERE attempts > 0) "retryCount",
+          MAX(${lastCol}) "lastActivity"
         FROM ${t}
       `);
       const r = rows[0] ?? {};
@@ -241,13 +244,13 @@ export class SystemDashboardService {
     try {
       const rows = await this.prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
         SELECT channel,
-          SUM(status = 'SENT') success,
-          SUM(status = 'FAILED') failed,
-          SUM(attempts > 0) retry,
-          AVG(CASE WHEN status = 'SENT' AND sentAt IS NOT NULL THEN TIMESTAMPDIFF(SECOND, createdAt, sentAt) END) avgSendSec,
-          MAX(CASE WHEN status = 'SENT' THEN sentAt END) lastSuccess,
-          MAX(CASE WHEN status = 'FAILED' THEN createdAt END) lastFailure
-        FROM \`NotificationOutbox\` GROUP BY channel
+          COUNT(*) FILTER (WHERE status = 'SENT') success,
+          COUNT(*) FILTER (WHERE status = 'FAILED') failed,
+          COUNT(*) FILTER (WHERE attempts > 0) retry,
+          AVG(EXTRACT(EPOCH FROM ("sentAt" - "createdAt"))) FILTER (WHERE status = 'SENT' AND "sentAt" IS NOT NULL) "avgSendSec",
+          MAX("sentAt") FILTER (WHERE status = 'SENT') "lastSuccess",
+          MAX("createdAt") FILTER (WHERE status = 'FAILED') "lastFailure"
+        FROM "NotificationOutbox" GROUP BY channel
       `);
       const pick = (ch: string) => {
         const r = rows.find((x) => x.channel === ch);
@@ -265,8 +268,8 @@ export class SystemDashboardService {
   private async workerAggregates() {
     try {
       const rows = await this.prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
-        SELECT module, SUM(action = 'tick') success, SUM(action = 'tick.failed') failure, MAX(createdAt) lastExecution, AVG(durationMs) avgMs
-        FROM \`SystemLog\` WHERE module LIKE 'worker.%' GROUP BY module
+        SELECT module, COUNT(*) FILTER (WHERE action = 'tick') success, COUNT(*) FILTER (WHERE action = 'tick.failed') failure, MAX("createdAt") "lastExecution", AVG("durationMs") "avgMs"
+        FROM "SystemLog" WHERE module LIKE 'worker.%' GROUP BY module
       `);
       return new Map(rows.map((r) => [String(r.module), r]));
     } catch {
@@ -303,14 +306,14 @@ export class SystemDashboardService {
       const [agg, avgCheckout] = await Promise.all([
         this.prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
           SELECT
-            (SELECT COUNT(*) FROM \`Order\` WHERE deletedAt IS NULL) totalOrders,
-            (SELECT COUNT(*) FROM \`Order\` WHERE deletedAt IS NULL AND createdAt >= ${todayStart}) todayOrders,
-            (SELECT COUNT(*) FROM \`Payment\` WHERE deletedAt IS NULL AND createdAt >= ${todayStart}) todayPayments,
-            (SELECT COUNT(*) FROM \`Shipment\` WHERE createdAt >= ${todayStart}) todayShipments,
-            (SELECT COUNT(*) FROM \`User\` WHERE deletedAt IS NULL) totalCustomers
+            (SELECT COUNT(*) FROM "Order" WHERE "deletedAt" IS NULL) "totalOrders",
+            (SELECT COUNT(*) FROM "Order" WHERE "deletedAt" IS NULL AND "createdAt" >= ${todayStart}) "todayOrders",
+            (SELECT COUNT(*) FROM "Payment" WHERE "deletedAt" IS NULL AND "createdAt" >= ${todayStart}) "todayPayments",
+            (SELECT COUNT(*) FROM "Shipment" WHERE "createdAt" >= ${todayStart}) "todayShipments",
+            (SELECT COUNT(*) FROM "User" WHERE "deletedAt" IS NULL) "totalCustomers"
         `),
         this.prisma.$queryRaw<Array<{ avgMs: unknown }>>(Prisma.sql`
-          SELECT AVG(durationMs) avgMs FROM \`SystemLog\` WHERE module='http' AND method='POST' AND path LIKE '%/checkout/order'
+          SELECT AVG("durationMs") "avgMs" FROM "SystemLog" WHERE module='http' AND method='POST' AND path LIKE '%/checkout/order'
         `),
       ]);
       const r = agg[0] ?? {};
@@ -340,9 +343,9 @@ export class SystemDashboardService {
   private async hourly(since: Date, predicate: string, withAvg: boolean) {
     try {
       const rows = await this.prisma.$queryRaw<Array<{ hour: string; c: unknown; avgMs: unknown }>>(Prisma.sql`
-        SELECT DATE_FORMAT(createdAt, '%Y-%m-%d %H:00') hour, COUNT(*) c, AVG(durationMs) avgMs
-        FROM \`SystemLog\` WHERE ${Prisma.raw(predicate)} AND createdAt >= ${since}
-        GROUP BY hour ORDER BY hour ASC
+        SELECT to_char("createdAt", 'YYYY-MM-DD HH24:00') AS "hour", COUNT(*) c, AVG("durationMs") "avgMs"
+        FROM "SystemLog" WHERE ${Prisma.raw(predicate)} AND "createdAt" >= ${since}
+        GROUP BY "hour" ORDER BY "hour" ASC
       `);
       return rows.map((r) => ({ hour: r.hour, count: num(r.c), avgMs: withAvg ? Math.round(num(r.avgMs)) : 0 }));
     } catch (e) {

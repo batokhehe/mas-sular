@@ -29,6 +29,15 @@ export class PaymentsService {
     );
   }
 
+  /** L8: a customer may read a receipt only through a payment of their own that references it. */
+  async customerOwnsReceipt(filename: string, userId: string): Promise<boolean> {
+    const owned = await this.prisma.payment.findFirst({
+      where: { deletedAt: null, manualReceiptUrl: { endsWith: `/payments/receipts/${filename}` }, order: { userId } },
+      select: { id: true },
+    });
+    return owned !== null;
+  }
+
   /** Generic 404 when the payment is missing or not owned by the caller (no enumeration). */
   async assertPaymentOwner(paymentId: string, userId: string): Promise<void> {
     const owned = await this.prisma.payment.findFirst({

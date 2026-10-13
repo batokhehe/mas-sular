@@ -64,7 +64,7 @@ export default async function globalSetup(): Promise<void> {
   // through process.env; stack-ready.json never contains it.
   const jwtSecret = randomBytes(32).toString('hex');
 
-  console.log('[e2e] starting isolated stack (disposable MySQL + stubbed Google/Paxel) …');
+  console.log('[e2e] starting isolated stack (disposable PostgreSQL + stubbed Google/Paxel) …');
   const child = spawn(process.execPath, [LAUNCHER], {
     cwd: BACKEND_DIR,
     env: {

@@ -1,25 +1,19 @@
+import { apiBaseUrl, csrfHeaders } from './api';
 
-
-import { getAuthToken } from './api';
-
+/** Catalogue/banner image upload. Authenticated by the httpOnly admin session cookie (H4). */
 export async function uploadImage(formData: FormData) {
-    const token = getAuthToken();
-    const headers: Record<string, string> = {};
-    if (token) {
-        headers.Authorization = `Bearer ${token}`;
-    }
-
     const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/upload`,
+        `${apiBaseUrl()}/upload`,
         {
             method: 'POST',
-            headers,
+            credentials: 'include',
+            headers: await csrfHeaders('POST'),
             body: formData,
         }
     );
 
     if (!response.ok) {
-        throw new Error('Failed to upload image');
+        throw new Error('Gagal mengunggah gambar');
     }
 
     return response.json();

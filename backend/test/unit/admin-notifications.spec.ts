@@ -1,10 +1,8 @@
-import { UnauthorizedException } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
+import 'reflect-metadata'; // enableImplicitConversion reads design:type metadata
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
 import { buildAdminNotification, registerNotificationMapper, supportedNotificationEvents } from '../../src/infrastructure/admin-notifications/admin-notification.builder';
 import { BellListQueryDto, ManualNotificationDto } from '../../src/modules/admin/application/dto/bell-query.dto';
-import { AdminBellController } from '../../src/modules/admin/presentation/admin-bell.controller';
 import { MetricsRegistry } from '../../src/infrastructure/metrics/metrics.registry';
 import { AdminNotificationRepository } from '../../src/infrastructure/admin-notifications/admin-notification.repository';
 import { AdminNotificationDispatcher } from '../../src/infrastructure/admin-notifications/admin-notification.dispatcher';
@@ -273,58 +271,8 @@ describe('worker (consumer processing)', () => {
 
 // ---------------- production hardening (this pass) ----------------
 
-describe('SSE stream RBAC (token-claim authorization)', () => {
-  const SECRET = 'test-stream-secret';
-  const jwt = new JwtService({});
-
-  function buildController(activeAdmin = true) {
-    const prisma = { admin: { findFirst: jest.fn().mockResolvedValue(activeAdmin ? { id: 'a1' } : null) } };
-    const hub = { register: jest.fn(), activeConnections: jest.fn().mockReturnValue(0) };
-    const controller = new AdminBellController(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      {} as any, {} as any, hub as any, new AdminNotificationMetrics(), prisma as any,
-    );
-    return { controller, hub, prisma };
-  }
-
-  beforeAll(() => {
-    process.env.JWT_ADMIN_ACCESS_SECRET = SECRET;
-  });
-
-  it('registers the connection for an active admin holding Notification.read', async () => {
-    const { controller, hub } = buildController();
-    const token = jwt.sign({ sub: 'a1', permissions: ['Notification.read'] }, { secret: SECRET });
-    await controller.stream({} as never, {} as never, token);
-    expect(hub.register).toHaveBeenCalledWith('a1', expect.anything());
-  });
-
-  it('SUPER_ADMIN streams without an explicit grant', async () => {
-    const { controller, hub } = buildController();
-    const token = jwt.sign({ sub: 'a1', role: 'SUPER_ADMIN', permissions: [] }, { secret: SECRET });
-    await controller.stream({} as never, {} as never, token);
-    expect(hub.register).toHaveBeenCalled();
-  });
-
-  it('rejects a valid token WITHOUT Notification.read (RBAC gap closed)', async () => {
-    const { controller, hub } = buildController();
-    const token = jwt.sign({ sub: 'a1', role: 'OPS', permissions: ['Order.read'] }, { secret: SECRET });
-    await expect(controller.stream({} as never, {} as never, token)).rejects.toBeInstanceOf(UnauthorizedException);
-    expect(hub.register).not.toHaveBeenCalled();
-  });
-
-  it('rejects forged/missing tokens and inactive admins', async () => {
-    const { controller, hub } = buildController();
-    await expect(controller.stream({} as never, {} as never, undefined)).rejects.toBeInstanceOf(UnauthorizedException);
-    await expect(controller.stream({} as never, {} as never, 'garbage.token.here')).rejects.toBeInstanceOf(UnauthorizedException);
-    const forged = jwt.sign({ sub: 'a1', permissions: ['Notification.read'] }, { secret: 'wrong-secret' });
-    await expect(controller.stream({} as never, {} as never, forged)).rejects.toBeInstanceOf(UnauthorizedException);
-
-    const inactive = buildController(false);
-    const token = jwt.sign({ sub: 'a1', permissions: ['Notification.read'] }, { secret: SECRET });
-    await expect(inactive.controller.stream({} as never, {} as never, token)).rejects.toBeInstanceOf(UnauthorizedException);
-    expect(hub.register).not.toHaveBeenCalled();
-  });
-});
+// SSE stream authentication (cookie session, no ?token=) is covered end-to-end over
+// real HTTP in admin-session.http.spec.ts.
 
 describe('bell DTO validation (malformed input → 400, never 500)', () => {
   it('rejects non-numeric / out-of-range limits that previously became take: NaN', () => {

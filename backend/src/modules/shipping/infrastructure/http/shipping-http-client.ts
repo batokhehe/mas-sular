@@ -1,5 +1,9 @@
 import { Logger } from '@nestjs/common';
+import { randomUUID } from 'crypto';
+import { IntegrationDirection, IntegrationOutcome } from '@prisma/client';
 import { PermanentError, TransientError } from '../../domain/shipping-errors';
+import { safeRecord } from '../../../../infrastructure/integration-log/safe-record';
+import { IntegrationCallContext } from '../../../../infrastructure/integration-log/integration-log.types';
 
 export interface ShippingHttpResponse {
   status: number;
@@ -49,6 +53,18 @@ export interface ShippingRequestOptions {
   maxRetry: number;
   logger: Logger;
   logBase: ShippingLogBase;
+  /**
+   * OPTIONAL business context for durable integration logging (P1). Absent - as in
+   * every existing unit test - the function behaves exactly as before: no record is
+   * written, nothing is awaited, and control flow is untouched.
+   */
+  integration?: IntegrationCallContext;
+}
+
+/** Case-insensitive header lookup, so the sanitizer knows if a body is form-encoded. */
+function contentTypeOf(init: ShippingHttpRequest): string | undefined {
+  const entry = Object.entries(init.headers ?? {}).find(([key]) => key.toLowerCase() === 'content-type');
+  return entry?.[1];
 }
 
 function sanitize(text: string): string {
@@ -64,13 +80,59 @@ function sanitize(text: string): string {
  * NOT retryable: 429 (transient, but retrying spends more of the exhausted
  * quota) and every other 4xx (permanent).
  */
-export async function executeShippingRequest(opts: ShippingRequestOptions): Promise<{ status: number; text: string }> {
-  const { http, url, init, maxRetry, logger, logBase } = opts;
+export async function executeShippingRequest(
+  opts: ShippingRequestOptions,
+): Promise<{ status: number; text: string; operationId: string }> {
+  const { http, url, init, maxRetry, logger, logBase, integration } = opts;
   const attempts = Math.max(1, maxRetry + 1);
   const startedAt = Date.now();
   let lastTransient: TransientError | undefined;
 
+  // Shared by every attempt of this ONE logical call, and by the application-outcome
+  // record a provider may add after parsing (see JneShipmentProvider.createShipment).
+  const operationId = integration ? (integration.operationId ?? randomUUID()) : '';
+
+  /** Best-effort: handed to the shared safeRecord(), which can never throw or reject. */
+  const record = (fields: {
+    attempt: number;
+    durationMs: number;
+    httpStatus?: number | null;
+    outcome: IntegrationOutcome;
+    errorClass?: string | null;
+    errorMessage?: string | null;
+    responseBody?: string | null;
+  }): void => {
+    if (!integration?.recorder) return;
+    safeRecord(
+      integration.recorder,
+      {
+        provider: integration.provider,
+        operation: integration.operation,
+        direction: IntegrationDirection.OUTBOUND,
+        operationId,
+        attempt: fields.attempt,
+        maxAttempts: attempts,
+        correlationId: integration.correlationId ?? null,
+        orderId: integration.orderId ?? null,
+        paymentId: integration.paymentId ?? null,
+        shipmentId: integration.shipmentId ?? null,
+        method: init.method,
+        endpoint: url,
+        httpStatus: fields.httpStatus ?? null,
+        durationMs: fields.durationMs,
+        applicationOutcome: fields.outcome,
+        errorClass: fields.errorClass ?? null,
+        errorMessage: fields.errorMessage ?? null,
+        requestBody: init.body ?? null,
+        requestContentType: contentTypeOf(init),
+        responseBody: fields.responseBody ?? null,
+      },
+      (err) => logger.warn({ event: 'integration_log.record_failed', reason: err instanceof Error ? err.message : String(err) }),
+    );
+  };
+
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const attemptStartedAt = Date.now();
     let res: ShippingHttpResponse;
     try {
       res = await http(url, init);
@@ -79,6 +141,16 @@ export async function executeShippingRequest(opts: ShippingRequestOptions): Prom
       const reason = err instanceof Error ? err.message : String(err);
       lastTransient = new TransientError(`network error: ${reason}`, logBase.provider);
       logger.warn({ ...logBase, attempt, outcome: 'retry', errorClass: 'network', elapsedMs: Date.now() - startedAt });
+      // The Pino line keeps saying `network` for both cases (unchanged vocabulary);
+      // the durable record distinguishes an abort (timeout) from a socket failure.
+      const timedOut = err instanceof Error && (err.name === 'AbortError' || /abort/i.test(err.message));
+      record({
+        attempt,
+        durationMs: Date.now() - attemptStartedAt,
+        outcome: timedOut ? IntegrationOutcome.TIMEOUT : IntegrationOutcome.NETWORK_ERROR,
+        errorClass: timedOut ? 'timeout' : 'network',
+        errorMessage: reason,
+      });
       continue;
     }
 
@@ -86,7 +158,8 @@ export async function executeShippingRequest(opts: ShippingRequestOptions): Prom
 
     if (res.status >= 200 && res.status < 300) {
       logger.log({ ...logBase, attempt, outcome: 'ok', status: res.status, elapsedMs: Date.now() - startedAt });
-      return { status: res.status, text };
+      record({ attempt, durationMs: Date.now() - attemptStartedAt, httpStatus: res.status, outcome: IntegrationOutcome.OK, responseBody: text });
+      return { status: res.status, text, operationId };
     }
 
     // 429 is TRANSIENT but NOT retryable here. A courier that answers "too many
@@ -109,6 +182,15 @@ export async function executeShippingRequest(opts: ShippingRequestOptions): Prom
         status: res.status,
         elapsedMs: Date.now() - startedAt,
       });
+      record({
+        attempt,
+        durationMs: Date.now() - attemptStartedAt,
+        httpStatus: res.status,
+        outcome: IntegrationOutcome.HTTP_ERROR,
+        errorClass: 'rate_limited',
+        errorMessage: sanitize(text),
+        responseBody: text,
+      });
       throw new TransientError(`provider ${res.status}: ${sanitize(text)}`, logBase.provider);
     }
 
@@ -122,6 +204,15 @@ export async function executeShippingRequest(opts: ShippingRequestOptions): Prom
         status: res.status,
         elapsedMs: Date.now() - startedAt,
       });
+      record({
+        attempt,
+        durationMs: Date.now() - attemptStartedAt,
+        httpStatus: res.status,
+        outcome: IntegrationOutcome.HTTP_ERROR,
+        errorClass: 'provider_5xx',
+        errorMessage: sanitize(text),
+        responseBody: text,
+      });
       continue;
     }
 
@@ -133,6 +224,15 @@ export async function executeShippingRequest(opts: ShippingRequestOptions): Prom
       errorClass: 'permanent_4xx',
       status: res.status,
       elapsedMs: Date.now() - startedAt,
+    });
+    record({
+      attempt,
+      durationMs: Date.now() - attemptStartedAt,
+      httpStatus: res.status,
+      outcome: IntegrationOutcome.HTTP_ERROR,
+      errorClass: 'permanent_4xx',
+      errorMessage: sanitize(text),
+      responseBody: text,
     });
     throw new PermanentError(`provider ${res.status}: ${sanitize(text)}`, logBase.provider);
   }

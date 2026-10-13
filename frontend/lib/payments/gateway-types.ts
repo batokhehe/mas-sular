@@ -50,4 +50,11 @@ export interface GatewayPayment {
   vaNumber: string | null
   expiryAt: string | null
   paymentInstruction: PaymentInstruction
+  /**
+   * The attempt's amount split, as recorded by the backend: `serviceFee` is the
+   * customer-charged "Biaya Layanan" (0 when the merchant absorbs it) and
+   * `total` is exactly what the gateway was asked to collect. Null for attempts
+   * recorded before the breakdown existed.
+   */
+  amountBreakdown?: { baseAmount: number; serviceFee: number; total: number } | null
 }

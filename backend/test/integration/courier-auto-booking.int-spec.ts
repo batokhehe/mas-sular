@@ -1,7 +1,7 @@
 /**
  * PAXELBOX-61AG.3.31 / .3.32 — automatic courier booking after payment settlement.
  *
- * Drives the REAL PaymentSettlementService.settle() against real MySQL, for both
+ * Drives the REAL PaymentSettlementService.settle() against real PostgreSQL, for both
  * manual-receipt payment methods and BOTH couriers, and asserts the whole chain
  * through to the persisted airwaybill and the shipped notification. Only the
  * courier HTTP call is stubbed — the provider factory hands back a stub, so no
@@ -9,11 +9,13 @@
  *
  * 3.31 enabled JNE and left Paxel BLOCKED: Paxel's API genuinely requires
  * `pickup_datetime` and nothing in the application could produce one. 3.32 adds
- * the business's global rule (verified at or before 17:00 WIB -> today 19:00,
- * after -> tomorrow 19:00), so Paxel now books automatically too. The exact
- * arithmetic of that rule is pinned by test/unit/paxel-pickup-scheduler.spec.ts;
- * what these tests prove is the WIRING — that a slot is resolved from the
- * authoritative settlement timestamp, persisted, and reaches the courier.
+ * the business's global rule, now (P1 #13) cut-off 15:00 WIB / pickup 17:00 WIB:
+ * verified at or before 15:00 -> today 17:00, after -> tomorrow 17:00. Paxel is
+ * SENT that slot; JNE (no pickup field in its API) has the same slot RECORDED and
+ * books exactly as before. The exact arithmetic is pinned by
+ * test/unit/paxel-pickup-scheduler.spec.ts; what these tests prove is the WIRING —
+ * that a slot is resolved from the authoritative settlement timestamp, persisted,
+ * and (for Paxel) reaches the courier.
  */
 import { OrderStatus, PaymentMethod, PaymentStatus, ShipmentStatus } from '@prisma/client'
 import { randomUUID } from 'crypto'
@@ -23,17 +25,23 @@ import { PaxelPickupScheduler } from '../../src/modules/shipment/paxel-pickup-sc
 import { formatPaxelDatetime } from '../../src/modules/shipment/infrastructure/providers/paxel-datetime'
 import { readPickupDatetime } from '../../src/modules/shipment/shipment-metadata'
 import type { PaxelAutoPickupConfig, ShippingConfig } from '../../src/modules/shipping/shipping.config'
+import { buildAdminNotification } from '../../src/infrastructure/admin-notifications/admin-notification.builder'
 import { getWorld, IntegrationWorld } from './world'
 
 const CUSTOMER_PHONE = '628123456789'
 
-/** The confirmed business policy (61AG.3.32). */
+/** The confirmed business policy (61AG.3.32, P1 #13): cut-off 15:00 WIB, pickup 17:00 WIB. */
 const POLICY: PaxelAutoPickupConfig = {
   enabled: true,
   timeZone: 'Asia/Jakarta',
-  cutoffTime: '17:00',
-  pickupTime: '19:00',
+  cutoffTime: '15:00',
+  pickupTime: '17:00',
 }
+
+/** HH:mm of `iso` on the Jakarta wall clock — independent of the process timezone. */
+const jakartaClock = (iso: string) =>
+  new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+    .format(new Date(iso))
 
 const schedulerWith = (autoPickup: PaxelAutoPickupConfig | undefined) =>
   new PaxelPickupScheduler({ paxel: { autoPickup } } as unknown as ShippingConfig)
@@ -122,8 +130,11 @@ describe('automatic courier booking on settlement (real DB, stubbed courier)', (
   const paymentOf = (orderId: string) => world.prisma.payment.findFirstOrThrow({ where: { orderId } })
   const shippedRows = (orderId: string) =>
     world.prisma.notificationOutbox.findMany({
-      where: { template: 'order.shipped', payload: { path: '$.orderId', equals: orderId } },
+      where: { template: 'order.shipped', payload: { path: ['orderId'], equals: orderId } },
     })
+  /** P1 #15: the SHIPPED domain event the admin notification is built from. */
+  const shippedEvents = (orderId: string) =>
+    world.prisma.outboxEvent.findMany({ where: { aggregateId: orderId, eventName: 'order.status_updated' } })
 
   // ------------------------------------------------------------- the matrix --
 
@@ -163,13 +174,24 @@ describe('automatic courier booking on settlement (real DB, stubbed courier)', (
       expect(payload.trackingNumber).toBe(awb)
       expect(String(payload.shippingProvider).toUpperCase()).toBe(courier)
       expect(rows[0].recipient).toBe(CUSTOMER_PHONE)
+
+      // P1 #15: exactly one SHIPPED domain event, carrying the official AWB, and the
+      // admin "Order Shipped" notification built from it shows courier + AWB.
+      const events = await shippedEvents(order.id)
+      expect(events).toHaveLength(1)
+      const event = events[0].payload as Record<string, unknown>
+      expect(event).toMatchObject({ orderId: order.id, status: 'SHIPPED', trackingNumber: awb, shippingProvider: provider })
+      expect(event.shipmentId).toBe(shipment.id)
+      const bell = buildAdminNotification('order.status_updated', event)
+      expect(bell).toMatchObject({ title: 'Order Shipped', metadata: { trackingNumber: awb, shippingProvider: provider } })
+      expect(bell!.message).toContain(`AWB ${awb}`)
     })
   })
 
   // ------------------------------------------------ the Paxel pickup slot ----
 
   describe('the automatic Paxel pickup appointment', () => {
-    it('is resolved, persisted, and reaches the courier as a 19:00 Jakarta slot', async () => {
+    it('is resolved, persisted, and reaches the courier as a 17:00 Jakarta slot', async () => {
       const { order, payment } = await seed(PaymentMethod.BANK_TRANSFER, 'paxel', 'PAXEL_NEXTDAY')
       const { settlement, calls } = settlementWith('paxel', 'PXL-SLOT-1')
 
@@ -185,8 +207,8 @@ describe('automatic courier booking on settlement (real DB, stubbed courier)', (
       expect(readPickupDatetime(shipment.metadata)).toBe(sent)
 
       // The rule, end to end: whatever calendar day it lands on, the appointment
-      // is 19:00 Jakarta wall-clock. This is what Paxel receives on the wire.
-      expect(formatPaxelDatetime(sent)).toMatch(/^\d{4}-\d{2}-\d{2} 19:00:00$/)
+      // is 17:00 Jakarta wall-clock. This is what Paxel receives on the wire.
+      expect(formatPaxelDatetime(sent)).toMatch(/^\d{4}-\d{2}-\d{2} 17:00:00$/)
 
       // And it is a real future appointment relative to the settlement.
       const settled = await paymentOf(order.id)
@@ -202,14 +224,16 @@ describe('automatic courier booking on settlement (real DB, stubbed courier)', (
      * makes the expected appointment an exact literal.
      */
     it.each([
-      // verified 16:59 WIB -> the SAME day at 19:00 WIB (12:00Z)
-      ['at 16:59 WIB, before the cutoff', '2026-09-05T09:59:00.000Z', '2026-09-05T12:00:00.000Z'],
-      // verified exactly 17:00 WIB -> still the same day; the cutoff is inclusive
-      ['at exactly 17:00 WIB', '2026-09-05T10:00:00.000Z', '2026-09-05T12:00:00.000Z'],
-      // verified 17:01 WIB -> the NEXT day at 19:00 WIB
-      ['at 17:01 WIB, after the cutoff', '2026-09-05T10:01:00.000Z', '2026-09-06T12:00:00.000Z'],
+      // verified 14:59 WIB -> the SAME day at 17:00 WIB (10:00Z)
+      ['at 14:59 WIB, before the cutoff', '2026-09-05T07:59:00.000Z', '2026-09-05T10:00:00.000Z'],
+      // verified exactly 15:00 WIB -> still the same day; the cutoff is inclusive
+      ['at exactly 15:00 WIB', '2026-09-05T08:00:00.000Z', '2026-09-05T10:00:00.000Z'],
+      // verified 15:01 WIB -> the NEXT day at 17:00 WIB
+      ['at 15:01 WIB, after the cutoff', '2026-09-05T08:01:00.000Z', '2026-09-06T10:00:00.000Z'],
+      // verified exactly 17:00 WIB -> the PICKUP time, not the cutoff -> NEXT day
+      ['at 17:00 WIB, the pickup time (not the cutoff)', '2026-09-05T10:00:00.000Z', '2026-09-06T10:00:00.000Z'],
       // verified 23:59 WIB -> next calendar day, across the month boundary
-      ['at 23:59 WIB on the last day of a month', '2026-08-31T16:59:00.000Z', '2026-09-01T12:00:00.000Z'],
+      ['at 23:59 WIB on the last day of a month', '2026-08-31T16:59:00.000Z', '2026-09-01T10:00:00.000Z'],
     ])('books %s', async (_label, verifiedAtIso, expectedPickupIso) => {
       const { order, payment } = await seed(PaymentMethod.QRIS, 'paxel', 'PAXEL_NEXTDAY')
       const { shipments, calls } = settlementWith('paxel', 'PXL-EXACT-1')
@@ -299,7 +323,46 @@ describe('automatic courier booking on settlement (real DB, stubbed courier)', (
       // no pickup slot into the courier payload.
       expect(calls()).toHaveLength(1)
       expect(calls()[0].pickupAtIso).toBeUndefined()
-      expect((await shipmentOf(order.id)).trackingNumber).toBe('JNE-NOPICKUP-1')
+      const shipment = await shipmentOf(order.id)
+      expect(shipment.trackingNumber).toBe('JNE-NOPICKUP-1')
+
+      // P1 #13: the shop-wide rule still applies to JNE — the slot is RECORDED
+      // (never sent), in JNE's own namespace, even with Paxel's switch OFF.
+      const recorded = readPickupDatetime(shipment.metadata, 'jne') as string
+      expect(recorded).toBeTruthy()
+      expect(jakartaClock(recorded)).toBe('17:00')
+      expect(new Date(recorded).getTime()).toBeGreaterThan((await paymentOf(order.id)).verifiedAt!.getTime())
+      expect(readPickupDatetime(shipment.metadata, 'paxel')).toBeUndefined()
+    })
+
+    /**
+     * JNE against the exact boundaries, deterministically: the settlement
+     * timestamp is pinned in the database, then the REAL ShipmentService books.
+     * The recorded slot must match the Paxel rule minute for minute.
+     */
+    it.each([
+      ['at 14:59 WIB, before the cutoff', '2026-09-05T07:59:00.000Z', '2026-09-05T10:00:00.000Z'],
+      ['at exactly 15:00 WIB (inclusive)', '2026-09-05T08:00:00.000Z', '2026-09-05T10:00:00.000Z'],
+      ['at 15:01 WIB, after the cutoff', '2026-09-05T08:01:00.000Z', '2026-09-06T10:00:00.000Z'],
+      ['at 17:00 WIB, the pickup time (not the cutoff)', '2026-09-05T10:00:00.000Z', '2026-09-06T10:00:00.000Z'],
+    ])('JNE verified %s records the matching 17:00 WIB slot and still books', async (_label, verifiedAtIso, expectedPickupIso) => {
+      const { order, payment } = await seed(PaymentMethod.QRIS, 'jne', 'REG')
+      const { shipments, calls } = settlementWith('jne', `JNE-EXACT-${verifiedAtIso.slice(11, 16)}`, {
+        autoPickup: { ...POLICY, enabled: false },
+      })
+      await world.prisma.payment.update({
+        where: { id: payment.id },
+        data: { status: PaymentStatus.PAID, verifiedAt: new Date(verifiedAtIso) },
+      })
+      await world.prisma.order.update({ where: { id: order.id }, data: { status: OrderStatus.PROCESSING } })
+
+      await shipments.createForOrderSafe(order.id)
+
+      expect(calls()).toHaveLength(1)
+      expect(calls()[0].pickupAtIso).toBeUndefined()
+      const shipment = await shipmentOf(order.id)
+      expect(shipment.trackingNumber).toBeTruthy()
+      expect(readPickupDatetime(shipment.metadata, 'jne')).toBe(expectedPickupIso)
     })
   })
 
@@ -321,6 +384,7 @@ describe('automatic courier booking on settlement (real DB, stubbed courier)', (
       expect(second.result).toBe('ALREADY_PAID')
       expect(calls()).toHaveLength(1)                       // one courier booking
       expect(await shippedRows(order.id)).toHaveLength(1)   // one notification
+      expect(await shippedEvents(order.id)).toHaveLength(1) // one SHIPPED event (P1 #15)
       expect((await shipmentOf(order.id)).trackingNumber).toBe(awb)
     })
 
@@ -337,6 +401,32 @@ describe('automatic courier booking on settlement (real DB, stubbed courier)', (
       expect(again.ok).toBe(true)
       expect(calls()).toHaveLength(1)
       expect(await shippedRows(order.id)).toHaveLength(1)
+      expect(await shippedEvents(order.id)).toHaveLength(1)
+    })
+
+    it('P1 #15: two CONCURRENT settlements -> one transition, one booking, one AWB, one event', async () => {
+      const { order, payment } = await seed(PaymentMethod.BANK_TRANSFER, provider, service)
+      const awb = `${provider}-CONC-1`
+      const { settlement, calls } = settlementWith(provider, awb)
+
+      const outcomes = await Promise.allSettled([
+        settlement.settle(payment.id, { kind: 'ADMIN', adminId: 'a', note: null }),
+        settlement.settle(payment.id, { kind: 'ADMIN', adminId: 'b', note: null }),
+      ])
+
+      // Exactly one caller settles; the other loses the payment CAS (409) or sees PAID.
+      const settled = outcomes.filter((o) => o.status === 'fulfilled' && o.value.result === 'SETTLED')
+      expect(settled).toHaveLength(1)
+      for (const o of outcomes) {
+        if (o.status === 'rejected') expect(String(o.reason)).toMatch(/already verified|Conflict/i)
+      }
+      expect(await world.prisma.outboxEvent.count({ where: { aggregateId: payment.id, eventName: 'payment.paid' } })).toBe(1)
+      expect(calls()).toHaveLength(1)                        // one courier booking
+      expect((await shipmentOf(order.id)).trackingNumber).toBe(awb)
+      expect(await shippedRows(order.id)).toHaveLength(1)    // one customer notification
+      const events = await shippedEvents(order.id)
+      expect(events).toHaveLength(1)                         // one SHIPPED event
+      expect((events[0].payload as Record<string, unknown>).trackingNumber).toBe(awb)
     })
   })
 
@@ -362,6 +452,7 @@ describe('automatic courier booking on settlement (real DB, stubbed courier)', (
       const meta = shipment.metadata as Record<string, unknown>
       expect(String(meta.error)).toContain(fragment)        // diagnostics preserved
       expect(await shippedRows(order.id)).toHaveLength(0)   // nothing announced
+      expect(await shippedEvents(order.id)).toHaveLength(0) // no SHIPPED event, no admin bell (P1 #15)
 
       // The pickup slot resolved before the failed attempt SURVIVES the FAILED
       // write, so the retry books the appointment already committed to.
@@ -375,6 +466,9 @@ describe('automatic courier booking on settlement (real DB, stubbed courier)', (
       expect(retry.ok).toBe(true)
       expect((await shipmentOf(order.id)).trackingNumber).toBe(`${provider}-RETRY-1`)
       expect(await shippedRows(order.id)).toHaveLength(1)
+      const retryEvents = await shippedEvents(order.id)
+      expect(retryEvents).toHaveLength(1)
+      expect((retryEvents[0].payload as Record<string, unknown>).trackingNumber).toBe(`${provider}-RETRY-1`)
       if (provider === 'paxel') expect(retryCalls()[0].pickupAtIso).toBe(scheduled)
     })
   })

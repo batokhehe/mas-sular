@@ -22,7 +22,7 @@ function queryRaw(arg: unknown): Promise<unknown[]> {
   const t = sqlText(arg);
   if (t.includes('avgDeliverySec'))
     return Promise.resolve([{ total: 100, pending: 5, sending: 2, sent: 80, failed: 15, sentToday: 8, failedToday: 2, avgDeliverySec: 12 }]);
-  if (t.includes('DATE(createdAt)'))
+  if (t.includes('"createdAt"::date'))
     return Promise.resolve([{ day: '2026-07-06', sent: 10, failed: 1 }, { day: '2026-07-07', sent: 8, failed: 2 }]);
   return Promise.resolve([]);
 }

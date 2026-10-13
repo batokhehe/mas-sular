@@ -95,7 +95,7 @@ export class InventoryReservationService {
 
       if (args.outletId && pi) {
         const rows = await tx.$queryRaw<Array<{ stock: number; reserved: number }>>(
-          Prisma.sql`SELECT stock, reserved FROM ProductInventory WHERE id = ${pi.id} FOR UPDATE`,
+          Prisma.sql`SELECT stock, reserved FROM "ProductInventory" WHERE id = ${pi.id} FOR UPDATE`,
         );
         const row = rows[0];
         const available = (row?.stock ?? 0) - (row?.reserved ?? 0);
@@ -114,7 +114,7 @@ export class InventoryReservationService {
 
       // Legacy Product.stock path (backward compatible).
       const rows = await tx.$queryRaw<Array<{ stock: number }>>(
-        Prisma.sql`SELECT stock FROM Product WHERE id = ${productId} FOR UPDATE`,
+        Prisma.sql`SELECT stock FROM "Product" WHERE id = ${productId} FOR UPDATE`,
       );
       const stock = rows[0]?.stock;
       if (stock === undefined) throw new BadRequestException('Product is unavailable');
@@ -128,8 +128,8 @@ export class InventoryReservationService {
       // whoever acquires the Product lock second sees the winner's reservation.
       // Summed here rather than in SQL to keep the row lock unambiguous.
       const held = await tx.$queryRaw<Array<{ reservedQty: number }>>(
-        Prisma.sql`SELECT reservedQty FROM InventoryReservation
-                   WHERE productId = ${productId} AND status = ${ReservationStatus.RESERVED}
+        Prisma.sql`SELECT "reservedQty" FROM "InventoryReservation"
+                   WHERE "productId" = ${productId} AND status = ${ReservationStatus.RESERVED}::"ReservationStatus"
                    FOR UPDATE`,
       );
       const reservedQty = held.reduce((sum, row) => sum + Number(row.reservedQty), 0);
@@ -199,7 +199,7 @@ export class InventoryReservationService {
     });
     if (!pi) return null;
     const rows = await tx.$queryRaw<Array<{ id: string; stock: number; reserved: number }>>(
-      Prisma.sql`SELECT id, stock, reserved FROM ProductInventory WHERE id = ${pi.id} FOR UPDATE`,
+      Prisma.sql`SELECT id, stock, reserved FROM "ProductInventory" WHERE id = ${pi.id} FOR UPDATE`,
     );
     return rows[0] ?? null;
   }

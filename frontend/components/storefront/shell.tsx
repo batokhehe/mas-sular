@@ -2,6 +2,7 @@ import { type ReactNode } from 'react'
 import { StorefrontHeader } from '@/components/layout/storefront/header'
 import { StorefrontFooter } from '@/components/layout/storefront/footer'
 import { StorefrontBottomNav } from '@/components/layout/storefront/bottom-nav'
+import { WhatsAppFloatingButton } from '@/components/storefront/whatsapp-floating-button'
 
 export function StorefrontShell({ children }: { children: ReactNode }) {
   return (
@@ -11,6 +12,7 @@ export function StorefrontShell({ children }: { children: ReactNode }) {
       <main className="flex-1 pb-16 md:pb-0">{children}</main>
       <StorefrontFooter />
       <StorefrontBottomNav />
+      <WhatsAppFloatingButton />
     </div>
   )
 }

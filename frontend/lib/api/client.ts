@@ -1,16 +1,19 @@
 import Cookies from 'js-cookie'
-import { getTokens, removeLegacyCustomerCookies } from '@/lib/auth/tokens'
+import { clearCustomerSessionMarker, removeLegacyCustomerCookies } from '@/lib/auth/tokens'
 
 const BASE = `${process.env.NEXT_PUBLIC_API_URL ?? ''}/api/v1`
 
 export class ApiError extends Error {
-  constructor(
-    public readonly status: number,
-    message: string,
-    public readonly body?: unknown,
-  ) {
+  // Explicit fields (not constructor parameter properties) so node's type-stripping
+  // test runner can load this module; same public shape as before.
+  readonly status: number
+  readonly body?: unknown
+
+  constructor(status: number, message: string, body?: unknown) {
     super(message)
     this.name = 'ApiError'
+    this.status = status
+    this.body = body
   }
 }
 
@@ -39,18 +42,20 @@ function csrfHeader(method: string): Record<string, string> {
   return token ? { 'X-CSRF-Token': token } : {}
 }
 
-function authHeader(audience: Audience): Record<string, string> {
-  // Phase 13B.3: customer auth is now httpOnly-cookie based (sent via
-  // credentials:'include'), so NO customer Authorization header. Admin still uses
-  // Bearer until its own cutover.
-  if (audience === 'admin') {
-    const { adminAccess } = getTokens()
-    if (adminAccess) return { Authorization: `Bearer ${adminAccess}` }
-  }
+function authHeader(_audience: Audience): Record<string, string> {
+  // Customer (Phase 13B.3) AND admin (H4) auth are httpOnly-cookie based, sent via
+  // credentials:'include'. No Authorization header is ever built from script.
   return {}
 }
 
-async function tryRefresh(): Promise<boolean> {
+/**
+ * 'ok' - rotated; 'rejected' - the API refused the refresh token (401/403: missing,
+ * expired, revoked or already used), so the session is over; 'failed' - network or
+ * server trouble, which says nothing about the session.
+ */
+export type RefreshOutcome = 'ok' | 'rejected' | 'failed'
+
+async function tryRefresh(): Promise<RefreshOutcome> {
   try {
     // Phase 13B.3: cookie-only refresh. The httpOnly ms_refresh cookie is sent via
     // credentials:'include'; the backend rotates and re-issues httpOnly cookies in
@@ -60,10 +65,23 @@ async function tryRefresh(): Promise<boolean> {
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
     })
-    return res.ok
+    if (res.ok) return 'ok'
+    return res.status === 401 || res.status === 403 ? 'rejected' : 'failed'
   } catch {
-    return false
+    return 'failed'
   }
+}
+
+// P0-2: refresh tokens are single-use, so parallel 401s (e.g. /users/me and
+// /users/addresses on the same page) must share ONE refresh. Otherwise the second
+// call presents the already-rotated token, is refused, and would end a live session.
+let refreshInFlight: Promise<RefreshOutcome> | null = null
+
+function refreshOnce(): Promise<RefreshOutcome> {
+  refreshInFlight ??= tryRefresh().finally(() => {
+    refreshInFlight = null
+  })
+  return refreshInFlight
 }
 
 async function request<T>(path: string, opts: RequestOptions = {}, retried = false): Promise<T> {
@@ -71,8 +89,8 @@ async function request<T>(path: string, opts: RequestOptions = {}, retried = fal
 
   const res = await fetch(`${BASE}${path}`, {
     method,
-    // Phase 13B.1: send/receive httpOnly cookies alongside the Bearer header.
-    // Bearer still wins server-side (bearer-first extractor); cookies are additive.
+    // The httpOnly session cookies (customer and admin) are the credentials: sent
+    // and received via credentials:'include'. No token is ever handled by script.
     credentials: 'include',
     headers: {
       ...(form ? {} : { 'Content-Type': 'application/json' }),
@@ -85,11 +103,17 @@ async function request<T>(path: string, opts: RequestOptions = {}, retried = fal
 
   // Single transparent cookie refresh on customer 401, then retry the original request.
   if (res.status === 401 && audience === 'customer' && !retried) {
-    if (await tryRefresh()) {
+    const outcome = await refreshOnce()
+    if (outcome === 'ok') {
       return request<T>(path, opts, true)
     }
-    // Refresh failed → session is dead; remove any legacy host-only cookies.
+    // Refresh failed → remove any legacy host-only cookies.
     removeLegacyCustomerCookies()
+    // P0-2: the API refused the refresh token, so the session is over. Drop the
+    // ms_session marker too - it is what re-enables /users/me on every page load,
+    // which turned a dead session into a 401 (+ toast) on each navigation. With it
+    // gone the storefront is simply signed out until the next login sets it again.
+    if (outcome === 'rejected') clearCustomerSessionMarker()
   }
 
   const text = await res.text()

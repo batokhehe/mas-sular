@@ -23,8 +23,8 @@ export default function NewBannerPage() {
   return (
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.bannerCreate}>
       <div className="mb-6">
-        <h2 className="text-xl font-semibold text-gray-900">Add Banner</h2>
-        <p className="mt-1 text-sm text-gray-500">Create a new CMS banner placement.</p>
+        <h2 className="text-xl font-semibold text-gray-900">Tambah Banner</h2>
+        <p className="mt-1 text-sm text-gray-500">Buat penempatan banner CMS baru.</p>
       </div>
       <BannerForm
         onSubmit={async (values) => {
@@ -34,7 +34,7 @@ export default function NewBannerPage() {
             action: () => createBanner.mutateAsync(values),
           });
         }}
-        submitLabel={createBanner.isPending ? 'Creating...' : 'Create Banner'}
+        submitLabel={createBanner.isPending ? 'Membuat...' : 'Buat Banner'}
         isSubmitting={createBanner.isPending}
       />
     </AdminShell>

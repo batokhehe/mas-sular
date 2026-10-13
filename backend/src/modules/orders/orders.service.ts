@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, Optional } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { CoverageType, OrderStatus, PaymentMethod, PaymentStatus, Prisma, Product, Promo, Topping, VoucherType } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { IdempotencyService, SupersededError } from '../../infrastructure/idempotency/idempotency.service';
@@ -24,7 +24,15 @@ import { PaymentInitiationService } from '../payments/gateway/payment-initiation
 import { PaymentChannelRegistry } from '../payments/gateway/payment-channel.registry';
 import { buildCheckoutGatewayPayload } from '../payments/gateway/domain/payment-instruction.builder';
 import { DEFAULT_PAYMENT_METHOD, isSelectablePaymentMethod, selectablePaymentMethods } from '../payments/gateway/domain/payment-channel';
-import { calculatePaymentServiceFee } from '../payments/gateway/domain/payment-service-fee';
+import { calculatePaymentServiceFee, PaymentServiceFeeBreakdown } from '../payments/gateway/domain/payment-service-fee';
+import { toCustomerOrder } from './domain/customer-order-view';
+import { latestPaxelStatusCode, paxelStatusDisplayLabel } from '../shipment/shipment-display-label';
+import {
+  feeSettingFor,
+  loadPaymentServiceFeeConfig,
+  PAYMENT_SERVICE_FEE_CONFIG,
+  PaymentServiceFeeConfig,
+} from '../payments/gateway/payment-service-fee.config';
 
 type NormalizedCheckoutItem = {
   productId: string;
@@ -40,7 +48,7 @@ type PersistOrderArgs = {
   items: NormalizedCheckoutItem[];
   products: Product[];
   toppings: Topping[];
-  summary: Awaited<ReturnType<OrdersService['getSummary']>>;
+  summary: Awaited<ReturnType<OrdersService['computeSummary']>>;
   idempotencyRecordId: string | null;
   fenceToken: number | null;
 };
@@ -100,7 +108,15 @@ export class OrdersService {
     // Absent (tests / gateway module removed) → checkout behaves exactly as before.
     @Optional() private readonly paymentInitiation?: PaymentInitiationService,
     @Optional() private readonly paymentChannels?: PaymentChannelRegistry,
+    // PAYMENT_SERVICE_FEE_ENABLED. Optional so positional test construction keeps
+    // working; absent -> read from the environment (default: merchant absorbs).
+    @Optional() @Inject(PAYMENT_SERVICE_FEE_CONFIG) private readonly feeConfig?: PaymentServiceFeeConfig,
   ) {}
+
+  /** The channel's pass-through switch: PAYMENT_FEE_<channel>_ENABLED, else PAYMENT_SERVICE_FEE_ENABLED. */
+  private paymentServiceFeeSetting(channel: string | null | undefined) {
+    return feeSettingFor(this.feeConfig ?? loadPaymentServiceFeeConfig(), channel);
+  }
 
   /**
    * Coverage gate for delivery. Delivery Coverage is ONLY responsible for the
@@ -576,7 +592,17 @@ export class OrdersService {
     }
   }
 
+  /**
+   * Customer-facing checkout summary. The internal fee breakdown (the merchant's
+   * absorbed cost and the rule snapshot) never leaves the server — only the
+   * customer-charged "Biaya Layanan" and whether that row applies.
+   */
   async getSummary(userId: string, dto: CheckoutSummaryDto) {
+    const { payment_service_fee_breakdown: _internal, ...customerSummary } = await this.computeSummary(userId, dto);
+    return customerSummary;
+  }
+
+  private async computeSummary(userId: string, dto: CheckoutSummaryDto) {
     const address = await this.assertAddress(userId, dto.address_id);
     const items = this.normalizeItems(dto.items);
     const { products, subtotal, totalItems } = await this.getCartPricing(items);
@@ -602,18 +628,33 @@ export class OrdersService {
       discount = this.calculateVoucherDiscount(voucher, subtotal, deliveryFee);
     }
 
+    // Product subtotal, discount and shipping are settled BEFORE the payment fee and
+    // are unaffected by it; the fee is calculated on this fee-exclusive base.
     const transactionBase = subtotal + deliveryFee - discount;
-    const paymentServiceFee = dto.payment_method === PaymentMethod.GATEWAY
-      ? calculatePaymentServiceFee({ paymentChannel: dto.payment_channel, transactionBase }).feeAmount
-      : 0;
+    // Gateway orders only. At checkout this is a PREVIEW for the chosen channel; the
+    // authoritative figure is recalculated per payment attempt at initiation.
+    const feeApplies = dto.payment_method === PaymentMethod.GATEWAY;
+    const feeSetting = this.paymentServiceFeeSetting(dto.payment_channel);
+    const fee: PaymentServiceFeeBreakdown | null = feeApplies
+      ? calculatePaymentServiceFee({
+          paymentChannel: dto.payment_channel,
+          transactionBase,
+          feeEnabled: feeSetting.enabled,
+          setting: feeSetting,
+        })
+      : null;
 
     return {
       subtotal,
       shipping_cost: deliveryFee,
       delivery_fee: deliveryFee,
       discount,
-      payment_service_fee: paymentServiceFee,
-      grand_total: transactionBase + paymentServiceFee,
+      // Customer-charged fee: Rp0 when PAYMENT_SERVICE_FEE_ENABLED=false (merchant absorbs).
+      payment_service_fee: fee?.customerFee ?? 0,
+      // Whether the "Biaya Layanan" row belongs in the breakdown (shown even at Rp0).
+      payment_service_fee_applies: feeApplies,
+      grand_total: fee?.customerTotal ?? transactionBase,
+      payment_service_fee_breakdown: fee,
       total_items: totalItems,
       estimated_days: quote.estimatedDays,
       estimated_minutes: null as number | null,
@@ -686,7 +727,7 @@ export class OrdersService {
       where: { id: replay.resourceId },
       include: ORDER_CHECKOUT_INCLUDE,
     });
-    return order ?? replay.body;
+    return order ? toCustomerOrder(order) : replay.body;
   }
 
   /** Canonical projection of the checkout request that is hashed into the fingerprint. */
@@ -726,13 +767,16 @@ export class OrdersService {
     fenceToken: number | null,
   ) {
     this.assertSelectablePaymentMethod(dto.payment_method);
+    await this.assertManualTransferReady(dto.payment_method);
+    await this.assertGatewayChannelReady(dto.payment_method, dto.payment_channel);
     const items = this.normalizeItems(dto.items);
     const { products, toppings } = await this.getCartPricing(items);
     this.assertStock(items, products);
-    const summary = await this.getSummary(userId, dto);
+    const summary = await this.computeSummary(userId, dto);
 
     const order = await this.persistOrderWithRetry({ userId, dto, items, products, toppings, summary, idempotencyRecordId, fenceToken });
-    return this.withGatewayCharge(order, dto);
+    // The merchant's fee accounting stays server-side; the customer gets the rest.
+    return toCustomerOrder(await this.withGatewayCharge(order, dto));
   }
 
   /**
@@ -748,6 +792,35 @@ export class OrdersService {
         `Payment method ${method} is no longer available. Choose one of: ${selectablePaymentMethods().join(', ')}.`,
       );
     }
+  }
+
+  /**
+   * P0-3: a NEW manual-transfer order (explicit BANK_TRANSFER or the omitted-method
+   * default) needs a transfer the customer can actually make - the same readiness
+   * GET /payments/channels uses, i.e. an active bank account. Without one the order
+   * would sit PENDING with nowhere to pay. Other methods are untouched; existing
+   * orders and their payment pages are untouched.
+   */
+  private async assertManualTransferReady(method?: PaymentMethod): Promise<void> {
+    if ((method ?? DEFAULT_PAYMENT_METHOD) !== PaymentMethod.BANK_TRANSFER || !this.paymentChannels) return;
+    const manual = this.paymentChannels.find('MANUAL_TRANSFER');
+    if (manual && (await this.paymentChannels.isReady(manual))) return;
+    throw new BadRequestException('Transfer Bank is not available right now. Please choose another payment method.');
+  }
+
+  /**
+   * A NEW gateway order naming a channel must name one a customer can use right now:
+   * in the catalog, switched on (PAYMENT_<channel>_ENABLED), its provider registered
+   * and ready - exactly what GET /payments/channels offers. Checked BEFORE the order
+   * exists: the charge opens only after commit and its failure is swallowed, so a
+   * disabled channel would otherwise leave a PENDING order with nothing to pay.
+   * Existing orders and payments are untouched.
+   */
+  private async assertGatewayChannelReady(method?: PaymentMethod, channelCode?: string): Promise<void> {
+    if (method !== PaymentMethod.GATEWAY || !channelCode || !this.paymentChannels) return;
+    const channel = this.paymentChannels.find(channelCode);
+    if (channel && (await this.paymentChannels.isReady(channel))) return;
+    throw new BadRequestException('This payment method is not available right now. Please choose another payment method.');
   }
 
   /**
@@ -851,6 +924,19 @@ export class OrdersService {
           deliveryFee: summary.shipping_cost,
           voucherDiscountAmount: summary.discount,
           paymentServiceFee: summary.payment_service_fee,
+          // Fee breakdown of the checkout-time preview (gateway orders). Payment
+          // initiation replaces it with the authoritative per-attempt figures.
+          ...(summary.payment_service_fee_breakdown
+            ? {
+                paymentServiceFeeCalculated: summary.payment_service_fee_breakdown.calculatedFee,
+                paymentServiceFeeAbsorbed: summary.payment_service_fee_breakdown.merchantAbsorbedFee,
+                paymentServiceFeeEnabled: summary.payment_service_fee_breakdown.feeEnabled,
+                paymentServiceFeeChannel: summary.payment_service_fee_breakdown.channel,
+                ...(summary.payment_service_fee_breakdown.rule
+                  ? { paymentServiceFeeRule: summary.payment_service_fee_breakdown.rule as unknown as Prisma.InputJsonValue }
+                  : {}),
+              }
+            : {}),
           // Unique code lives only on Payment.amount; the service fee is part of
           // the immutable customer charge snapshot above.
           totalPrice: chargedTotal,
@@ -965,7 +1051,7 @@ export class OrdersService {
       if (idempotencyRecordId) {
         await this.idempotency.finalize(tx, idempotencyRecordId, fenceToken!, {
           statusCode: 201,
-          body: JSON.parse(JSON.stringify(createdOrder)) as Prisma.InputJsonValue,
+          body: JSON.parse(JSON.stringify(toCustomerOrder(createdOrder))) as Prisma.InputJsonValue,
           resourceType: 'Order',
           resourceId: createdOrder.id,
         });
@@ -1042,22 +1128,57 @@ export class OrdersService {
             },
           },
         },
-        shipment: true,
+        shipment: {
+          select: {
+            id: true,
+            orderId: true,
+            provider: true,
+            service: true,
+            status: true,
+            cost: true,
+            trackingNumber: true,
+            trackingUrl: true,
+            metadata: true,
+            history: { select: { providerStatus: true, changedAt: true }, orderBy: { changedAt: 'desc' }, take: 1 },
+          },
+        },
       },
       orderBy: { createdAt: 'desc' },
     });
 
     // Present the latest attempt as `payment.gateway`; the relation name and its
     // array shape are an internal detail the frontend should not depend on.
-    return orders.map(({ payment, ...order }) => {
-      if (!payment) return { ...order, payment: null };
+    return orders.map(({ payment, shipment, ...orderRow }) => {
+      const providerStatus = shipment
+        ? latestPaxelStatusCode(shipment.metadata, shipment.history)
+        : undefined;
+      const order = {
+        ...orderRow,
+        shipment: shipment
+          ? {
+              id: shipment.id,
+              orderId: shipment.orderId,
+              provider: shipment.provider,
+              service: shipment.service,
+              status: shipment.status,
+              cost: shipment.cost,
+              trackingNumber: shipment.trackingNumber,
+              trackingUrl: shipment.trackingUrl,
+              displayStatusLabel: paxelStatusDisplayLabel(
+                shipment.provider,
+                providerStatus,
+              ),
+            }
+          : null,
+      };
+      if (!payment) return { ...toCustomerOrder(order), payment: null };
       const { gatewayTransactions, ...rest } = payment;
       const latest = gatewayTransactions[0];
       // Rebuild the summary field by field rather than spreading the row: the
       // narrow `select` above already limits it, but widening that clause later
       // must not silently start publishing provider data to every order.
       const gateway = latest ? { expiryAt: latest.expiryAt, status: latest.status } : null;
-      return { ...order, payment: { ...rest, gateway } };
+      return { ...toCustomerOrder(order), payment: { ...rest, gateway } };
     });
   }
 }

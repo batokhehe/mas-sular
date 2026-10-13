@@ -1,13 +1,16 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Header, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { PaymentStatus } from '@prisma/client';
 import { ApiTags } from '@nestjs/swagger';
 import { AdminUser, CurrentAdmin } from '../../../common/decorators/current-admin.decorator';
 import { Permissions } from '../../../common/decorators/permissions.decorator';
 import { AdminGuard } from '../../../common/guards/admin.guard';
 import { PermissionGuard } from '../../../common/guards/permission.guard';
+import { SuperAdminGuard } from '../../../common/guards/super-admin.guard';
 import { AdminService } from '../admin.service';
 import { ExecutiveDashboardService } from '../executive-dashboard.service';
 import { AdminOrderNotesService } from '../admin-order-notes.service';
+import { AdminInvoiceLinkService } from '../admin-invoice-link.service';
+import { PackingSlipService } from '../packing-slip.service';
 import { ShipmentService } from '../../shipment/shipment.service';
 import {
   CreateShipmentDto,
@@ -34,6 +37,8 @@ export class AdminOperationsController {
     // Cancellation talks to the courier, which is ShipmentService's job — the
     // same collaborator the retry and prepare actions already go through.
     private readonly shipments: ShipmentService,
+    private readonly invoiceLinks: AdminInvoiceLinkService,
+    private readonly packingSlips: PackingSlipService,
   ) {}
 
   @Permissions('Dashboard.read')
@@ -66,6 +71,37 @@ export class AdminOperationsController {
   @Get('orders/:id/operations')
   orderOperations(@Param('id') id: string) {
     return this.adminService.getOrderOperations(id);
+  }
+
+  // ---- Packing slip (P3) ----
+  // Read-only print view: recipient, items (no prices) and the shipment AWB. Same
+  // access as the order detail; carries customer PII, so it is never cached.
+  @Permissions('Order.read')
+  @Get('orders/:id/packing-slip')
+  @Header('Cache-Control', 'no-store')
+  packingSlip(@Param('id') id: string) {
+    return this.packingSlips.get(id);
+  }
+
+  // ---- Customer invoice link (P2 #14) ----
+  // Metadata of the active link only; the link itself is shown once, when created.
+  @Permissions('Order.read')
+  @Get('orders/:id/invoice-link')
+  invoiceLinkStatus(@Param('id') id: string) {
+    return this.invoiceLinks.status(id);
+  }
+
+  @Permissions('Order.update')
+  @Post('orders/:id/invoice-link')
+  createInvoiceLink(@CurrentAdmin() admin: AdminUser, @Param('id') id: string) {
+    return this.invoiceLinks.create(id, { id: admin.sub, name: admin.name });
+  }
+
+  // Sends a customer message, so it also needs the manual-send permission.
+  @Permissions('Order.update', 'Notification.send')
+  @Post('orders/:id/invoice-link/whatsapp')
+  sendInvoiceLinkWhatsApp(@CurrentAdmin() admin: AdminUser, @Param('id') id: string) {
+    return this.invoiceLinks.sendWhatsApp(id, { id: admin.sub, name: admin.name });
   }
 
   // ---- Internal notes (admin-only annotations; isolated from business flows) ----
@@ -201,10 +237,12 @@ export class AdminOperationsController {
     return this.adminService.updateUser(id, dto);
   }
 
+  // H1: role administration is SUPER_ADMIN-only, on top of the permission check.
   @Permissions('Role.create')
+  @UseGuards(SuperAdminGuard)
   @Post('roles')
-  createRole(@Body() dto: CreateRoleDto) {
-    return this.adminService.createRole(dto);
+  createRole(@Body() dto: CreateRoleDto, @CurrentAdmin() admin: AdminUser) {
+    return this.adminService.createRole(dto, admin);
   }
 
   @Permissions('Role.read')
@@ -220,9 +258,10 @@ export class AdminOperationsController {
   }
 
   @Permissions('Role.update')
+  @UseGuards(SuperAdminGuard)
   @Patch('roles/:id')
-  updateRole(@Param('id') id: string, @Body() dto: UpdateRoleDto) {
-    return this.adminService.updateRole(id, dto);
+  updateRole(@Param('id') id: string, @Body() dto: UpdateRoleDto, @CurrentAdmin() admin: AdminUser) {
+    return this.adminService.updateRole(id, dto, admin);
   }
 
   @Permissions('Role.read')

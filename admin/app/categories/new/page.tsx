@@ -23,18 +23,18 @@ export default function NewCategoryPage() {
   return (
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.categoryCreate}>
       <div className="mb-6">
-        <h2 className="text-xl font-semibold text-gray-900">Add Category</h2>
-        <p className="mt-1 text-sm text-gray-500">Create a catalog category for products and storefront filters.</p>
+        <h2 className="text-xl font-semibold text-gray-900">Tambah Kategori</h2>
+        <p className="mt-1 text-sm text-gray-500">Buat kategori katalog untuk produk dan filter storefront.</p>
       </div>
       <CategoryForm
         onSubmit={async (values) => {
           await runWithFeedback({
             loading: ADMIN_LOADING_MESSAGES.create,
-            success: ADMIN_SUCCESS_MESSAGES.created('Category'),
+            success: ADMIN_SUCCESS_MESSAGES.created('Kategori'),
             action: () => createCategory.mutateAsync(values),
           });
         }}
-        submitLabel={createCategory.isPending ? 'Creating...' : 'Create Category'}
+        submitLabel={createCategory.isPending ? 'Membuat...' : 'Buat Kategori'}
         isSubmitting={createCategory.isPending}
       />
     </AdminShell>

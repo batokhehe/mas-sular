@@ -23,7 +23,29 @@ describe('PaymentUploadTokenService', () => {
       expect(stored.token).not.toBe(issued.rawToken); // raw secret never persisted
       expect(stored.expiresAt.getTime()).toBe(NOW + UPLOAD_TOKEN_TTL_MS);
       expect(UPLOAD_TOKEN_TTL_MS).toBe(72 * 60 * 60 * 1000);
-      expect(issued.uploadUrl.endsWith(`/payments/upload/${issued.rawToken}`)).toBe(true);
+      expect(issued.uploadUrl.endsWith(`/payment/${issued.rawToken}`)).toBe(true);
+    });
+
+    it('H4: builds the STOREFRONT page route /payment/<token>, not the API path', () => {
+      const saved = process.env.PAYMENT_UPLOAD_BASE_URL;
+      process.env.PAYMENT_UPLOAD_BASE_URL = 'https://shop.example.invalid/';
+      try {
+        const url = svc().buildUrl('a'.repeat(64));
+        expect(url).toBe(`https://shop.example.invalid/payment/${'a'.repeat(64)}`);
+        expect(url).not.toContain('/payments/upload/');
+      } finally {
+        if (saved === undefined) delete process.env.PAYMENT_UPLOAD_BASE_URL;
+        else process.env.PAYMENT_UPLOAD_BASE_URL = saved;
+      }
+    });
+
+    it('H4: the storefront really serves that route, and the token is its only segment', () => {
+      const { existsSync } = jest.requireActual<typeof import('fs')>('fs');
+      const { join } = jest.requireActual<typeof import('path')>('path');
+      const page = join(__dirname, '../../../frontend/app/payment/[token]/page.tsx');
+      expect(existsSync(page)).toBe(true);
+      // Consumers recover the token as the LAST path segment; the new URL keeps that true.
+      expect(svc().buildUrl('b'.repeat(64)).split('/').pop()).toBe('b'.repeat(64));
     });
   });
 

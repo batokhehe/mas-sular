@@ -5,14 +5,10 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { useQueryClient } from '@tanstack/react-query'
 import { AlertCircle, Loader2 } from 'lucide-react'
 import { useAuth } from '@/lib/auth/auth-context'
+import { safeRedirect } from '@/lib/auth/safe-redirect'
 import { GoogleSignInButton } from '@/components/auth/google-sign-in-button'
 import { qk } from '@/lib/query/keys'
 import type { User } from '@/lib/types/models'
-
-function safeRedirect(value: string | null): string {
-  // Only allow internal paths (avoid open redirects).
-  return value && value.startsWith('/') && !value.startsWith('//') ? value : '/'
-}
 
 function LoginInner() {
   const router = useRouter()
@@ -45,7 +41,7 @@ function LoginInner() {
       await loginWithGoogle(idToken)
       router.replace(destinationFor())
     } catch {
-      setError('Login failed. Please try again.')
+      setError('Gagal masuk. Silakan coba lagi.')
     } finally {
       setLoading(false)
     }
@@ -64,7 +60,7 @@ function LoginInner() {
           </div>
 
           <h1 className="mb-4 text-4xl font-bold leading-tight xl:text-5xl">
-            Bakso Premium
+            Bakso Bumbu Rujak
             <br />
             Langsung ke
             <br />
@@ -95,8 +91,8 @@ function LoginInner() {
           </div>
 
           <div className="mb-8 text-center lg:text-left">
-            <h2 className="text-2xl font-bold lg:text-3xl">Welcome to Bakso Mas Sular</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Sign in to order and track your meatballs.</p>
+            <h2 className="text-2xl font-bold lg:text-3xl">Selamat datang di Bakso Mas Sular</h2>
+            <p className="mt-1 text-sm text-muted-foreground">Masuk untuk memesan dan melacak pesanan bakso Anda.</p>
           </div>
 
           {error ? (
@@ -108,19 +104,19 @@ function LoginInner() {
 
           {loading ? (
             <div className="flex items-center justify-center gap-2 py-3 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" /> Signing in…
+              <Loader2 className="size-4 animate-spin" /> Sedang masuk…
             </div>
           ) : (
             <div className="flex justify-center lg:justify-start">
               <GoogleSignInButton
                 onCredential={handleCredential}
-                onError={() => setError('Google sign-in was cancelled or failed.')}
+                onError={() => setError('Masuk dengan Google dibatalkan atau gagal.')}
               />
             </div>
           )}
 
           <p className="mt-6 text-center text-xs text-muted-foreground lg:text-left">
-            By continuing you agree to our terms of service.
+            Dengan melanjutkan, Anda menyetujui syarat dan ketentuan kami.
           </p>
         </div>
       </div>

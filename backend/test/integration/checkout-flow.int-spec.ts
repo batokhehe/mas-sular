@@ -1,5 +1,5 @@
 /**
- * B. Checkout flow E2E — order/payment/outbox persisted (real MySQL tx) → relay
+ * B. Checkout flow E2E — order/payment/outbox persisted (real PostgreSQL tx) → relay
  * publishes to RabbitMQ → consumer enqueues a NotificationOutbox row.
  */
 import { checkout, getWorld, waitFor, type IntegrationWorld } from './world'
@@ -28,7 +28,7 @@ describe('B. Checkout flow E2E', () => {
     // The running consumer drains the message → 5. NotificationOutbox created (exactly one).
     await waitFor(async () => (await world.prisma.notificationOutbox.count({ where: { sourceMessageId: outboxId } })) === 1)
     const notif = await world.prisma.notificationOutbox.findFirst({ where: { sourceMessageId: outboxId } })
-    expect(notif?.template).toBe('order.received')
-    expect(notif?.recipient).toBe(scenario.email)
+    expect(notif?.template).toBe('order.transfer')
+    expect(notif?.recipient).toBe(scenario.phone)
   })
 })

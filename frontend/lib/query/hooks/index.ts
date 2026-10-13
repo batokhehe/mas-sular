@@ -1,5 +1,5 @@
 export { useMe } from './use-me'
-export { useProducts } from './use-products'
+export { useProducts, useToppings } from './use-products'
 export { useCheckout } from './use-checkout'
 export { useOrders } from './use-orders'
 export { useUploadReceipt } from './use-upload-receipt'

@@ -1,37 +1,49 @@
 #!/usr/bin/env bash
 #
-# Mas Sular — encrypted backup of MySQL + the uploads volume.
+# Mas Sular — encrypted backup of PostgreSQL + the uploads volume.
 #
 # Pipeline per run:
-#   dump/archive -> compress -> encrypt -> checksum -> VERIFY BY DECRYPTING
-#   -> manifest -> atomic promotion -> retention
+#   pg_dump -Fc / tar -> integrity check -> encrypt -> checksum
+#   -> VERIFY BY DECRYPTING -> manifest -> atomic promotion -> retention
 #
 # Nothing is promoted into the backup directory until it has been decrypted
 # again and matched byte-for-byte against the source checksum. A half-written
-# or unverifiable artifact must never be mistaken for a usable backup.
+# or unverifiable artifact must never be mistaken for a usable backup. Any
+# failure exits non-zero and promotes nothing.
 #
-# Usage:
-#   BACKUP_DIR=/srv/backups BACKUP_KEY_FILE=/etc/mas-sular/backup.key ./backup.sh
-#   ./backup.sh --dry-run-retention     # show what retention WOULD delete
+# This is a LOGICAL snapshot taken at the moment of the run. There is no
+# point-in-time recovery (no WAL archiving): a restore returns the data as it
+# was at the chosen backup, and loses every write made after it.
+#
+# Usage (on the VPS, from the repository root):
+#   BACKUP_DIR=/srv/backups/mas-sular BACKUP_KEY_FILE=/etc/mas-sular/backup.key \
+#     ./scripts/backup/backup.sh
+#   BACKUP_LABEL=pre-migrate ./scripts/backup/backup.sh   # tag a one-off run
+#   ./scripts/backup/backup.sh --dry-run-retention        # show what retention WOULD delete
 #
 set -Eeuo pipefail
 
 # ----------------------------------------------------------------- config ---
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.production.yml}"
 ENV_FILE="${ENV_FILE:-production.env}"
-MYSQL_SERVICE="${MYSQL_SERVICE:-mysql}"
-MYSQL_DATABASE="${MYSQL_DATABASE:-mas_sular}"
+POSTGRES_SERVICE="${POSTGRES_SERVICE:-postgres}"
+# Direct container name/id; bypasses compose resolution (restore drills, tests).
+POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-}"
 UPLOADS_VOLUME="${UPLOADS_VOLUME:-mas-sular_uploads_data}"
+BACKUP_LABEL="${BACKUP_LABEL:-scheduled}"
 
 BACKUP_DIR="${BACKUP_DIR:?BACKUP_DIR must be set (must live OUTSIDE any git repo)}"
 BACKUP_KEY_FILE="${BACKUP_KEY_FILE:?BACKUP_KEY_FILE must be set (must live OUTSIDE BACKUP_DIR)}"
 
-# Retention — values come from the Phase 5J.13 Step 2 strategy.
-KEEP_MYSQL="${KEEP_MYSQL:-24}"      # hourly cadence -> 24h of point-in-time recovery
-KEEP_UPLOADS="${KEEP_UPLOADS:-7}"   # daily cadence  -> 7 days
+# Retention: newest N artifacts of each kind (scheduled daily runs AND the
+# pre-migration runs count alike). 14 daily = two weeks of restore points.
+KEEP_POSTGRES="${KEEP_POSTGRES:-14}"
+KEEP_UPLOADS="${KEEP_UPLOADS:-14}"
 
 DRY_RUN_RETENTION=0
 [[ "${1:-}" == "--dry-run-retention" ]] && DRY_RUN_RETENTION=1
+
+[[ "$BACKUP_LABEL" =~ ^[a-z0-9-]{1,32}$ ]] || { echo "ERROR: BACKUP_LABEL must match [a-z0-9-]{1,32}" >&2; exit 1; }
 
 TS="$(date -u +%Y%m%d-%H%M%SZ)"
 LOCK_DIR="${BACKUP_DIR}/.backup.lock"
@@ -84,14 +96,23 @@ preflight() {
     "$(cd "$BACKUP_DIR" 2>/dev/null && pwd)"*) fail "key file must NOT live inside BACKUP_DIR" ;;
   esac
 
-  MYSQL_CID="$(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps -q "$MYSQL_SERVICE" 2>/dev/null || true)"
-  [[ -n "$MYSQL_CID" ]] || fail "mysql container not found"
+  if [[ -n "$POSTGRES_CONTAINER" ]]; then
+    PG_CID="$POSTGRES_CONTAINER"
+  else
+    PG_CID="$(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps -q "$POSTGRES_SERVICE" 2>/dev/null || true)"
+  fi
+  [[ -n "$PG_CID" ]] || fail "postgres container not found (service '$POSTGRES_SERVICE')"
   local health
-  health="$(docker inspect "$MYSQL_CID" --format '{{.State.Health.Status}}' 2>/dev/null || echo unknown)"
-  [[ "$health" == "healthy" ]] || fail "mysql container is '$health', refusing to back up"
+  health="$(docker inspect "$PG_CID" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' 2>/dev/null || echo unknown)"
+  [[ "$health" == "healthy" ]] || fail "postgres container is '$health', refusing to back up"
+
+  # The database name comes from the container's own environment - nothing is
+  # read from production.env on the host and nothing is passed on a command line.
+  PG_DATABASE="$(docker exec "$PG_CID" sh -c 'printf %s "$POSTGRES_DB"')"
+  [[ -n "$PG_DATABASE" ]] || fail "POSTGRES_DB is not set inside the postgres container"
 
   docker volume inspect "$UPLOADS_VOLUME" >/dev/null 2>&1 || fail "uploads volume not found: $UPLOADS_VOLUME"
-  log "preflight ok (mysql=$health, volume=$UPLOADS_VOLUME)"
+  log "preflight ok (postgres=$health db=$PG_DATABASE volume=$UPLOADS_VOLUME label=$BACKUP_LABEL)"
 }
 
 # ------------------------------------------------------- encrypt + verify ---
@@ -128,30 +149,40 @@ encrypt_and_verify() {
   log "  verified $(basename "$enc") (decrypt + checksum ok)"
 }
 
-# ------------------------------------------------------------ mysql backup --
-backup_mysql() {
-  local plain="${WORK_DIR}/mas-sular-mysql-${TS}.sql.gz"
-  log "dumping mysql (${MYSQL_DATABASE})"
+# --------------------------------------------------------- postgres backup --
+backup_postgres() {
+  local plain="${WORK_DIR}/mas-sular-postgres-${TS}.dump"
+  local err="${WORK_DIR}/pg_dump.err"
+  log "dumping postgres (${PG_DATABASE}, custom format)"
 
-  # MYSQL_PWD keeps the password out of argv/process listings.
-  # --single-transaction gives a consistent InnoDB snapshot without blocking writers.
-  if ! docker exec "$MYSQL_CID" sh -c '
-        MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqldump -u root \
-          --single-transaction --routines --triggers --events \
-          --set-gtid-purged=OFF --default-character-set=utf8mb4 \
-          --hex-blob --no-tablespaces '"$MYSQL_DATABASE"'
-      ' 2>/dev/null | gzip -9 > "$plain"; then
-    fail "mysqldump failed"
+  # Runs INSIDE the postgres container over its local socket as the cluster's own
+  # user, so no password is read, typed, passed in argv or written to history.
+  # -Fc: compressed custom archive, restorable selectively with pg_restore; it is
+  # a consistent snapshot (one repeatable-read transaction) that does not block
+  # the application's writes.
+  if ! docker exec "$PG_CID" sh -c 'exec pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' \
+        > "$plain" 2> "$err"; then
+    fail "pg_dump failed: $(head -c 400 "$err" 2>/dev/null)"
   fi
-  [[ -s "$plain" ]] || fail "mysql dump is empty"
-  gzip -t "$plain" || fail "mysql dump failed gzip integrity"
+  [[ -s "$plain" ]] || fail "postgres dump is empty"
 
-  MYSQL_PLAIN_SHA="$(sha256sum "$plain" | cut -d' ' -f1)"
-  encrypt_and_verify "$plain" "${plain}.enc" "$MYSQL_PLAIN_SHA"
-  MYSQL_ARTIFACT="$(basename "${plain}.enc")"
-  MYSQL_ENC_SHA="$(sha256sum "${plain}.enc" | cut -d' ' -f1)"
-  MYSQL_ENC_SIZE="$(stat -c%s "${plain}.enc")"
-  rm -f "$plain"                          # plaintext is temporary, always
+  # Integrity: the archive must be readable by pg_restore (same major version,
+  # from the same container), and it must actually contain the schema.
+  local toc="${WORK_DIR}/pg_restore.toc"
+  if ! docker exec -i "$PG_CID" pg_restore --list < "$plain" > "$toc" 2> "$err"; then
+    fail "pg_restore could not read the dump: $(head -c 400 "$err" 2>/dev/null)"
+  fi
+  PG_TABLES="$(grep -c ' TABLE DATA ' "$toc" || true)"
+  grep -q ' TABLE DATA public _prisma_migrations ' "$toc" || fail "dump has no _prisma_migrations table data - not an application database"
+  (( PG_TABLES > 0 )) || fail "dump contains no table data"
+  log "  archive readable by pg_restore (${PG_TABLES} tables with data)"
+
+  PG_PLAIN_SHA="$(sha256sum "$plain" | cut -d' ' -f1)"
+  encrypt_and_verify "$plain" "${plain}.enc" "$PG_PLAIN_SHA"
+  PG_ARTIFACT="$(basename "${plain}.enc")"
+  PG_ENC_SHA="$(sha256sum "${plain}.enc" | cut -d' ' -f1)"
+  PG_ENC_SIZE="$(stat -c%s "${plain}.enc")"
+  rm -f "$plain" "$toc" "$err"             # plaintext is temporary, always
 }
 
 # ---------------------------------------------------------- uploads backup --
@@ -171,6 +202,7 @@ backup_uploads() {
   [[ -s "$p" ]] || fail "uploads archive is empty"
   gzip -t "$p" || fail "uploads archive failed gzip integrity"
   tar tzf "$p" >/dev/null 2>&1 || fail "uploads archive failed tar integrity"
+  UPLOADS_FILES="$(tar tzf "$p" | grep -vc '/$' || true)"
 
   UPLOADS_PLAIN_SHA="$(sha256sum "$p" | cut -d' ' -f1)"
   encrypt_and_verify "$p" "${p}.enc" "$UPLOADS_PLAIN_SHA"
@@ -186,15 +218,19 @@ write_manifest() {
   cat > "${WORK_DIR}/manifest-${TS}.json" <<JSON
 {
   "timestamp": "${TS}",
-  "database": "${MYSQL_DATABASE}",
-  "mysql": {
-    "artifact": "${MYSQL_ARTIFACT}",
-    "sha256": "${MYSQL_ENC_SHA}",
-    "size": ${MYSQL_ENC_SIZE},
-    "plaintext_sha256": "${MYSQL_PLAIN_SHA}"
+  "label": "${BACKUP_LABEL}",
+  "database": "${PG_DATABASE}",
+  "postgres": {
+    "artifact": "${PG_ARTIFACT}",
+    "format": "pg_dump custom (-Fc)",
+    "tables_with_data": ${PG_TABLES},
+    "sha256": "${PG_ENC_SHA}",
+    "size": ${PG_ENC_SIZE},
+    "plaintext_sha256": "${PG_PLAIN_SHA}"
   },
   "uploads": {
     "artifact": "${UPLOADS_ARTIFACT}",
+    "files": ${UPLOADS_FILES},
     "sha256": "${UPLOADS_ENC_SHA}",
     "size": ${UPLOADS_ENC_SIZE},
     "plaintext_sha256": "${UPLOADS_PLAIN_SHA}"
@@ -204,7 +240,8 @@ write_manifest() {
     "algorithm": "AES-256",
     "integrity": "OpenPGP MDC (verified by decrypt round-trip)"
   },
-  "verification": "decrypt + sha256 match performed before promotion"
+  "verification": "pg_restore --list + decrypt + sha256 match performed before promotion",
+  "point_in_time_recovery": false
 }
 JSON
 }
@@ -225,16 +262,16 @@ promote() {
 # Deletes ONLY files matching this project's naming convention, only inside
 # BACKUP_DIR, never the newest, and never the last remaining copy.
 retention() {
-  local prefix="$1" keep="$2" mode="$3" ext="$4"
+  local prefix="$1" keep="$2" mode="$3" suffix="$4"
   local -a files=()
   # -name globs, not -regex: find's DEFAULT regex dialect is emacs, where
   # "[0-9]\{8\}" silently matches nothing — retention would then quietly never
   # delete anything and disk growth would be unbounded while appearing healthy.
   # This glob is still tightly scoped (project prefix + exact extension chain +
-  # maxdepth 1 inside BACKUP_DIR), so no unrelated .gz/.enc file can match.
+  # maxdepth 1 inside BACKUP_DIR), so no unrelated file can match.
   while IFS= read -r f; do [[ -n "$f" ]] && files+=("$f"); done < <(
     find "$BACKUP_DIR" -maxdepth 1 -type f \
-         -name "mas-sular-${prefix}-*.${ext}.gz.enc" \
+         -name "mas-sular-${prefix}-*.${suffix}" \
          -printf '%T@ %p\n' 2>/dev/null | sort -rn | cut -d' ' -f2-
   )
 
@@ -261,22 +298,22 @@ main() {
 
   if (( DRY_RUN_RETENTION )); then
     log "RETENTION DRY RUN — no backup taken, nothing deleted"
-    retention "mysql"   "$KEEP_MYSQL"   1 "sql"
-    retention "uploads" "$KEEP_UPLOADS" 1 "tar"
+    retention "postgres" "$KEEP_POSTGRES" 1 "dump.enc"
+    retention "uploads"  "$KEEP_UPLOADS"  1 "tar.gz.enc"
     return 0
   fi
 
   preflight
-  backup_mysql
+  backup_postgres
   backup_uploads
   write_manifest
   promote
 
   log "applying retention"
-  retention "mysql"   "$KEEP_MYSQL"   0 "sql"
-  retention "uploads" "$KEEP_UPLOADS" 0 "tar"
+  retention "postgres" "$KEEP_POSTGRES" 0 "dump.enc"
+  retention "uploads"  "$KEEP_UPLOADS"  0 "tar.gz.enc"
 
-  log "backup OK  mysql=${MYSQL_ARTIFACT} uploads=${UPLOADS_ARTIFACT}"
+  log "backup OK  postgres=${PG_ARTIFACT} uploads=${UPLOADS_ARTIFACT}"
 }
 
 main "$@"

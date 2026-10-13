@@ -70,16 +70,40 @@ export function clearCustomerAuthCookies(res: Response, config: CookieConfig = l
   res.clearCookie(AUTH_COOKIES.refresh, clearOptions(config, config.authCookiePath));
 }
 
+function adminCookieOptions(config: CookieConfig, maxAgeMs?: number): CookieOptions {
+  return {
+    httpOnly: true,
+    secure: config.secure,
+    sameSite: config.sameSite,
+    domain: config.adminCookieDomain,
+    path: ROOT_PATH,
+    ...(maxAgeMs !== undefined ? { maxAge: maxAgeMs } : {}),
+  };
+}
+
+/**
+ * Before H4/M4 the admin cookie was written with Domain=COOKIE_DOMAIN. A browser
+ * still holding that copy would send BOTH same-named cookies, and cookie-parser keeps
+ * the first - the stale one. Expire it whenever the admin cookie is set or cleared.
+ */
+function expireLegacyAdminCookie(res: Response, config: CookieConfig): void {
+  if (config.domain && config.domain !== config.adminCookieDomain) {
+    res.clearCookie(AUTH_COOKIES.adminAccess, { ...clearOptions(config, ROOT_PATH), domain: config.domain });
+  }
+}
+
 export function setAdminAuthCookies(
   res: Response,
   tokens: { accessToken: string },
   config: CookieConfig = loadCookieConfig(),
 ): void {
-  res.cookie(AUTH_COOKIES.adminAccess, tokens.accessToken, setOptions(config, config.adminAccessMaxAgeMs, ROOT_PATH));
+  expireLegacyAdminCookie(res, config);
+  res.cookie(AUTH_COOKIES.adminAccess, tokens.accessToken, adminCookieOptions(config, config.adminAccessMaxAgeMs));
 }
 
 export function clearAdminAuthCookies(res: Response, config: CookieConfig = loadCookieConfig()): void {
-  res.clearCookie(AUTH_COOKIES.adminAccess, clearOptions(config, ROOT_PATH));
+  expireLegacyAdminCookie(res, config);
+  res.clearCookie(AUTH_COOKIES.adminAccess, adminCookieOptions(config));
 }
 
 // Marker cookies mirror the token cookies' domain/secure/sameSite (so they travel
@@ -147,6 +171,18 @@ function readAuthCookie(req: Request | undefined, cookieName: string): string | 
 export const customerCookieExtractor: JwtFromRequestFunction = (req) =>
   readAuthCookie(req as Request | undefined, AUTH_COOKIES.access);
 
-/** Extracts the admin access JWT from the httpOnly `ms_admin_access` cookie. */
-export const adminCookieExtractor: JwtFromRequestFunction = (req) =>
-  readAuthCookie(req as Request | undefined, AUTH_COOKIES.adminAccess);
+/**
+ * Extracts the admin access JWT from the httpOnly `ms_admin_access` cookie.
+ *
+ * NOT gated by AUTH_COOKIE_EXTRACTOR_ENABLED (that flag is the rollback lever for the
+ * CUSTOMER cookie rollout). The admin cookie is the admin UI's only credential since
+ * H4 - the token is no longer returned in a response body or kept in localStorage.
+ */
+export const adminCookieExtractor: JwtFromRequestFunction = (req) => {
+  try {
+    const value = (req as Request | undefined)?.cookies?.[AUTH_COOKIES.adminAccess];
+    return typeof value === 'string' && value.length > 0 ? value : null;
+  } catch {
+    return null;
+  }
+};

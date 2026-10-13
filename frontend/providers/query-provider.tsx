@@ -24,6 +24,9 @@ function messageFor(error: unknown): string {
   return error instanceof Error ? error.message : 'Unexpected error'
 }
 
+export const isUnauthenticated = (error: unknown): boolean =>
+  error instanceof ApiError && error.status === 401
+
 export function makeQueryClient(): QueryClient {
   return new QueryClient({
     defaultOptions: {
@@ -40,7 +43,14 @@ export function makeQueryClient(): QueryClient {
       mutations: { retry: 0 },
     },
     queryCache: new QueryCache({
-      onError: (error) => toast.error(messageFor(error)),
+      // P0-2: a query 401 means "not signed in" (the client already tried the one
+      // refresh and, if the API refused it, dropped the ms_session marker). The page
+      // renders its signed-out state; a background "Unauthorized" toast on every
+      // navigation is noise, not information. Mutations (user actions) still toast.
+      onError: (error) => {
+        if (isUnauthenticated(error)) return
+        toast.error(messageFor(error))
+      },
     }),
     mutationCache: new MutationCache({
       // Admin flows that present their own SweetAlert error opt out via

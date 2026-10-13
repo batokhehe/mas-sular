@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { PermissionGate } from '@/components/auth/permission-gate';
 import { AdminShell } from '@/components/layout/admin-shell';
 import { Badge } from '@/components/ui/badge';
+import { paymentStatusLabel } from '@/lib/status-labels';
 import { Button } from '@/components/ui/button';
 import { Card, CardTitle } from '@/components/ui/card';
 import { ROUTE_PERMISSIONS } from '@/lib/access';
@@ -34,8 +35,8 @@ export default function PaymentsPage() {
     runWithFeedback({
       confirm: () =>
         confirmApprove({
-          title: 'Verify Payment?',
-          text: 'This payment will be marked as PAID and the order will move to PROCESSING.',
+          title: 'Verifikasi pembayaran?',
+          text: 'Pembayaran ini akan ditandai Lunas dan pesanan akan berpindah ke status Diproses.',
         }),
       loading: ADMIN_LOADING_MESSAGES.verify,
       success: ADMIN_SUCCESS_MESSAGES.paymentVerified,
@@ -46,8 +47,8 @@ export default function PaymentsPage() {
     runWithFeedback({
       confirm: () =>
         confirmReject({
-          title: 'Reject Payment?',
-          text: 'This payment will be rejected and inventory restored.',
+          title: 'Tolak pembayaran?',
+          text: 'Pembayaran ini akan ditolak dan stok dikembalikan.',
         }),
       loading: ADMIN_LOADING_MESSAGES.reject,
       success: ADMIN_SUCCESS_MESSAGES.paymentRejected,
@@ -60,14 +61,14 @@ export default function PaymentsPage() {
     runWithFeedback<{ successCount: number; failureCount: number }>({
       confirm: () =>
         confirmApprove({
-          title: 'Verify Selected Payments?',
-          text: `${selectedPaymentIds.length} payment(s) will be marked as PAID.`,
+          title: 'Verifikasi pembayaran terpilih?',
+          text: `${selectedPaymentIds.length} pembayaran akan ditandai Lunas.`,
         }),
       loading: ADMIN_LOADING_MESSAGES.verify,
       success: ({ successCount, failureCount }) =>
         failureCount === 0
-          ? `${successCount} payments verified successfully`
-          : `${successCount} verified, ${failureCount} failed`,
+          ? `${successCount} pembayaran berhasil diverifikasi`
+          : `${successCount} terverifikasi, ${failureCount} gagal`,
       action: async () => {
         let successCount = 0;
         let failureCount = 0;
@@ -88,8 +89,8 @@ export default function PaymentsPage() {
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.payments}>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold text-gray-900">Payment Verification</h2>
-          <p className="mt-1 text-sm text-gray-500">Manual transfer queue and future gateway webhook reconciliation.</p>
+          <h2 className="text-xl font-semibold text-gray-900">Verifikasi Pembayaran</h2>
+          <p className="mt-1 text-sm text-gray-500">Antrean transfer manual dan rekonsiliasi webhook gateway.</p>
         </div>
         <PermissionGate permissions={ROUTE_PERMISSIONS.paymentVerify}>
           <Button
@@ -102,21 +103,21 @@ export default function PaymentsPage() {
       </div>
       <Card>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <CardTitle>Manual Transfer Queue</CardTitle>
+          <CardTitle>Antrean Transfer Manual</CardTitle>
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search order, customer, or transfer amount (e.g. 135123)"
+            placeholder="Cari pesanan, pelanggan, atau nominal transfer (mis. 135123)"
             className="h-10 w-full rounded-xl border border-gray-200 bg-gray-50 px-4 text-sm outline-none focus:border-[#465fff] focus:bg-white sm:w-96"
           />
         </div>
         <div className="mt-4 space-y-3">
           {isLoading ? (
-            <p className="p-6 text-sm text-gray-500">Loading payments...</p>
+            <p className="p-6 text-sm text-gray-500">Memuat pembayaran...</p>
           ) : isError ? (
-            <p className="p-6 text-sm text-red-600">Unable to load payments. Please reauthenticate.</p>
+            <p className="p-6 text-sm text-red-600">Gagal memuat pembayaran. Silakan masuk ulang.</p>
           ) : data?.length === 0 ? (
-            <p className="p-6 text-sm text-gray-500">No payments waiting for verification.</p>
+            <p className="p-6 text-sm text-gray-500">Tidak ada pembayaran yang menunggu verifikasi.</p>
           ) : (
             data?.map((payment) => (
             <div key={payment.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-100 p-4">
@@ -127,7 +128,7 @@ export default function PaymentsPage() {
                     checked={selectedPaymentIds.includes(payment.id)}
                     onChange={() => toggleSelection(payment.id)}
                     className="h-4 w-4 rounded border-gray-300 text-[#465fff] focus:ring-[#465fff]"
-                    aria-label={`Select payment ${payment.order.orderNumber}`}
+                    aria-label={`Pilih pembayaran ${payment.order.orderNumber}`}
                   />
                 </PermissionGate>
                 <div className="min-w-0">
@@ -135,17 +136,17 @@ export default function PaymentsPage() {
                   <p className="text-sm text-gray-500">
                     {payment.manualBankName ?? payment.method}
                     {payment.uniqueCode != null ? (
-                      <> · Unique code <span className="font-semibold text-gray-700">{payment.uniqueCode}</span></>
+                      <> · Kode unik <span className="font-semibold text-gray-700">{payment.uniqueCode}</span></>
                     ) : null}
                   </p>
                   {payment.uniqueCode != null ? (
                     <p className="text-sm text-gray-500">
-                      Business total:{' '}
+                      Total pesanan:{' '}
                       <span className="font-semibold text-gray-700">Rp {payment.order.totalPrice.toLocaleString('id-ID')}</span>
                     </p>
                   ) : null}
                   <p className="text-sm text-gray-500">
-                    {payment.uniqueCode != null ? 'Transfer amount' : 'Total payment'}:{' '}
+                    {payment.uniqueCode != null ? 'Nominal transfer' : 'Total pembayaran'}:{' '}
                     <span className="font-semibold text-gray-700">Rp {payment.amount.toLocaleString('id-ID')}</span>
                   </p>
                 </div>
@@ -155,12 +156,12 @@ export default function PaymentsPage() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <Badge tone="brand">{payment.status}</Badge>
+                <Badge tone="brand">{paymentStatusLabel(payment.status)}</Badge>
                 <PermissionGate permissions={ROUTE_PERMISSIONS.paymentVerify}>
-                  <Button onClick={() => handleVerify(payment.id)} disabled={verifyMutation.isPending}>Verify</Button>
+                  <Button onClick={() => handleVerify(payment.id)} disabled={verifyMutation.isPending}>Verifikasi</Button>
                 </PermissionGate>
                 <PermissionGate permissions={ROUTE_PERMISSIONS.paymentReject}>
-                  <Button className="bg-white text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50" onClick={() => handleReject(payment.id)} disabled={rejectMutation.isPending}>Reject</Button>
+                  <Button className="bg-white text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50" onClick={() => handleReject(payment.id)} disabled={rejectMutation.isPending}>Tolak</Button>
                 </PermissionGate>
               </div>
             </div>

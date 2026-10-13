@@ -152,7 +152,7 @@ export class StockTransferService {
       // Lock the SOURCE row FOR UPDATE before validating stock, so concurrent
       // transfers draining the same outlet serialize (no oversell / negative stock).
       const locked = await tx.$queryRaw<Array<{ id: string; stock: number; reserved: number }>>(
-        Prisma.sql`SELECT id, stock, reserved FROM ProductInventory WHERE productId = ${transfer.productId} AND outletId = ${transfer.fromOutletId} FOR UPDATE`,
+        Prisma.sql`SELECT id, stock, reserved FROM "ProductInventory" WHERE "productId" = ${transfer.productId} AND "outletId" = ${transfer.fromOutletId} FOR UPDATE`,
       );
       const from = locked[0];
       if (!from || from.stock - from.reserved < transfer.quantity) {

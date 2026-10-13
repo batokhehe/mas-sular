@@ -1,14 +1,17 @@
-# Mas Sular — Backup & Disaster Recovery Runbook
+# Mas Sular — Backup & Disaster Recovery Runbook (PostgreSQL)
 
 **Audience:** any engineer with shell + Docker access. No prior context assumed.
-**Last validated:** Phase 5J.13 (Steps 1–9), against the local Docker stack.
+**Last validated:** production-readiness H1 — `scripts/backup/test-backup-restore.sh`
+(27 checks, throwaway PostgreSQL 16 migrated with the real migrations), local Docker.
+The MySQL-era procedures this runbook used to describe (Phase 5J.13) no longer apply:
+the application database is PostgreSQL 16.
 
 Every procedure below carries a status label. Read it before relying on the step:
 
 | Label | Meaning |
 |---|---|
-| **VERIFIED** | Executed and independently checked during Phase 5J.13 |
-| **AVAILABLE, NOT PRODUCTION-VERIFIED** | Mechanism works; never exercised at production scale or on a VPS |
+| **VERIFIED** | Executed and independently checked by the automated test above |
+| **AVAILABLE, NOT PRODUCTION-VERIFIED** | Mechanism works; never exercised at production scale or on the VPS |
 | **MANUAL ACTION REQUIRED** | A human must do this; no automation exists |
 | **NOT IMPLEMENTED** | Does not exist. Do not assume it protects you. |
 
@@ -16,20 +19,20 @@ Every procedure below carries a status label. Read it before relying on the step
 
 ## 1. Purpose
 
-**Protects:** the MySQL application database and the customer uploads volume — the only two data classes that cannot be reconstructed from source control or by restarting a service.
+**Protects:** the PostgreSQL application database and the customer uploads volume
+(product images, payment receipts) — the only two data classes that cannot be
+reconstructed from source control or by restarting a service.
 
-**Restores:** those two data classes into an isolated target, with verified schema, metadata, ownership and integrity.
+**Restores:** those two data classes into an isolated target, verified before use.
 
 **Applies to:** the Dockerised Mas Sular stack defined by `docker-compose.production.yml`.
 
-**NOT covered:**
-- Off-server / off-site backup — **NOT IMPLEMENTED** (see §16)
-- Automated scheduling — **NOT IMPLEMENTED** (see §15)
-- Encryption-key escrow or recovery — **NOT IMPLEMENTED** (see §17)
-- Full application recovery timing — **NOT VERIFIED** (see §12)
-- VPS provisioning, DNS, TLS certificates
-
-> **Scope warning.** All timings in this runbook were measured against a **local Docker drill** with a **2.98 MB** database and an **8,260-byte** uploads volume containing one synthetic file. They demonstrate that the mechanism works. **They are not a production SLA** and must not be quoted as one.
+**What this is NOT:**
+- **Not point-in-time recovery.** Each backup is a logical snapshot (`pg_dump`). There
+  is no WAL archiving. A restore returns the data as it was at the chosen backup and
+  **loses every write made after it**. RPO = time since the last successful backup.
+- Not off-server by itself — copying artifacts off the VPS is a separate step (§16).
+- Not a key-escrow system (§17).
 
 ---
 
@@ -37,83 +40,100 @@ Every procedure below carries a status label. Read it before relying on the step
 
 | Component | Class | Backup? | Restore? | Rebuild? | Depends on |
 |---|---|---|---|---|---|
-| **MySQL** | **CRITICAL** | Yes | Yes | No | — |
-| **Uploads volume** | **CRITICAL** | Yes | Yes | No | — |
+| **PostgreSQL** | **CRITICAL** | Yes | Yes | No | — |
+| **Uploads volume** (`mas-sular_uploads_data`) | **CRITICAL** | Yes | Yes | No | — |
 | **Redis** | EPHEMERAL | **No** | **No** | Yes — recreate empty | — |
-| **RabbitMQ** | REBUILDABLE | **No** | **No** | Yes — topology re-asserted on consumer boot | MySQL (`OutboxEvent` is authoritative) |
-| **Backend** | REBUILDABLE | No | No | Build from `mas-sular` (see §12) | MySQL, migrations, Redis, RabbitMQ |
-| **Frontend** | REBUILDABLE | No | No | Build from `mas-sular` (see §12) | Backend (runtime only) |
-| **Admin** | REBUILDABLE | No | No | Build from `mas-sular` (see §12) | Backend (runtime only) |
-| **Secrets / config** | **CRITICAL** | **Yes — separately** | Yes | No | Must exist before anything starts |
+| **RabbitMQ** | REBUILDABLE | **No** | **No** | Yes — topology re-asserted on consumer boot | PostgreSQL (`OutboxEvent` is authoritative) |
+| **Backend / Frontend / Admin** | REBUILDABLE | No | No | Build from the release commit | Backend: PostgreSQL, migrations, Redis, RabbitMQ |
+| **Secrets / config** (`production.env`, backup key) | **CRITICAL** | **Yes — separately** | Yes | No | Must exist before anything starts |
 
-**Why Redis and RabbitMQ are not backed up** (verified in Phase 5J.13 Step 2):
-- Redis runs with `save ""` and `appendonly no`. It is a cache; the application treats it as non-authoritative.
-- RabbitMQ held 9 durable queues with **0 messages**; topology is recreated by `assertExchange`/`assertQueue` at consumer startup. **`OutboxEvent` rows in MySQL are the authoritative record** — the relay republishes anything unsent. Backing up Mnesia would add restore-ordering risk for no recovery value.
-
-**External dependencies required after recovery:** `GOOGLE_CLIENT_ID`, `MIDTRANS_SERVER_KEY`, `MIDTRANS_CLIENT_KEY`, `RESEND_API_KEY` (and Qontak keys if WhatsApp is enabled). Without these the stack starts but cannot authenticate customers or take payments.
+- Redis runs with `save ""` / `appendonly no` and holds cache only.
+- RabbitMQ topology is recreated by `assertExchange`/`assertQueue` at consumer start.
+  **`OutboxEvent` rows in PostgreSQL are the authoritative record** — the relay
+  republishes anything unsent, and consumers deduplicate via `ProcessedEvent`.
 
 ---
 
 ## 3. Backup artifact layout
 
-Conceptual layout. **The key must never live inside the backup directory** — the backup script refuses to run if it does.
+**The key must never live inside the backup directory** — the script refuses to run if it does.
 
 ```
-<BACKUP_DIR>/                                  # e.g. /srv/backups
-  mas-sular-mysql-YYYYMMDD-HHMMSSZ.sql.gz.enc
-  mas-sular-uploads-YYYYMMDD-HHMMSSZ.tar.gz.enc
+<BACKUP_DIR>/                                   # e.g. /srv/backups/mas-sular  (outside any git checkout)
+  mas-sular-postgres-YYYYMMDD-HHMMSSZ.dump.enc  # pg_dump custom format (-Fc), GPG AES-256
+  mas-sular-uploads-YYYYMMDD-HHMMSSZ.tar.gz.enc # tar of the uploads volume, GPG AES-256
   manifest-YYYYMMDD-HHMMSSZ.json
 
-<KEY_DIR>/                                     # e.g. /etc/mas-sular  — DIFFERENT filesystem/host in production
+<KEY_DIR>/                                      # e.g. /etc/mas-sular — root-only, NOT in BACKUP_DIR
   backup.key
 ```
 
-- Timestamps are **UTC**, `Z`-suffixed.
-- MySQL and uploads artifacts from one run **share the run timestamp**.
-- The **encrypted artifact is the canonical retained copy**. Plaintext is temporary and deleted by the script after successful encryption + verification.
-
-Manifest contents (safe metadata only — no credentials, no PII, no SQL):
+- Timestamps are **UTC**, `Z`-suffixed; both artifacts of one run share it.
+- The **encrypted artifact is the canonical copy**. Plaintext exists only in a temp
+  work dir during the run and is deleted on every exit path.
+- Manifest (safe metadata only — no credentials, no PII, no SQL):
 
 ```json
 {
-  "timestamp": "...", "database": "mas_sular",
-  "mysql":   { "artifact": "...", "sha256": "...", "size": 0, "plaintext_sha256": "..." },
-  "uploads": { "artifact": "...", "sha256": "...", "size": 0, "plaintext_sha256": "..." },
-  "encryption": { "tool": "gpg", "algorithm": "AES-256", "integrity": "OpenPGP MDC" }
+  "timestamp": "...", "label": "scheduled | pre-migrate | ...", "database": "mas_sular",
+  "postgres": { "artifact": "...", "format": "pg_dump custom (-Fc)", "tables_with_data": 0,
+                "sha256": "...", "size": 0, "plaintext_sha256": "..." },
+  "uploads":  { "artifact": "...", "files": 0, "sha256": "...", "size": 0, "plaintext_sha256": "..." },
+  "encryption": { "tool": "gpg", "algorithm": "AES-256", "integrity": "OpenPGP MDC (verified by decrypt round-trip)" },
+  "point_in_time_recovery": false
 }
 ```
 
 ---
 
-## 4. Backup procedure — **VERIFIED**
+## 4. Backup procedure — **VERIFIED** (locally; see header)
 
-Use the verified script: **`scripts/backup/backup.sh`** (repository root of the workspace).
+Script: **`scripts/backup/backup.sh`**, run from the repository root on the VPS.
 
+**One-time key setup — MANUAL ACTION REQUIRED:**
 ```bash
-BACKUP_DIR=/srv/backups \
-BACKUP_KEY_FILE=/etc/mas-sular/backup.key \
-./scripts/backup/backup.sh
+sudo install -d -m 700 /etc/mas-sular
+sudo sh -c 'head -c 48 /dev/urandom | base64 > /etc/mas-sular/backup.key && chmod 600 /etc/mas-sular/backup.key'
+sudo install -d -m 700 /srv/backups/mas-sular
+```
+Then escrow a copy of the key OFF the VPS (§17) **before** the first real backup.
+
+**Run it:**
+```bash
+sudo BACKUP_DIR=/srv/backups/mas-sular BACKUP_KEY_FILE=/etc/mas-sular/backup.key \
+     bash scripts/backup/backup.sh
 ```
 
-Optional overrides: `COMPOSE_FILE`, `ENV_FILE`, `MYSQL_SERVICE`, `MYSQL_DATABASE`, `UPLOADS_VOLUME`, `KEEP_MYSQL`, `KEEP_UPLOADS`.
-
-Retention preview (deletes nothing):
+**Before every migration / release (mandatory):** the same command with a label, and
+do not proceed unless it exits 0:
 ```bash
-BACKUP_DIR=... BACKUP_KEY_FILE=... ./scripts/backup/backup.sh --dry-run-retention
+sudo BACKUP_LABEL=pre-migrate BACKUP_DIR=/srv/backups/mas-sular BACKUP_KEY_FILE=/etc/mas-sular/backup.key \
+     bash scripts/backup/backup.sh
 ```
+Also run it once **before the first real order**, and restore-drill it (§8).
+
+Optional overrides: `COMPOSE_FILE`, `ENV_FILE`, `POSTGRES_SERVICE`, `POSTGRES_CONTAINER`,
+`UPLOADS_VOLUME`, `BACKUP_LABEL`, `KEEP_POSTGRES`, `KEEP_UPLOADS`.
+
+Retention preview (deletes nothing): `... bash scripts/backup/backup.sh --dry-run-retention`
 
 **What the script does, in order:**
-1. Acquire an atomic `mkdir` lock (prevents overlapping runs; `flock` is not required)
-2. Preflight — Docker reachable, gpg present, key exists and is **outside** `BACKUP_DIR`, MySQL container **healthy**, uploads volume exists
-3. `mysqldump --single-transaction --routines --triggers --events --set-gtid-purged=OFF --hex-blob --no-tablespaces` (password via `MYSQL_PWD`, never argv) → `gzip -9`
-4. `tar czf` the uploads volume mounted **`:ro`**, with `--numeric-owner`
-5. GPG symmetric AES-256 encryption (SHA-512 S2K, 65M iterations)
-6. **Verify by decrypting back and comparing SHA-256** — the artifact is not trusted until proven recoverable
-7. Write manifest
-8. **Atomic promotion** — everything is built in a temp workdir on the same filesystem and `mv`d only after every check passes
-9. Retention
+1. Atomic `mkdir` lock (no overlapping runs)
+2. Preflight — Docker reachable, gpg present, key exists and is **outside** `BACKUP_DIR`,
+   PostgreSQL container **healthy**, uploads volume exists
+3. `pg_dump -Fc` **inside** the postgres container, over its local socket as the
+   cluster's own user — no password is read, typed, put in argv or shell history.
+   `pg_dump` takes a consistent snapshot without blocking application writes.
+4. Integrity: `pg_restore --list` must read the archive and it must contain
+   `_prisma_migrations` data
+5. `tar czf` of the uploads volume mounted **`:ro`**, `--numeric-owner`; `gzip -t` + `tar tzf`
+6. GPG symmetric AES-256 (SHA-512 S2K, 65M iterations)
+7. **Verify by decrypting back and comparing SHA-256** — not trusted until proven recoverable
+8. Manifest, then **atomic promotion** (built in a temp dir on the same filesystem, `mv`d only after every check)
+9. Retention (§18)
 
-**Do not run backups against an unhealthy MySQL.** The script already refuses.
+Any failure: non-zero exit, `backup FAILED — no artifact promoted`, previous backups untouched. **VERIFIED**
+(stopped database, wrong key, tampered artifact, invalid label).
 
 ---
 
@@ -121,282 +141,207 @@ BACKUP_DIR=... BACKUP_KEY_FILE=... ./scripts/backup/backup.sh --dry-run-retentio
 
 A backup is successful **only if all of these hold**. Exit code 0 alone is not acceptance.
 
-- [ ] Script exit code `0`
-- [ ] Both `.enc` artifacts exist and are non-zero
-- [ ] Manifest exists for the run timestamp
-- [ ] `sha256sum <artifact>` matches the manifest entry
-- [ ] Decrypt succeeds and the decrypted SHA-256 matches `plaintext_sha256`
-- [ ] `gzip -t` passes on the decrypted MySQL dump
-- [ ] `tar tzf` passes on the decrypted uploads archive
+- [ ] Script exit code `0` and a final `backup OK` line
+- [ ] Both `.enc` artifacts exist and are non-zero; a manifest exists for the timestamp
+- [ ] `sha256sum <artifact>` matches the manifest
+- [ ] **A restore drill of the new artifact passes (§8)** — at least weekly and after every schema change
 - [ ] The previous known-good backup is still present
+- [ ] The off-server copy of this run exists (§16)
 
 ---
 
 ## 6. Encryption & key handling
 
-**Mechanism — VERIFIED:** GnuPG symmetric, **AES-256**, SHA-512 S2K, passphrase supplied via `--passphrase-file`.
+GnuPG symmetric **AES-256**, SHA-512 S2K, passphrase via `--passphrase-file` only.
+Tamper detection is **VERIFIED**: a single flipped byte fails decryption / the manifest checksum.
 
-> `openssl enc` was tested and **explicitly refuses AEAD ciphers** (`"AEAD ciphers not supported"`). Do not substitute it.
-
-**Tamper detection — VERIFIED:** flipping a single byte in an encrypted artifact causes decryption to fail (non-zero exit).
-
-**Rules:**
-- Never pass the key on the command line — use `--passphrase-file`
-- Never print, log, or commit the key
-- Never store the key in `BACKUP_DIR` (the script enforces this)
-
-### Current key state: **NOT PRODUCTION READY (F6)**
-Temporary local key, on the same host as the backups, no KMS, no escrow, no tested recovery, no rotation procedure.
-
-### Required production process — **MANUAL ACTION REQUIRED**
-1. Obtain the production key from an approved secret store
-2. Run backup → encrypt → store artifact
-3. **Escrow the key independently of the backup host**
-4. Periodically test decryption of a real artifact
-5. Rotate under a controlled, documented procedure
-
-> **A backup encrypted with a lost key is not a backup.** Key escrow is as important as the backup itself.
+- Never pass the key on the command line; never print, log or commit it
+- Never store it in `BACKUP_DIR` (enforced)
+- **A backup encrypted with a lost key is not a backup** — escrow it (§17)
 
 ---
 
 ## 7. Restore decision tree
 
-| # | Scenario | Immediate action | Artifact needed | Restore target | Proven? |
+| # | Scenario | Immediate action | Artifact | Target | Proven? |
 |---|---|---|---|---|---|
-| **A** | App running, data corrupted | Freeze writes; identify last good backup | MySQL `.enc` | **Scratch first**, then cut over | ⚠️ scratch restore proven; cutover **not** proven |
-| **B** | MySQL container lost, volume intact | Recreate container against existing volume | none | existing volume | ✅ compose recreates |
-| **C** | MySQL volume lost | §8 | MySQL `.enc` + key | new volume | ✅ **VERIFIED** |
+| **A** | App running, data corrupted | Freeze writes; identify last good backup | postgres `.enc` | **Drill first (§8)**, then cut over (§8.2) | ⚠️ drill proven; cutover not drilled on a VPS |
+| **B** | Postgres container lost, volume intact | `docker compose up -d postgres` | none | existing volume | ✅ compose recreates |
+| **C** | Postgres volume lost | §8.2 into a new volume | postgres `.enc` + key | new volume | ✅ restore mechanism **VERIFIED** |
 | **D** | Uploads volume lost | §9 | uploads `.enc` + key | new volume | ✅ **VERIFIED** |
-| **E** | Docker host failed, disks intact | Restart Docker, `compose up -d` | none | — | ⚠️ partially proven |
-| **F** | **Entire VPS lost** | §12 + restore from off-server copy | **off-server artifacts + escrowed key** | new host | ❌ **NOT PROVEN — no off-server copy exists (H1)** |
-| **G** | Backup artifact corrupted | Fall back to the previous artifact | older `.enc` | scratch | ✅ retention keeps 24 MySQL / 7 uploads |
-| **H** | **Encryption key unavailable** | **STOP. Escalate.** | — | — | ❌ **UNRECOVERABLE (F6)** |
-
-**Host failure (E) and host loss (F) are different problems.** Only the first is currently survivable.
+| **E** | Docker host restarted, disks intact | Containers restart (`unless-stopped`) | none | — | ✅ reboot simulation recovered |
+| **F** | **Entire VPS lost** | §12 + artifacts from the off-server copy | **off-server artifacts + escrowed key** | new host | ❌ only as good as §16/§17 |
+| **G** | Artifact corrupted | Previous artifact | older `.enc` | drill | ✅ retention keeps 14 |
+| **H** | **Key unavailable** | **STOP. Escalate.** | — | — | ❌ **UNRECOVERABLE** |
 
 ---
 
-## 8. MySQL restore procedure — **VERIFIED** (into scratch)
+## 8. PostgreSQL restore
+
+### 8.1 Restore drill — **VERIFIED** (safe on production at any time)
+
+`scripts/backup/restore-drill.sh` decrypts an artifact (checking the manifest
+checksums first), restores it into a **disposable PostgreSQL 16 container with no
+network**, prints what came back, and removes the container. It never touches the
+application's containers or volumes.
 
 ```bash
-# 1-2. Identify the incident. Freeze writes if the live DB is still serving.
-
-# 3. Identify the authoritative backup (newest, or the last known-good)
-ls -t "$BACKUP_DIR"/mas-sular-mysql-*.sql.gz.enc | head -1
-
-# 4. Verify against the manifest — MUST match before proceeding
-sha256sum <artifact>
-grep -A4 '"mysql"' "$BACKUP_DIR/manifest-<TS>.json"
-
-# 5-7. Decrypt — CHECK EXIT CODE FIRST (see warning below)
-gpg --batch --quiet --pinentry-mode loopback --passphrase-file "$BACKUP_KEY_FILE" \
-    -d -o /tmp/restore/dump.sql.gz <artifact> \
-  || { rm -f /tmp/restore/dump.sql.gz; echo "DECRYPT FAILED — ABORT"; exit 1; }
-
-# 8-9. Verify checksum, then format
-sha256sum /tmp/restore/dump.sql.gz     # must equal manifest plaintext_sha256
-gzip -t /tmp/restore/dump.sql.gz
-
-# 10. Provision a CLEAN, ISOLATED MySQL (same major.minor: 8.4)
-docker volume create restore-data-$(date -u +%s)
-docker network create restore-net-$(date -u +%s)
-docker run -d --name restore-mysql --network restore-net-... \
-  -e MYSQL_ROOT_PASSWORD=<scratch-only> -e MYSQL_DATABASE=mas_sular_restore_drill \
-  -v restore-data-...:/var/lib/mysql mysql:8.4
-#    NO published ports. Do NOT attach application containers.
-
-# 11. Restore
-gzip -dc /tmp/restore/dump.sql.gz | docker exec -i restore-mysql \
-  sh -c 'MYSQL_PWD=<scratch-only> mysql -u root mas_sular_restore_drill'
-
-# 12-13. Validate: table/column/index/FK counts vs source; orphan scan;
-#        _prisma_migrations count (expect all applied, 0 rolled back)
+sudo BACKUP_KEY_FILE=/etc/mas-sular/backup.key bash scripts/backup/restore-drill.sh \
+  /srv/backups/mas-sular/mas-sular-postgres-<TS>.dump.enc \
+  /srv/backups/mas-sular/manifest-<TS>.json
+# Expect: DRILL_TABLES=<n>  DRILL_MIGRATIONS_APPLIED=<number of migrations>  DRILL_ROWS_Order=...
+# Optional: DRILL_EXTRA_SQL='select max("createdAt") from "Order"'   (newest order in the backup)
 ```
 
-> ### ⚠️ Decryption safety (F7) — mandatory
-> **GPG streams plaintext to the output file *before* validating integrity at the end.** Bytes exist on disk even for a corrupt or tampered artifact.
-> **The exit code is the only trustworthy signal.** Always: run GPG → check exit code → **delete the output on any failure** → only then checksum → only then validate format → only then restore.
-> Never decrypt directly into the final restore destination.
+### 8.2 Restoring the production database — **MANUAL, DESTRUCTIVE** (not drilled on a VPS)
 
-**14–17.** Start the application against the restored data, verify `/health` and `/health/ready`, run §21 smoke tests, then declare recovery.
+> **Only after 8.1 has passed on the SAME artifact.** This replaces the live database;
+> every write after the backup is lost. Take a fresh backup of the current (broken)
+> state first if it still runs — you may need it for forensics.
 
-> **Never restore over the live database until a scratch restore has validated the artifact.** Restoring to scratch first is the verified path.
+```bash
+C="docker compose --env-file ./production.env -f docker-compose.production.yml"
+
+# 1. Stop everything that writes. Keep postgres running.
+$C stop backend frontend admin
+
+# 2. Decrypt — CHECK THE EXIT CODE (gpg writes output before validating it)
+gpg --batch --quiet --pinentry-mode loopback --passphrase-file /etc/mas-sular/backup.key \
+    -d -o /root/restore.dump /srv/backups/mas-sular/mas-sular-postgres-<TS>.dump.enc \
+  || { rm -f /root/restore.dump; echo "DECRYPT FAILED - ABORT"; exit 1; }
+sha256sum /root/restore.dump      # must equal the manifest's plaintext_sha256
+
+# 3. Recreate the database EMPTY, then restore into it (inside the container, local socket)
+$C exec -T postgres sh -c 'dropdb -U "$POSTGRES_USER" --force "$POSTGRES_DB" && createdb -U "$POSTGRES_USER" "$POSTGRES_DB"'
+$C exec -T postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --exit-on-error' < /root/restore.dump
+shred -u /root/restore.dump
+
+# 4. Bring the app back: backend-migrate applies any migration newer than the backup
+$C up -d
+```
+
+Then §21. **Never "repair" a failed restore with `prisma migrate`/`db push`** — that masks a bad backup.
 
 ---
 
-## 9. Uploads restore procedure — **VERIFIED**
+## 9. Uploads restore — **VERIFIED**
 
 ```bash
-# 1-2. Identify artifact + verify manifest checksum
-ls -t "$BACKUP_DIR"/mas-sular-uploads-*.tar.gz.enc | head -1
+gpg --batch --quiet --pinentry-mode loopback --passphrase-file /etc/mas-sular/backup.key \
+    -d -o /root/uploads.tar.gz /srv/backups/mas-sular/mas-sular-uploads-<TS>.tar.gz.enc \
+  || { rm -f /root/uploads.tar.gz; echo "DECRYPT FAILED - ABORT"; exit 1; }
+sha256sum /root/uploads.tar.gz && gzip -t /root/uploads.tar.gz && tar tzf /root/uploads.tar.gz >/dev/null
 
-# 3-5. Decrypt with the same exit-code-first discipline as §8
-gpg --batch --quiet --pinentry-mode loopback --passphrase-file "$BACKUP_KEY_FILE" \
-    -d -o /tmp/restore/uploads.tar.gz <artifact> \
-  || { rm -f /tmp/restore/uploads.tar.gz; echo "DECRYPT FAILED — ABORT"; exit 1; }
-
-# 6-7. Verify
-sha256sum /tmp/restore/uploads.tar.gz   # must equal manifest plaintext_sha256
-gzip -t /tmp/restore/uploads.tar.gz && tar tzf /tmp/restore/uploads.tar.gz >/dev/null
-
-# 8. Provision a disposable restore volume
-docker volume create uploads-restore-$(date -u +%s)
-
-# 9-10. Extract with GNU tar — see warning
-docker run --rm -i -v uploads-restore-...:/restore debian:12-slim \
-  sh -c 'cat > /tmp/u.tar.gz && tar xzf /tmp/u.tar.gz -C /restore --numeric-owner' \
-  < /tmp/restore/uploads.tar.gz
-
-# 11-13. Verify uid:gid (1000:1000), modes (644 files / 755 dirs), and mtimes
-# 14. Application-UID write test
-docker run --rm -u 1000:1000 -v uploads-restore-...:/app/uploads alpine \
+# Restore into a NEW volume first, verify, then point the stack at it (or copy into the live one)
+docker volume create mas-sular_uploads_restore
+docker run --rm -v mas-sular_uploads_restore:/restore -v /root:/in:ro debian:12-slim \
+  tar xzf /in/uploads.tar.gz -C /restore --numeric-owner
+docker run --rm -u 1000:1000 -v mas-sular_uploads_restore:/app/uploads alpine \
   sh -c 'touch /app/uploads/.t && rm /app/uploads/.t && echo WRITABLE'
 ```
 
-> ### 🚨 Use GNU tar, not BusyBox/alpine (F17)
-> **Empirically proven during Phase 5J.13 Step 8:** BusyBox tar **1.37.0** silently sets directory mtimes to *extraction time* instead of restoring them. GNU tar **1.34** restored them exactly.
-> **Restore with a `debian`/`ubuntu` image.** Alpine is fine for *creating* the archive (mtimes are written correctly) — the defect is extraction-only.
-> Always pass `--numeric-owner`: the app runs as uid 1000, and name-based resolution can silently remap ownership.
-
-**15–17.** Compare file checksums against the manifest, smoke-test an upload/download, declare recovery.
+> **Extract with GNU tar (debian/ubuntu image), not BusyBox** — BusyBox tar sets
+> directory mtimes to extraction time (F17). Always `--numeric-owner` (the app runs as uid 1000).
+> The automated test verifies byte-identical files and uid 1000 ownership after restore.
 
 ---
 
-## 10. Redis recovery — **do not restore**
+## 10. Redis — **do not restore**
+Recreate (`docker compose up -d redis`); the cache warms itself. `/health/ready` → `"redis":"ok"`.
 
-Redis is **EPHEMERAL**. There is no backup and none is needed.
-
-1. Recreate the container (`docker compose up -d redis`)
-2. Allow the cache to warm naturally
-3. Verify connectivity via `/health/ready` → `"redis":"ok"`
-
-**Latent observation (H2):** BullMQ queues (`orders`, `inventory`, `payments`, `notifications`) are *registered* but have **no producers** and held 0 jobs. If a producer is ever added, Redis becomes business-critical while persistence is off — **enable AOF or remove the unused registration before enqueuing real work.** Not currently an incident.
-
----
-
-## 11. RabbitMQ recovery — **rebuild, do not restore**
-
-1. Recreate the container (`docker compose up -d rabbitmq`)
-2. Start consumers — topology is re-asserted automatically (`assertExchange` / `assertQueue`)
-3. Verify `/health/ready` → `"rabbitmq":"ok"`
-4. Confirm the outbox relay drains `OutboxEvent`
-5. Confirm no duplicate side effects — consumers deduplicate via `ProcessedEvent`
-
-**Durable messages are NOT backed up.** In-flight unacknowledged messages are lost on host failure and are recovered by **replaying `OutboxEvent` from MySQL**, which is the authoritative record.
+## 11. RabbitMQ — **rebuild, do not restore**
+Recreate; consumers re-assert topology; the relay drains `OutboxEvent`; `ProcessedEvent`
+prevents duplicate side effects. `/health/ready` → `"rabbitmq":"ok"`.
 
 ---
 
 ## 12. Full application recovery — **RTO NOT VERIFIED**
 
-Dependency order taken from `docker-compose.production.yml`:
-
 ```
 host + Docker
-  └─ mysql            (must be service_healthy)
-       └─ backend-migrate   (must complete successfully — runs `prisma migrate deploy`)
-            └─ backend      (also requires redis + rabbitmq healthy)
+  └─ postgres            (service_healthy)
+       └─ backend-migrate  (completes successfully — `prisma migrate deploy`)
+            └─ backend     (also redis + rabbitmq healthy)
                  ├─ frontend
                  └─ admin
 ```
 
-1. Provision host, install Docker
-2. Clone **`mas-sular`**, branch **`main`** — the single source deployment builds from.
-   All three services are built from that one checkout: `docker-compose.production.yml`
-   lives there and its build contexts are `./backend`, `./frontend` and `./admin`.
-   The standalone repositories (`mas-sular-be`, `-fe`, `-admin`) are **NOT** used for
-   deployment and carry none of the compose, migration or backup tooling below.
-3. **Restore `production.env` secrets and the backup encryption key**
-4. `docker compose -f docker-compose.production.yml build`
-5. Start `mysql`; **restore the database (§8)**
-6. **Restore the uploads volume (§9)**
-7. `docker compose up -d` — `backend-migrate` runs before `backend` automatically
-8. Verify `/health` and `/health/ready`
-9. DNS / TLS / reverse proxy
-10. §21 smoke tests
-
-> **FULL APPLICATION RTO = NOT VERIFIED.** No drill has provisioned a fresh host, rebuilt images, restored into a live stack and served traffic. **Do not extrapolate from the 2.1 s MySQL restore** — real recovery is dominated by provisioning, image builds and data transfer, none of which have been measured.
+1. Provision the host, install Docker (`systemctl enable docker`)
+2. Clone the repository at the **release tag**
+3. Restore `production.env` and the backup key from escrow
+4. `docker compose --env-file ./production.env -f docker-compose.production.yml up -d postgres`
+5. Copy the artifacts back from the off-server store; restore-drill (§8.1); restore (§8.2 step 3)
+6. Restore the uploads volume (§9)
+7. `... up -d --build` — `backend-migrate` runs before `backend`
+8. Reverse proxy / TLS; `/api/v1/health/ready`; §21
 
 ---
 
 ## 13. Failure handling
 
-Universal rule: **STOP · do not overwrite known-good data · preserve the previous backup · escalate.**
+**STOP · never overwrite known-good data · keep the previous backup · escalate.**
 
 | Failure | Action |
 |---|---|
-| GPG non-zero exit | **Delete the output immediately.** Try the previous artifact. If all fail → suspect key (§17) |
-| Checksum mismatch | Discard. Artifact is corrupt or the wrong manifest was used. Fall back. |
-| `gzip -t` fails | Discard; fall back to the previous artifact |
-| `tar` fails | Discard; fall back |
-| Wrong key | **STOP.** Do not guess. Retrieve the correct key from escrow |
-| Missing artifact | Use the previous timestamp; check retention did not over-prune |
-| Missing manifest | Artifact integrity is unverifiable — treat as untrusted; prefer an artifact that has one |
-| Insufficient disk | Free space **before** restoring; a partial restore is worse than none |
-| Docker unavailable | Restore the daemon first; nothing else is possible |
-| MySQL restore fails | Keep the scratch instance for diagnosis. **Do not "repair" with `prisma migrate`** — that masks a bad backup |
-| Uploads restore fails | Check GNU tar is in use (F17) before suspecting the artifact |
+| `backup.sh` non-zero | Read the `ERROR:` line; nothing was promoted; the previous backup stands. Fix and re-run before any migration. |
+| GPG non-zero exit | Delete the output immediately; try the previous artifact; if all fail suspect the key (§17) |
+| Checksum mismatch | Discard (corrupt, or wrong manifest); fall back |
+| `pg_restore` fails in the drill | Keep the drill output; try the previous artifact; do NOT restore production from it |
+| Wrong key | **STOP.** Retrieve the correct key from escrow |
+| Missing manifest | Integrity unverifiable — prefer an artifact that has one |
+| Insufficient disk | Free space first; a partial restore is worse than none |
 
 ---
 
 ## 14. RPO / RTO
 
-### Measured — **MECHANICALLY VERIFIED, NON-PRODUCTION-SCALE**
-
-| Metric | Measured | Dataset |
-|---|---|---|
-| Full backup pipeline (both components) | **7,072 ms** | 2.98 MB + 8 KB |
-| MySQL backup phase | 1,353 ms | 2.98 MB |
-| Uploads backup phase | 1,778 ms | 8,260 B |
-| MySQL decrypt | 375 ms | — |
-| **MySQL restore** | **2,119 ms** | 2.98 MB |
-| MySQL recovery incl. scratch startup + validation | ≈ 25 s | — |
-| Uploads decrypt | 346 ms | — |
-| **Uploads restore (GNU tar)** | **724 ms** | 8,260 B |
-
-### Current RPO
-
-**NOT VERIFIED.** No scheduler is installed (F18); execution is manual. The last recoverable point is whenever someone last ran the script.
-
-### Targets — **TARGETS ONLY, not measurements**
-
-| Component | Target |
-|---|---|
-| MySQL RPO | ≤ 1 hour |
-| Uploads RPO | ≤ 24 hours |
-| MySQL RTO | ≤ 2 hours at 5–50 GB |
-| Uploads RTO | ≤ 2 hours at 10–100 GB |
-| Full application RTO | ≤ 4 hours |
-| Host-loss RPO/RTO | ≤ 1 h / ≤ 4 h — **currently unachievable** (H1) |
+- **RPO = time since the last successful backup.** With the daily schedule (§15) that is
+  up to 24 h, plus the explicit pre-migration backups. There is no point-in-time recovery.
+- **RTO: NOT MEASURED** on the VPS. The local test restores a freshly migrated
+  database in seconds; that says nothing about a production-size restore. Measure it
+  with §8.1 on real data after go-live and record it here.
+- (The timings previously listed here were measured against the retired MySQL setup
+  and no longer apply.)
 
 ---
 
-## 15. Scheduling gap (F18) — **NOT IMPLEMENTED**
+## 15. Scheduling — **MANUAL ACTION REQUIRED**
 
-There is **no scheduler**. The "hourly"/"daily" cadence exists only as comments beside `KEEP_MYSQL=24` / `KEEP_UPLOADS=7`. Retention encodes intent; it does not execute anything.
+Nothing is scheduled until you install it. On the VPS (as root), daily at 02:15 UTC:
 
-**MANUAL ACTION REQUIRED:** on the Linux VPS, schedule the verified script (cron or a systemd timer) to run hourly, logging to a file, with the lock left in place to prevent overlap. **Until then, RPO is undefined.**
-
----
-
-## 16. Off-server backup gap (H1) — **NOT IMPLEMENTED**
-
-Artifacts currently live on the same host as the workload.
-
+```bash
+cat > /etc/cron.d/mas-sular-backup <<'CRON'
+15 2 * * * root cd /opt/mas-sular && BACKUP_DIR=/srv/backups/mas-sular BACKUP_KEY_FILE=/etc/mas-sular/backup.key bash scripts/backup/backup.sh >> /var/log/mas-sular-backup.log 2>&1
+CRON
 ```
-Application host ──▶ encrypted backup ──▶ [ MISSING: independent destination ]
-```
-
-The destination must survive loss of the application VPS. **No provider is selected** — that is a project decision, not a runbook default.
-
-**Consequence: total VPS loss is currently unrecoverable.** This is the single largest DR gap.
+(`/opt/mas-sular` = the repository checkout.) Check `/var/log/mas-sular-backup.log`
+for `backup OK` daily until alerting exists (§19).
 
 ---
 
-## 17. Key escrow gap (F6) — **NOT IMPLEMENTED**
+## 16. Off-server copy — **MANUAL ACTION REQUIRED**
 
-The key is local and test-only, on the backup host, with no escrow and no tested recovery.
+Artifacts on the VPS die with the VPS. After each successful run, copy the new
+`.enc` files and manifest to storage that survives loss of the VPS. They are
+encrypted, so any provider works; the key must NOT travel with them. Examples:
 
-**Required:** backup host ≠ key escrow location, and **key recovery must be tested** before DR is declared complete. If the key cannot be recovered, every encrypted artifact is permanently unreadable.
+```bash
+# rsync to another host you control
+rsync -a --ignore-existing /srv/backups/mas-sular/ backup@<OFFSITE_HOST>:/backups/mas-sular/
+# or an rclone remote (S3/B2/Drive), configured once with `rclone config`
+rclone copy /srv/backups/mas-sular <REMOTE>:mas-sular-backups --ignore-existing
+```
+Add the chosen line to the cron entry after the backup (`&& rsync ...`). **Choosing the
+destination is an operator decision.** A Hostinger VPS snapshot is a useful extra
+layer, not a substitute (same provider, whole-disk, not restorable per table).
+
+---
+
+## 17. Key escrow — **MANUAL ACTION REQUIRED**
+
+Store a copy of `/etc/mas-sular/backup.key` in a password manager / secret store that is
+not the VPS and not the off-server backup location. Test recovery once: fetch it from
+escrow onto another machine and run §8.1 against an off-server artifact.
 
 ---
 
@@ -404,49 +349,39 @@ The key is local and test-only, on the backup host, with no escrow and no tested
 
 | Scope | Implementation | Status |
 |---|---|---|
-| MySQL | `KEEP_MYSQL=24` newest retained | ✅ **VERIFIED** (9 → 3 with `KEEP=3`) |
-| Uploads | `KEEP_UPLOADS=7` newest retained | ✅ **VERIFIED** |
-| Newest / last-remaining protection | Never deleted | ✅ **VERIFIED** |
-| Scope safety | Only files matching the project naming convention inside `BACKUP_DIR` | ✅ **VERIFIED** — unrelated archives survived |
-| Weekly / monthly tiers | — | ❌ **GAP (F12)** |
-| Manifest retention | — | ❌ **GAP (F13)** — grows unbounded |
+| PostgreSQL | `KEEP_POSTGRES=14` newest `.dump.enc` retained | ✅ **VERIFIED** |
+| Uploads | `KEEP_UPLOADS=14` newest `.tar.gz.enc` retained | ✅ **VERIFIED** |
+| Newest / last-remaining | Never deleted | ✅ by construction |
+| Scope | Only this project's file names, only inside `BACKUP_DIR` | ✅ |
+| Weekly / monthly tiers | — | ❌ keep them in the off-server store (e.g. its lifecycle rules) |
+| Manifests | not pruned | ❌ small; prune by hand occasionally |
 
-**Target (not implemented):** 24 hourly + 7 daily + 4 weekly for MySQL; prune manifests alongside their artifacts.
+Pre-migration runs count toward the 14. The off-server store should keep longer
+(recommended: 14 daily + 8 weekly + 6 monthly).
 
 ---
 
-## 19. Monitoring & alerting (F14) — **NOT IMPLEMENTED**
+## 19. Monitoring & alerting — **NOT IMPLEMENTED**
 
-No alerting exists. A failing backup is invisible until a restore is attempted.
-
-**Required alerts:** backup failure · encryption failure · checksum mismatch · expected artifact missing · low disk · key access failure · off-server copy failure.
+A failing backup is invisible until someone reads the log. Minimum: check
+`/var/log/mas-sular-backup.log` daily; later alert on a missing `backup OK` line,
+low disk, or a failed off-server copy.
 
 ---
 
 ## 20. Recovery checklist
 
 ```
-[ ] Identify incident and scope (which data class?)
-[ ] Determine acceptable data loss / target recovery point
+[ ] Identify incident and scope (database? uploads? whole host?)
+[ ] Decide the acceptable recovery point (which backup)
 [ ] Freeze writes if the live system is still serving
-[ ] Identify latest known-good artifact
-[ ] Verify manifest checksum matches artifact
-[ ] Confirm encryption key is available
-[ ] Decrypt  → CHECK EXIT CODE FIRST, delete output on failure
-[ ] Verify decrypted SHA-256 against manifest
-[ ] Verify gzip / tar integrity
-[ ] Restore MySQL into SCRATCH and validate
-[ ] Restore uploads with GNU TAR and validate metadata
-[ ] Recreate Redis (no restore)
-[ ] Recreate RabbitMQ (no restore); confirm outbox relay drains
-[ ] Run prisma migrate deploy (backend-migrate)
-[ ] Start backend
-[ ] Start frontend / admin
-[ ] /health and /health/ready all ok
-[ ] Smoke test (§21)
-[ ] Verify payments / orders / uploads
-[ ] Monitor for anomalies
-[ ] Declare recovery + record actual RTO
+[ ] Verify the artifact against its manifest; confirm the key is available
+[ ] Restore drill (§8.1) passes on that artifact
+[ ] Restore the database (§8.2) / uploads (§9)
+[ ] Recreate Redis and RabbitMQ (no restore); confirm the outbox relay drains
+[ ] backend-migrate completes; backend, frontend, admin healthy
+[ ] §21 checks
+[ ] Declare recovery; record the actual RTO in §14
 ```
 
 ---
@@ -455,45 +390,28 @@ No alerting exists. A failing backup is invisible until a restore is attempted.
 
 Non-destructive checks only:
 
-- [ ] `GET /api/v1/health` → `status: ok`
-- [ ] `GET /api/v1/health/ready` → `mysql/redis/rabbitmq: ok`
-- [ ] Customer login (Google OAuth)
-- [ ] Order list renders for a known customer
-- [ ] Payment records readable with correct statuses
-- [ ] Gateway transaction data intact (`providerOrderId` present)
-- [ ] Inventory counts plausible
-- [ ] An existing uploaded receipt downloads correctly
-- [ ] Admin panel login and order list
+- [ ] `GET /api/v1/health` → ok; `GET /api/v1/health/ready` → postgres/redis/rabbitmq ok
+- [ ] Customer login; a known customer's order list renders
+- [ ] Payment records and statuses intact
+- [ ] An existing uploaded receipt / product image loads
+- [ ] Admin login and order list
 - [ ] `OutboxEvent` backlog draining, not growing
 
-> **Do not run checkout or payment-producing operations as part of routine verification** without explicit approval — they create real orders and can contact the payment gateway.
+> Do not run checkout or payment-producing operations as routine verification — they
+> create real orders and can contact the payment gateway and couriers.
 
 ---
 
-## 22. Current production readiness verdict
+## 22. Readiness verdict
 
 | Capability | Status |
 |---|---|
-| Backup mechanism | ✅ **PROVEN** |
-| Restore mechanism | ✅ **PROVEN** |
-| RPO | ❌ **NOT PROVEN** (no scheduler) |
-| Host-loss DR | ❌ **NOT PROVEN** (no off-server copy) |
-| Key recovery | ❌ **NOT PROVEN** (no escrow) |
-| Full application RTO | ❌ **NOT PROVEN** (never drilled) |
-| Off-server durability | ❌ **NOT IMPLEMENTED** |
-| Automated scheduling | ❌ **NOT IMPLEMENTED** |
-| Alerting | ❌ **NOT IMPLEMENTED** |
-
-**Overall disaster recovery posture: PARTIAL.**
-
-The backup and restore *mechanisms* are production-grade and independently verified. The *disaster recovery posture* is not: without scheduling, off-server copies and key escrow, this system cannot survive the loss of its host.
-
-**The existence of this runbook does not make the system production-ready.**
-
-### Ordered actions to close the gap
-1. **Off-server destination (H1)** — nothing else matters if the host is gone
-2. **Key escrow + tested recovery (F6)** — an unrecoverable key voids every backup
-3. **Scheduler (F18)** — converts an undefined RPO into a bounded one
-4. **Alerting (F14)** — makes silent failure visible
-5. **Full-stack recovery drill (F20)** — the only way to obtain a real RTO
-6. **Retention tiers + manifest pruning (F12, F13)**
+| PostgreSQL backup (`pg_dump -Fc`, encrypted, verified) | ✅ **PROVEN locally** |
+| Uploads backup | ✅ **PROVEN locally** |
+| Restore drill / uploads restore | ✅ **PROVEN locally** |
+| Loud failure, nothing promoted | ✅ **PROVEN locally** |
+| Point-in-time recovery | ❌ **does not exist** (by design of this mechanism) |
+| Scheduling | ⚠️ **MANUAL** (§15) |
+| Off-server copy | ⚠️ **MANUAL** (§16) — until done, VPS loss = data loss |
+| Key escrow | ⚠️ **MANUAL** (§17) |
+| Production-scale RTO | ❌ **NOT MEASURED** |

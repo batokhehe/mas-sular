@@ -54,19 +54,19 @@ export default function IncidentsPage() {
   const resolveM = useMutation({ mutationFn: resolveIncident, onSuccess: refresh });
 
   const ack = (id: string) =>
-    runWithFeedback({ loading: ADMIN_LOADING_MESSAGES.update, success: 'Incident acknowledged', action: () => ackM.mutateAsync(id) });
+    runWithFeedback({ loading: ADMIN_LOADING_MESSAGES.update, success: 'Insiden ditandai ditangani', action: () => ackM.mutateAsync(id) });
   const resolve = (id: string) =>
-    runWithFeedback({ loading: ADMIN_LOADING_MESSAGES.update, success: 'Incident resolved', action: () => resolveM.mutateAsync(id) });
+    runWithFeedback({ loading: ADMIN_LOADING_MESSAGES.update, success: 'Insiden diselesaikan', action: () => resolveM.mutateAsync(id) });
 
   return (
     <AdminShell requiredPermissions={ROUTE_PERMISSIONS.incidents}>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold text-gray-900">Incidents</h2>
-          <p className="mt-1 text-sm text-gray-500">Auto-detected operational incidents — errors, backlogs, failing workers, latency.</p>
+          <h2 className="text-xl font-semibold text-gray-900">Insiden</h2>
+          <p className="mt-1 text-sm text-gray-500">Insiden operasional yang terdeteksi otomatis — error, antrean menumpuk, worker gagal, latensi.</p>
         </div>
         <Button onClick={() => void query.refetch()} disabled={query.isFetching} className="gap-2">
-          <RefreshCw className={`h-4 w-4 ${query.isFetching ? 'animate-spin' : ''}`} /> Refresh
+          <RefreshCw className={`h-4 w-4 ${query.isFetching ? 'animate-spin' : ''}`} /> Muat ulang
         </Button>
       </div>
 
@@ -76,19 +76,19 @@ export default function IncidentsPage() {
         <Card>
           <div className="flex flex-col items-center gap-3 p-10 text-center">
             <AlertTriangle className="h-6 w-6 text-red-500" />
-            <p className="text-sm text-red-600">Unable to load incidents.</p>
-            <Button onClick={() => void query.refetch()}>Retry</Button>
+            <p className="text-sm text-red-600">Gagal memuat insiden.</p>
+            <Button onClick={() => void query.refetch()}>Coba ulang</Button>
           </div>
         </Card>
       ) : (
         <div className="space-y-6">
           {/* Summary cards */}
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
-            <Stat label="Open" value={data.summary.open} tone={data.summary.open > 0 ? 'error' : undefined} />
+            <Stat label="Buka" value={data.summary.open} tone={data.summary.open > 0 ? 'error' : undefined} />
             <Stat label="Critical" value={data.summary.critical} tone={data.summary.critical > 0 ? 'error' : undefined} />
             <Stat label="High" value={data.summary.high} tone={data.summary.high > 0 ? 'warn' : undefined} />
-            <Stat label="Acknowledged" value={data.summary.acknowledged} />
-            <Stat label="Resolved Today" value={data.summary.resolvedToday} tone="ok" />
+            <Stat label="Ditangani" value={data.summary.acknowledged} />
+            <Stat label="Diselesaikan Hari Ini" value={data.summary.resolvedToday} tone="ok" />
           </div>
 
           <Card>
@@ -96,37 +96,37 @@ export default function IncidentsPage() {
             <div className="flex flex-wrap items-end gap-3">
               <Filter label="Status">
                 <select value={filters.status ?? ''} onChange={(e) => patch({ status: e.target.value as IncidentStatus | '' })} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]">
-                  <option value="">All</option>{STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                  <option value="">Semua</option>{STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
               </Filter>
-              <Filter label="Severity">
+              <Filter label="Tingkat">
                 <select value={filters.severity ?? ''} onChange={(e) => patch({ severity: e.target.value as IncidentSeverity | '' })} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]">
-                  <option value="">All</option>{SEVERITIES.map((s) => <option key={s} value={s}>{s}</option>)}
+                  <option value="">Semua</option>{SEVERITIES.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
               </Filter>
-              <Filter label="Source">
+              <Filter label="Sumber">
                 <select value={filters.source ?? ''} onChange={(e) => patch({ source: e.target.value || undefined })} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]">
-                  <option value="">All</option>{SOURCES.map((s) => <option key={s} value={s}>{s}</option>)}
+                  <option value="">Semua</option>{SOURCES.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
               </Filter>
               <Filter label="Worker"><input defaultValue={filters.worker ?? ''} onChange={(e) => patch({ worker: e.target.value || undefined })} placeholder="payment-lifecycle" className="h-10 w-44 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
-              <Filter label="Module"><input defaultValue={filters.module ?? ''} onChange={(e) => patch({ module: e.target.value || undefined })} placeholder="http" className="h-10 w-32 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
-              <Filter label="From"><input type="datetime-local" onChange={(e) => patch({ dateFrom: e.target.value ? new Date(e.target.value).toISOString() : undefined })} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
-              <Filter label="To"><input type="datetime-local" onChange={(e) => patch({ dateTo: e.target.value ? new Date(e.target.value).toISOString() : undefined })} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
+              <Filter label="Modul"><input defaultValue={filters.module ?? ''} onChange={(e) => patch({ module: e.target.value || undefined })} placeholder="http" className="h-10 w-32 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
+              <Filter label="Dari"><input type="datetime-local" onChange={(e) => patch({ dateFrom: e.target.value ? new Date(e.target.value).toISOString() : undefined })} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
+              <Filter label="Sampai"><input type="datetime-local" onChange={(e) => patch({ dateTo: e.target.value ? new Date(e.target.value).toISOString() : undefined })} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#465fff]" /></Filter>
             </div>
 
-            <CardTitle className="mt-5">Incidents</CardTitle>
+            <CardTitle className="mt-5">Insiden</CardTitle>
             <div className="mt-4 overflow-x-auto">
               {(data.items.length ?? 0) === 0 ? (
-                <p className="p-10 text-center text-sm text-gray-500">No incidents — all clear.</p>
+                <p className="p-10 text-center text-sm text-gray-500">Tidak ada insiden — semua aman.</p>
               ) : (
                 <table className="w-full min-w-[1050px] text-left text-sm">
                   <thead>
                     <tr className="border-b border-gray-100 text-xs uppercase text-gray-400">
-                      <th className="py-2 font-medium">Severity</th><th className="py-2 font-medium">Status</th><th className="py-2 font-medium">Title</th>
-                      <th className="py-2 font-medium">Source</th><th className="py-2 text-right font-medium">Count</th>
-                      <th className="py-2 font-medium">First Seen</th><th className="py-2 font-medium">Last Seen</th><th className="py-2 font-medium">Duration</th>
-                      <th className="py-2 font-medium">Actions</th>
+                      <th className="py-2 font-medium">Tingkat</th><th className="py-2 font-medium">Status</th><th className="py-2 font-medium">Judul</th>
+                      <th className="py-2 font-medium">Sumber</th><th className="py-2 text-right font-medium">Jumlah</th>
+                      <th className="py-2 font-medium">Pertama Terlihat</th><th className="py-2 font-medium">Terakhir Terlihat</th><th className="py-2 font-medium">Durasi</th>
+                      <th className="py-2 font-medium">Aksi</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -146,12 +146,12 @@ export default function IncidentsPage() {
                             <span className="flex gap-2" onClick={(e) => e.stopPropagation()}>
                               {actions.canAcknowledge ? (
                                 <PermissionGate permissions={ROUTE_PERMISSIONS.incidentManage}>
-                                  <button onClick={() => void ack(i.id)} title="Acknowledge" className="rounded-lg px-2 py-1 text-xs font-medium text-amber-700 ring-1 ring-amber-200 hover:bg-amber-50"><Check className="h-3.5 w-3.5" /></button>
+                                  <button onClick={() => void ack(i.id)} title="Tandai ditangani" className="rounded-lg px-2 py-1 text-xs font-medium text-amber-700 ring-1 ring-amber-200 hover:bg-amber-50"><Check className="h-3.5 w-3.5" /></button>
                                 </PermissionGate>
                               ) : null}
                               {actions.canResolve ? (
                                 <PermissionGate permissions={ROUTE_PERMISSIONS.incidentManage}>
-                                  <button onClick={() => void resolve(i.id)} title="Resolve" className="rounded-lg px-2 py-1 text-xs font-medium text-emerald-700 ring-1 ring-emerald-200 hover:bg-emerald-50"><CheckCheck className="h-3.5 w-3.5" /></button>
+                                  <button onClick={() => void resolve(i.id)} title="Selesaikan" className="rounded-lg px-2 py-1 text-xs font-medium text-emerald-700 ring-1 ring-emerald-200 hover:bg-emerald-50"><CheckCheck className="h-3.5 w-3.5" /></button>
                                 </PermissionGate>
                               ) : null}
                             </span>
@@ -215,30 +215,30 @@ function IncidentDrawer({ id, onClose, onAck, onResolve }: { id: string; onClose
               {(actions.canAcknowledge || actions.canResolve) ? (
                 <PermissionGate permissions={ROUTE_PERMISSIONS.incidentManage}>
                   <div className="flex gap-2">
-                    {actions.canAcknowledge ? <Button onClick={() => onAck(incident.id)} className="gap-2 bg-amber-500 hover:bg-amber-600"><Check className="h-4 w-4" /> Acknowledge</Button> : null}
-                    {actions.canResolve ? <Button onClick={() => onResolve(incident.id)} className="gap-2 bg-emerald-600 hover:bg-emerald-700"><CheckCheck className="h-4 w-4" /> Resolve</Button> : null}
+                    {actions.canAcknowledge ? <Button onClick={() => onAck(incident.id)} className="gap-2 bg-amber-500 hover:bg-amber-600"><Check className="h-4 w-4" /> Tandai ditangani</Button> : null}
+                    {actions.canResolve ? <Button onClick={() => onResolve(incident.id)} className="gap-2 bg-emerald-600 hover:bg-emerald-700"><CheckCheck className="h-4 w-4" /> Selesaikan</Button> : null}
                   </div>
                 </PermissionGate>
               ) : null}
 
               <section>
-                <p className="mb-2 text-xs font-semibold uppercase text-gray-400">General</p>
+                <p className="mb-2 text-xs font-semibold uppercase text-gray-400">Umum</p>
                 <dl className="space-y-1.5">
-                  <Field label="Source" value={incident.source} />
-                  <Field label="Occurrences" value={String(incident.count)} />
-                  <Field label="First seen" value={dt(incident.firstSeen)} />
-                  <Field label="Last seen" value={dt(incident.lastSeen)} />
-                  <Field label="Duration" value={incidentDuration(incident.firstSeen, incident.lastSeen)} />
+                  <Field label="Sumber" value={incident.source} />
+                  <Field label="Kemunculan" value={String(incident.count)} />
+                  <Field label="Pertama terlihat" value={dt(incident.firstSeen)} />
+                  <Field label="Terakhir terlihat" value={dt(incident.lastSeen)} />
+                  <Field label="Durasi" value={incidentDuration(incident.firstSeen, incident.lastSeen)} />
                   {incident.worker ? <Field label="Worker" value={incident.worker} /> : null}
-                  {incident.module ? <Field label="Module" value={incident.module} /> : null}
-                  {incident.acknowledgedAt ? <Field label="Acknowledged" value={`${dt(incident.acknowledgedAt)} · ${incident.acknowledgedBy ?? ''}`} /> : null}
-                  {incident.resolvedAt ? <Field label="Resolved" value={`${dt(incident.resolvedAt)} · ${incident.resolvedBy ?? ''}`} /> : null}
+                  {incident.module ? <Field label="Modul" value={incident.module} /> : null}
+                  {incident.acknowledgedAt ? <Field label="Ditangani" value={`${dt(incident.acknowledgedAt)} · ${incident.acknowledgedBy ?? ''}`} /> : null}
+                  {incident.resolvedAt ? <Field label="Diselesaikan" value={`${dt(incident.resolvedAt)} · ${incident.resolvedBy ?? ''}`} /> : null}
                 </dl>
               </section>
 
               {links.length > 0 ? (
                 <section>
-                  <p className="mb-2 text-xs font-semibold uppercase text-gray-400">Related</p>
+                  <p className="mb-2 text-xs font-semibold uppercase text-gray-400">Terkait</p>
                   <div className="flex flex-wrap gap-2">
                     {links.map((l) => (
                       <Link key={l.label} href={l.href} className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 hover:border-[#465fff] hover:text-[#465fff]">
@@ -252,7 +252,7 @@ function IncidentDrawer({ id, onClose, onAck, onResolve }: { id: string; onClose
               <section>
                 <p className="mb-2 text-xs font-semibold uppercase text-gray-400">Timeline (correlated logs)</p>
                 {d.timeline.length === 0 ? (
-                  <p className="text-sm text-gray-500">No correlated log entries.</p>
+                  <p className="text-sm text-gray-500">Tidak ada log terkait.</p>
                 ) : (
                   <ol className="space-y-1.5">
                     {d.timeline.map((e) => (

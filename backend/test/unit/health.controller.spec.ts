@@ -5,6 +5,7 @@
 jest.mock('amqplib', () => ({ connect: jest.fn() }));
 import * as amqp from 'amqplib';
 import { HealthController } from '../../src/health.controller';
+import { RabbitConnectionManager } from '../../src/infrastructure/outbox/rabbit-connection.manager';
 
 const mockConnect = amqp.connect as unknown as jest.Mock;
 
@@ -21,17 +22,20 @@ function mockRes(): ResStub {
   return res;
 }
 
-function build(over: { mysqlOk?: boolean; redisOk?: boolean } = {}) {
+function build(over: { postgresOk?: boolean; redisOk?: boolean } = {}) {
   const prisma = {
-    $queryRaw: jest.fn().mockImplementation(() => (over.mysqlOk === false ? Promise.reject(new Error('db down')) : Promise.resolve([{ '1': 1 }]))),
+    $queryRaw: jest.fn().mockImplementation(() => (over.postgresOk === false ? Promise.reject(new Error('db down')) : Promise.resolve([{ '1': 1 }]))),
   };
   const cache = {
     set: jest.fn().mockResolvedValue(undefined),
     get: jest.fn().mockResolvedValue(over.redisOk === false ? 'nope' : 'ok'),
   };
+  // The REAL shared-connection manager, over the mocked amqplib (L4).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const controller = new HealthController(prisma as any, cache as any);
-  return { controller };
+  const rabbit = new RabbitConnectionManager({ rabbitmqUrl: process.env.RABBITMQ_URL } as any);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const controller = new HealthController(prisma as any, cache as any, rabbit);
+  return { controller, rabbit };
 }
 
 describe('HealthController.ready — RabbitMQ-aware readiness', () => {
@@ -51,7 +55,7 @@ describe('HealthController.ready — RabbitMQ-aware readiness', () => {
     const http = mockRes();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await controller.ready(http as any);
-    expect(res).toEqual({ status: 'ready', checks: { mysql: 'ok', redis: 'ok', rabbitmq: 'skipped' } });
+    expect(res).toEqual({ status: 'ready', checks: { postgres: 'ok', redis: 'ok', rabbitmq: 'skipped' } });
     expect(http.code).toBe(200);
     expect(mockConnect).not.toHaveBeenCalled();
   });
@@ -83,7 +87,7 @@ describe('HealthController.ready — RabbitMQ-aware readiness', () => {
   it('ready when the broker is reachable', async () => {
     process.env.CONSUMERS_ENABLED = 'true';
     process.env.RABBITMQ_URL = 'amqp://rabbit';
-    mockConnect.mockResolvedValue({ close: jest.fn().mockResolvedValue(undefined) });
+    mockConnect.mockResolvedValue({ close: jest.fn().mockResolvedValue(undefined), on: jest.fn() });
     const { controller } = build();
     const http = mockRes();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -93,12 +97,46 @@ describe('HealthController.ready — RabbitMQ-aware readiness', () => {
     expect(http.code).toBe(200);
   });
 
+  it('L4: repeated readiness probes REUSE one shared connection (no connect per request)', async () => {
+    process.env.CONSUMERS_ENABLED = 'true';
+    process.env.RABBITMQ_URL = 'amqp://rabbit';
+    const close = jest.fn().mockResolvedValue(undefined);
+    mockConnect.mockResolvedValue({ close, on: jest.fn() });
+    const { controller } = build();
+    for (let i = 0; i < 5; i += 1) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await controller.ready(mockRes() as any);
+      expect(res.checks.rabbitmq).toBe('ok');
+    }
+    expect(mockConnect).toHaveBeenCalledTimes(1);
+    expect(close).not.toHaveBeenCalled(); // the shared connection stays open for the relay/consumers
+  });
+
+  it('L4: concurrent probes while disconnected open exactly ONE connection (no leaked duplicates)', async () => {
+    process.env.CONSUMERS_ENABLED = 'true';
+    process.env.RABBITMQ_URL = 'amqp://rabbit';
+    // A slow broker: every probe reaches ensureConnection while the first attempt is in flight.
+    mockConnect.mockImplementation(() => new Promise((r) => setTimeout(() => r({ close: jest.fn(), on: jest.fn() }), 100)));
+    const { controller } = build();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const results = await Promise.all(Array.from({ length: 4 }, () => controller.ready(mockRes() as any)));
+    expect(results.every((r) => r.checks.rabbitmq === 'ok')).toBe(true);
+    expect(mockConnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('L4: a hung broker is bounded by the probe timeout instead of hanging readiness', async () => {
+    process.env.RABBITMQ_URL = 'amqp://rabbit';
+    mockConnect.mockImplementation(() => new Promise(() => undefined)); // never settles
+    const { rabbit } = build();
+    await expect(rabbit.isHealthy(50)).resolves.toBe(false);
+  });
+
   it('NOT ready when MySQL is down', async () => {
-    const { controller } = build({ mysqlOk: false });
+    const { controller } = build({ postgresOk: false });
     const http = mockRes();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await controller.ready(http as any);
-    expect(res.checks.mysql).toBe('failed');
+    expect(res.checks.postgres).toBe('failed');
     expect(res.status).toBe('not_ready');
     expect(http.code).toBe(503);
   });
@@ -133,7 +171,7 @@ describe('HealthController.ready — HTTP status code is the readiness signal (F
   });
 
   it('sets 503 when MySQL is down, and still returns the per-dependency detail', async () => {
-    const { controller } = build({ mysqlOk: false });
+    const { controller } = build({ postgresOk: false });
     const http = mockRes();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await controller.ready(http as any);
@@ -141,7 +179,7 @@ describe('HealthController.ready — HTTP status code is the readiness signal (F
     // The body is what the runbook reads; 503 must not flatten it away.
     expect(res).toEqual({
       status: 'not_ready',
-      checks: { mysql: 'failed', redis: 'ok', rabbitmq: 'skipped' },
+      checks: { postgres: 'failed', redis: 'ok', rabbitmq: 'skipped' },
     });
   });
 
@@ -164,7 +202,7 @@ describe('HealthController.ready — HTTP status code is the readiness signal (F
   });
 
   it('liveness is unaffected — /health and /live never signal dependency state', () => {
-    const { controller } = build({ mysqlOk: false, redisOk: false });
+    const { controller } = build({ postgresOk: false, redisOk: false });
     expect(controller.health().status).toBe('ok');
     expect(controller.live()).toEqual({ status: 'live' });
   });

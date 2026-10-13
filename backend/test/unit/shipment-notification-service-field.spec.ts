@@ -40,7 +40,8 @@ function shipmentRow(over: {
 
 function build(row: ReturnType<typeof shipmentRow>) {
   const tx = {
-    shipment: { update: jest.fn().mockResolvedValue({}) },
+    // pollAndUpdate claims the move with a CAS on the status it read (count 1 = won).
+    shipment: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     order: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     orderEvent: { create: jest.fn().mockResolvedValue({}) },
     notificationOutbox: { create: jest.fn().mockResolvedValue({}) },
