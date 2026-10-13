@@ -1,0 +1,59 @@
+# Edge proxy — the ONLY thing on this VPS that publishes 80/443. Routes:
+#   ecommerce / api / admin .baksomassular.com          -> project mas-sular-prd
+#   staging-ecommerce / -api / -admin .baksomassular.com -> project mas-sular (staging)
+#
+# Replaces /opt/mas-sular/docker-compose.proxy.yml. Cut-over: deploy/prd/README.md.
+#
+#   cd deploy/prd/proxy && docker compose up -d
+#   docker exec mas-sular-nginx nginx -t && docker exec mas-sular-nginx nginx -s reload
+#
+# Joins BOTH application edge networks. A container on two networks does not route
+# between them, so staging and production stay unable to reach each other.
+# Both networks must exist before this starts: staging creates mas-sular_edge,
+# deploy/prd/deploy.sh creates mas-sular-prd_edge.
+#
+# PRD_TLS (in ./.env, gitignored): off until the production certificate exists,
+# then on. It picks which directory is mounted at /etc/nginx/prd-tls.
+
+name: edge-proxy
+
+services:
+  nginx:
+    image: nginx:1.28-alpine
+    # Kept identical to the old proxy: the certbot deploy hook
+    # (/etc/letsencrypt/renewal-hooks/deploy/mas-sular-nginx-reload.sh) reloads
+    # this container BY NAME after every renewal.
+    container_name: mas-sular-nginx
+    restart: always
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./conf.d:/etc/nginx/conf.d:ro
+      - ./snippets:/etc/nginx/snippets:ro
+      - ./prd-tls-${PRD_TLS:-off}:/etc/nginx/prd-tls:ro
+      # ACME HTTP-01 webroot. Must stay the path certbot's renewal configs use.
+      - ${ACME_WEBROOT:-/opt/mas-sular/nginx/certbot/www}:/var/www/certbot:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    networks:
+      - staging_edge
+      - prd_edge
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits: { cpus: "0.25", memory: 64M }
+
+networks:
+  # Remove this network (and conf.d/10-staging.conf) when staging is taken down.
+  staging_edge:
+    external: true
+    name: mas-sular_edge
+  prd_edge:
+    external: true
+    name: mas-sular-prd_edge
