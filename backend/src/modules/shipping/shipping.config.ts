@@ -17,6 +17,21 @@ export const JNE_SANDBOX_HOSTS = ['apiv2.jne.co.id:10202'];
 export type JneEnvironment = 'sandbox' | 'production';
 
 /**
+ * Paxel's non-production host - the one staging has always used
+ * (`https://stage-commerce-api.paxel.co/v1`). Unlike JNE, Paxel's sandbox host IS
+ * known, so the guard below polices BOTH directions: production may not use it,
+ * and a sandbox may use nothing else (bar a reserved test host).
+ *
+ * There is deliberately no production constant: production names its endpoint
+ * explicitly in PAXEL_BASE_URL. A guessed default (`https://api.paxel.co`) was what
+ * production quotes were sent to, and every one of them answered 404.
+ */
+export const PAXEL_SANDBOX_HOSTS = ['stage-commerce-api.paxel.co'];
+
+/** Which Paxel tenant a configuration addresses. Any other value is an error. */
+export type PaxelEnvironment = 'sandbox' | 'production';
+
+/**
  * The shop's single courier pickup rule (PAXELBOX-61AG.3.32, P1 #13).
  *
  * One rule for EVERY courier, not one per provider: the shop has one packing
@@ -25,24 +40,27 @@ export type JneEnvironment = 'sandbox' | 'production';
  * JNE shipment and is what JNE /pickupcashless sends as PICKUP_DATE / PICKUP_TIME.
  *
  * The cutoff and the pickup are DIFFERENT times and must never be conflated:
- *   cutoffTime - the latest payment VERIFICATION still eligible for today's run
+ *   cutoffTime - the first payment-VERIFICATION minute that misses today's run
  *   pickupTime - the courier appointment itself, deliberately later than the cutoff
  *
- * There is deliberately no START_TIME/END_TIME pair and no operating-hours,
- * weekend or holiday model: none of those exist in this repository, and a
- * placeholder for one would be shipped to a courier as if it were true.
+ * Saturday and Sunday are never pickup days (approved policy, Phase 2): the
+ * rule itself is `resolvePickupSchedule` in ./pickup-schedule.ts. There is still
+ * no START_TIME/END_TIME pair and no holiday model: none exists in this
+ * repository, and a placeholder for one would be shipped to a courier as if it
+ * were true.
  */
 export interface PickupPolicy {
   /** IANA zone the cutoff and pickup times are wall-clock in (e.g. Asia/Jakarta). */
   timeZone: string;
-  /** `HH:mm`. The latest payment VERIFICATION still eligible for today's pickup. */
+  /** `HH:mm`. A payment verified at or after this minute misses today's pickup. */
   cutoffTime: string;
   /** `HH:mm`. The appointment itself — may legitimately fall after the cutoff. */
   pickupTime: string;
 }
 
 /**
- * THE business rule: cut-off 15:00 WIB, pickup 17:00 WIB. The single source of
+ * THE business rule: cut-off 15:00 WIB (15:00 itself is past it), pickup 17:00 WIB,
+ * no Saturday/Sunday pickups. The single source of
  * truth for both couriers — providers never carry their own copy. The
  * PAXEL_PICKUP_* variables may override it per environment, but an unset
  * variable means THIS rule, never "no rule". Wall-clock in `timeZone`, so the
@@ -65,6 +83,12 @@ export interface PaxelAutoPickupConfig extends PickupPolicy {
 
 export interface PaxelProviderConfig {
   enabled: boolean;
+  /**
+   * PAXEL_ENVIRONMENT. Absent = 'sandbox', the same convention as JNE_ENVIRONMENT.
+   * Validated by {@link assertPaxelEnvironment}, never inferred from the URL.
+   */
+  environment?: PaxelEnvironment;
+  /** PAXEL_BASE_URL verbatim (trailing slashes trimmed). Empty when unset - there is no default. */
   baseUrl: string;
   apiKey?: string;
   /** Signs create/cancel requests (X-Paxel-Signature). Never logged, never returned. */
@@ -365,7 +389,10 @@ export function loadShippingConfig(env: NodeJS.ProcessEnv = process.env): Shippi
     allowMockRates: env.NODE_ENV !== 'production',
     paxel: {
       enabled: bool(env.PAXEL_ENABLED),
-      baseUrl: (env.PAXEL_BASE_URL ?? 'https://api.paxel.co').replace(/\/+$/, ''),
+      // Cast, not parse: an unrecognised value must survive to assertPaxelEnvironment().
+      environment: (env.PAXEL_ENVIRONMENT?.trim() || undefined) as PaxelEnvironment | undefined,
+      // No default endpoint. An enabled Paxel without one is refused at boot.
+      baseUrl: (env.PAXEL_BASE_URL ?? '').trim().replace(/\/+$/, ''),
       apiKey: env.PAXEL_API_KEY,
       apiSecret: env.PAXEL_API_SECRET,
       originPhone: env.PAXEL_ORIGIN_PHONE,
@@ -424,6 +451,92 @@ function hostOf(url: string): string {
 /** True when `url` addresses the JNE endpoint the supplied specification calls sandbox. */
 export function isJneSandboxUrl(url: string): boolean {
   return JNE_SANDBOX_HOSTS.includes(hostOf(url).toLowerCase());
+}
+
+/** True when `url` addresses Paxel's known non-production host. */
+export function isPaxelSandboxUrl(url: string): boolean {
+  try {
+    return PAXEL_SANDBOX_HOSTS.includes(new URL(url).hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A host no real courier lives on: loopback, or an RFC 2606 reserved name
+ * (`.test`, `.invalid`, `.example`, `.localhost`). Unit and e2e doubles use these.
+ */
+function isTestDoubleHost(hostname: string): boolean {
+  const h = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  return (
+    h === 'localhost' ||
+    h === '127.0.0.1' ||
+    h === '::1' ||
+    /\.(test|invalid|example|localhost)$/.test(h)
+  );
+}
+
+/**
+ * Paxel environment guard (Phase 2).
+ *
+ * Production Paxel quotes went to `https://api.paxel.co` - a code default nobody
+ * chose - with the STAGING credentials, and every one answered 404. So:
+ *
+ *   - an enabled Paxel has no default endpoint: PAXEL_BASE_URL must be set;
+ *   - production must use https and may not use the known sandbox host or a test host;
+ *   - sandbox (the default when PAXEL_ENVIRONMENT is unset) may use ONLY the known
+ *     sandbox host or a test host - staging cannot reach a production endpoint by
+ *     forgetting one variable, and production cannot run as "sandbox" by accident.
+ *
+ * Credentials cannot be told apart here (the application sees one set); comparing
+ * them against the other environment's is an operational check outside this code.
+ * Nothing in any message below is a credential: only the variable names and the HOST.
+ * Nothing infers the environment from the URL or NODE_ENV.
+ */
+export function assertPaxelEnvironment(config: PaxelProviderConfig): void {
+  // A disabled courier issues no requests, so it needs no endpoint.
+  if (!config.enabled) return;
+
+  const environment = config.environment ?? 'sandbox';
+  if (environment !== 'sandbox' && environment !== 'production') {
+    throw new Error(`PAXEL_ENVIRONMENT must be "sandbox" or "production" (got "${environment}")`);
+  }
+  if (!config.baseUrl) {
+    throw new Error(
+      'PAXEL_BASE_URL is required when PAXEL_ENABLED=true. There is no default endpoint: name the ' +
+        `Paxel ${environment} endpoint explicitly, including its path prefix (e.g. /v1).`,
+    );
+  }
+  let url: URL;
+  try {
+    url = new URL(config.baseUrl);
+  } catch {
+    throw new Error('PAXEL_BASE_URL is not a valid absolute URL');
+  }
+  const host = url.hostname.toLowerCase();
+
+  if (environment === 'production') {
+    if (isPaxelSandboxUrl(config.baseUrl)) {
+      throw new Error(
+        `Paxel is enabled in production but PAXEL_BASE_URL points to the known Paxel sandbox host (${host}).`,
+      );
+    }
+    if (isTestDoubleHost(host)) {
+      throw new Error(`Paxel is enabled in production but PAXEL_BASE_URL points to a test host (${host}).`);
+    }
+    if (url.protocol !== 'https:') {
+      throw new Error('PAXEL_BASE_URL must use https when PAXEL_ENVIRONMENT=production.');
+    }
+    return;
+  }
+
+  if (!isPaxelSandboxUrl(config.baseUrl) && !isTestDoubleHost(host)) {
+    throw new Error(
+      `PAXEL_ENVIRONMENT=sandbox${config.environment ? '' : ' (the default when unset)'} but PAXEL_BASE_URL ` +
+        `(${host}) is not the known Paxel sandbox host (${PAXEL_SANDBOX_HOSTS.join(', ')}). ` +
+        'Set PAXEL_ENVIRONMENT=production to use a production endpoint.',
+    );
+  }
 }
 
 /**
@@ -519,6 +632,7 @@ export function assertShippingConfigured(config: ShippingConfig): void {
   // Environment safety is a separate failure from a missing credential, and says
   // so in its own words rather than joining the "missing credentials" list.
   assertJneEnvironment(config.jne);
+  assertPaxelEnvironment(config.paxel);
   if (missing.length) {
     throw new Error(`Shipping providers are enabled but missing credentials: ${missing.join(', ')}`);
   }

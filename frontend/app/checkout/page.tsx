@@ -6,10 +6,11 @@ import { useRouter } from 'next/navigation'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { AlertCircle, Loader2, MapPin, Banknote, CreditCard, Wallet, ChevronRight, Check, Plus } from 'lucide-react'
+import { AlertCircle, Loader2, MapPin, Banknote, CreditCard, Wallet, ChevronRight, Check, Plus, Truck } from 'lucide-react'
 import { StorefrontShell } from '@/components/storefront/shell'
 import { Empty } from '@/components/common/empty'
 import { AddressForm } from '@/components/account/address-form'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -41,6 +42,7 @@ import { formatIDR } from '@/lib/utils/format'
 import { formatAddressLine } from '@/lib/address/format-address'
 import { checkoutSummaryRows } from '@/lib/checkout/summary'
 import { groupShippingOptions, serviceLabel } from '@/lib/checkout/shipping-groups'
+import { PICKUP_NOTICE_ETA_HINT, pickupNotice } from '@/lib/checkout/pickup-notice'
 import { ProviderLogo } from '@/components/checkout/provider-logo'
 import { cn } from '@/lib/utils'
 import type { CreateOrderInput } from '@/lib/api/orders.api'
@@ -126,6 +128,8 @@ export default function CheckoutPage() {
   const [selectedShipping, setSelectedShipping] = useState<ShippingOption | null>(null)
   // Presentation-only grouping; does not touch selection or the submit payload.
   const shippingGroups = useMemo(() => groupShippingOptions(shippingOptions), [shippingOptions])
+  // Worded from the backend's pickup schedule (one per response); null = no notice.
+  const pickupNoticeText = useMemo(() => pickupNotice(shippingOptions), [shippingOptions])
 
   // Reset the selection when the address changes; auto-pick the cheapest option once loaded.
   useEffect(() => {
@@ -431,6 +435,18 @@ export default function CheckoutPage() {
                     // Grouped by the backend's stable `provider` id — presentation
                     // only; each button still selects the exact option object.
                     <div className="space-y-4">
+                      {pickupNoticeText ? (
+                        // Courier HAND-OVER timing, deliberately separate from each
+                        // service's own delivery estimate below. role=status: polite,
+                        // informational - not an error.
+                        <Alert role="status" aria-live="polite" className="border-amber-300 bg-amber-50 text-amber-950">
+                          <Truck aria-hidden="true" className="text-amber-600" />
+                          <AlertDescription className="text-amber-900">
+                            <p>{pickupNoticeText}</p>
+                            <p className="text-xs">{PICKUP_NOTICE_ETA_HINT}</p>
+                          </AlertDescription>
+                        </Alert>
+                      ) : null}
                       {shippingGroups.map((group) => (
                         <div key={group.provider} className="space-y-2">
                           <div className="flex items-center gap-2">

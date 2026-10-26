@@ -146,6 +146,9 @@ const baseSchema = z
     // required (cross-field below) only when the provider is enabled.
     SHIPPING_ORIGIN_POSTAL_CODE: z.string().optional(),
     PAXEL_ENABLED: boolFlag,
+    // Which Paxel tenant (absent = sandbox). The endpoint/tenant pairing itself is
+    // enforced by assertPaxelEnvironment (shipping.config.ts) at boot.
+    PAXEL_ENVIRONMENT: z.enum(['sandbox', 'production']).optional(),
     PAXEL_BASE_URL: z.string().optional(),
     PAXEL_API_KEY: z.string().optional(),
     // Signs X-Paxel-Signature on create/cancel. Required when Paxel is enabled.
