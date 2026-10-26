@@ -44,6 +44,8 @@ export interface ShippingLogBase {
   origin: string;
   destination: string;
   service: string;
+  /** Host + path the call went to (never the query string or a credential). Optional. */
+  endpoint?: string;
 }
 
 export interface ShippingRequestOptions {

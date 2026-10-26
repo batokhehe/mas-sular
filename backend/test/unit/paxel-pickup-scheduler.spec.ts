@@ -1,12 +1,17 @@
 /**
- * PAXELBOX-61AG.3.32 / P1 #13 — the shop-wide courier pickup rule
- * (cut-off 15:00 WIB, pickup 17:00 WIB).
+ * PAXELBOX-61AG.3.32 / P1 #13 — the shop-wide courier pickup rule, as approved in
+ * Phase 2 (cut-off 15:00 WIB, 15:00 itself past it; pickup 17:00 WIB; no weekend
+ * pickups).
  *
  * The whole business rule is one pure function, so it is tested as one: given the
  * instant a payment was verified, which appointment does the shop commit to?
  *
- *   verification <= cutoff  ->  SAME calendar day at the pickup time
- *   verification >  cutoff  ->  NEXT calendar day at the pickup time
+ *   verification <  cutoff  ->  SAME calendar day at the pickup time
+ *   verification >= cutoff  ->  NEXT calendar day at the pickup time
+ *   ...moved to Monday when that day is a Saturday or Sunday.
+ *
+ * These cases use a TUESDAY (3 Nov 2026) so the cut-off is exercised without the
+ * weekend rule; the weekday/weekend matrix lives in pickup-schedule.policy.spec.ts.
  *
  * Every expectation below is written as an absolute UTC instant, deliberately.
  * Asserting on a local-time rendering would let the test agree with a buggy
@@ -44,7 +49,8 @@ const resolve = (reference: string, policy: PickupPolicy = POLICY) =>
   resolveAutomaticPaxelPickupAt(new Date(reference), policy).toISOString();
 
 // 17:00 WIB (UTC+7, no DST) is 10:00Z. Every same-day answer below is 10:00Z on
-// the verification's own Jakarta date; every next-day answer is 10:00Z the day after.
+// the verification's own Jakarta date (Tue 3 Nov); every next-day answer is
+// 10:00Z the day after (Wed 4 Nov).
 
 // ======================================================== the stated rule =====
 
@@ -55,11 +61,10 @@ describe('the 15:00 cut-off / 17:00 pickup rule', () => {
   });
 
   describe.each([
-    ['08:00', '2026-09-05T08:00:00+07:00', '2026-09-05T10:00:00.000Z'],
-    ['09:00', '2026-09-05T09:00:00+07:00', '2026-09-05T10:00:00.000Z'],
-    ['12:30', '2026-09-05T12:30:00+07:00', '2026-09-05T10:00:00.000Z'],
-    ['14:59', '2026-09-05T14:59:00+07:00', '2026-09-05T10:00:00.000Z'],
-    ['15:00', '2026-09-05T15:00:00+07:00', '2026-09-05T10:00:00.000Z'],
+    ['08:00', '2026-11-03T08:00:00+07:00', '2026-11-03T10:00:00.000Z'],
+    ['09:00', '2026-11-03T09:00:00+07:00', '2026-11-03T10:00:00.000Z'],
+    ['12:30', '2026-11-03T12:30:00+07:00', '2026-11-03T10:00:00.000Z'],
+    ['14:59', '2026-11-03T14:59:00+07:00', '2026-11-03T10:00:00.000Z'],
   ])('a payment verified at %s WIB', (_label, reference, expected) => {
     it('is picked up the SAME day at 17:00', () => {
       expect(resolve(reference)).toBe(expected);
@@ -67,42 +72,43 @@ describe('the 15:00 cut-off / 17:00 pickup rule', () => {
   });
 
   describe.each([
-    ['15:01', '2026-09-05T15:01:00+07:00', '2026-09-06T10:00:00.000Z'],
-    ['16:59', '2026-09-05T16:59:00+07:00', '2026-09-06T10:00:00.000Z'],
-    ['17:00', '2026-09-05T17:00:00+07:00', '2026-09-06T10:00:00.000Z'],
-    ['19:00', '2026-09-05T19:00:00+07:00', '2026-09-06T10:00:00.000Z'],
-    ['22:00', '2026-09-05T22:00:00+07:00', '2026-09-06T10:00:00.000Z'],
-    ['23:59', '2026-09-05T23:59:00+07:00', '2026-09-06T10:00:00.000Z'],
+    ['15:00', '2026-11-03T15:00:00+07:00', '2026-11-04T10:00:00.000Z'],
+    ['15:01', '2026-11-03T15:01:00+07:00', '2026-11-04T10:00:00.000Z'],
+    ['16:59', '2026-11-03T16:59:00+07:00', '2026-11-04T10:00:00.000Z'],
+    ['17:00', '2026-11-03T17:00:00+07:00', '2026-11-04T10:00:00.000Z'],
+    ['19:00', '2026-11-03T19:00:00+07:00', '2026-11-04T10:00:00.000Z'],
+    ['22:00', '2026-11-03T22:00:00+07:00', '2026-11-04T10:00:00.000Z'],
+    ['23:59', '2026-11-03T23:59:00+07:00', '2026-11-04T10:00:00.000Z'],
   ])('a payment verified at %s WIB', (_label, reference, expected) => {
     it('is picked up the NEXT day at 17:00', () => {
       expect(resolve(reference)).toBe(expected);
     });
   });
 
-  it('14:59 is before the cut-off, 15:00 is included, 15:01 is after - the boundary is exactly there', () => {
-    expect(resolve('2026-09-05T14:59:00+07:00')).toBe('2026-09-05T10:00:00.000Z');
-    expect(resolve('2026-09-05T15:00:00+07:00')).toBe('2026-09-05T10:00:00.000Z');
-    expect(resolve('2026-09-05T15:01:00+07:00')).toBe('2026-09-06T10:00:00.000Z');
+  it('14:59 is before the cut-off, 15:00 is already PAST it, 15:01 too - the boundary is exactly there', () => {
+    expect(resolve('2026-11-03T14:59:00+07:00')).toBe('2026-11-03T10:00:00.000Z');
+    expect(resolve('2026-11-03T15:00:00+07:00')).toBe('2026-11-04T10:00:00.000Z');
+    expect(resolve('2026-11-03T15:01:00+07:00')).toBe('2026-11-04T10:00:00.000Z');
   });
 
   it('never conflates the cut-off with the pickup: a payment verified AT 17:00 misses today', () => {
     // 17:00 is the PICKUP time, not the cut-off. Under the old rule (cut-off
     // 17:00) this verification caught today's run; under 15:00 it must not.
-    expect(resolve('2026-09-05T17:00:00+07:00')).toBe('2026-09-06T10:00:00.000Z');
+    expect(resolve('2026-11-03T17:00:00+07:00')).toBe('2026-11-04T10:00:00.000Z');
     // ...and the old rule's last same-day minute is now a next-day case too.
-    expect(resolve('2026-09-05T16:59:00+07:00')).toBe('2026-09-06T10:00:00.000Z');
+    expect(resolve('2026-11-03T16:59:00+07:00')).toBe('2026-11-04T10:00:00.000Z');
   });
 
-  it('compares at MINUTE granularity, so 15:00:59 still catches the same-day run', () => {
-    // The business stated the boundary in minutes. Comparing seconds would shrink
-    // "15:00 is included" to a one-second window, which is not what an
-    // operational cutoff means.
-    expect(resolve('2026-09-05T15:00:59+07:00')).toBe('2026-09-05T10:00:00.000Z');
+  it('compares at MINUTE granularity: all of the 15:00 minute is past the cut-off, 14:59:59 is not', () => {
+    // The business stated the boundary in minutes: 15:00 is past the cut-off, so
+    // 15:00:59 is too, and 14:59:59 still belongs to the 14:59 minute.
+    expect(resolve('2026-11-03T15:00:59+07:00')).toBe('2026-11-04T10:00:00.000Z');
+    expect(resolve('2026-11-03T14:59:59+07:00')).toBe('2026-11-03T10:00:00.000Z');
   });
 
   it('produces an appointment strictly AFTER the verification, in every stated case', () => {
     for (const hour of Array.from({ length: 24 }, (_, h) => h)) {
-      const reference = `2026-09-05T${String(hour).padStart(2, '0')}:30:00+07:00`;
+      const reference = `2026-11-03T${String(hour).padStart(2, '0')}:30:00+07:00`;
       expect(new Date(resolve(reference)).getTime()).toBeGreaterThan(new Date(reference).getTime());
     }
   });
@@ -112,45 +118,45 @@ describe('the 15:00 cut-off / 17:00 pickup rule', () => {
 
 describe('the reference instant is read in the configured zone, never the process one', () => {
   it('evaluates a UTC-expressed instant using Jakarta local time', () => {
-    // 18:00Z is already 01:00 the NEXT day in Jakarta — before the cutoff, so the
-    // pickup is that (Jakarta) same day. A UTC-date calculation would answer the
-    // 5th; the Jakarta answer is the 6th.
-    expect(resolve('2026-09-05T18:00:00Z')).toBe('2026-09-06T10:00:00.000Z');
+    // 18:00Z on Tue 3 Nov is already 01:00 on Wed 4 Nov in Jakarta — before the
+    // cutoff, so the pickup is that (Jakarta) same day. A UTC-date calculation
+    // would answer the 3rd; the Jakarta answer is the 4th.
+    expect(resolve('2026-11-03T18:00:00Z')).toBe('2026-11-04T10:00:00.000Z');
   });
 
   it('evaluates UTC-expressed instants correctly on both sides of the 15:00 WIB cut-off', () => {
     // 07:59Z = 14:59 WIB -> before the cut-off -> same day.
-    expect(resolve('2026-09-05T07:59:00Z')).toBe('2026-09-05T10:00:00.000Z');
-    // 08:00Z = 15:00 WIB -> the cut-off minute itself -> same day.
-    expect(resolve('2026-09-05T08:00:00Z')).toBe('2026-09-05T10:00:00.000Z');
+    expect(resolve('2026-11-03T07:59:00Z')).toBe('2026-11-03T10:00:00.000Z');
+    // 08:00Z = 15:00 WIB -> the cut-off minute itself -> PAST it -> next day.
+    expect(resolve('2026-11-03T08:00:00Z')).toBe('2026-11-04T10:00:00.000Z');
     // 08:01Z = 15:01 WIB -> after the cut-off -> next day.
-    expect(resolve('2026-09-05T08:01:00Z')).toBe('2026-09-06T10:00:00.000Z');
+    expect(resolve('2026-11-03T08:01:00Z')).toBe('2026-11-04T10:00:00.000Z');
     // 11:00Z = 18:00 WIB -> after the cut-off -> next day.
-    expect(resolve('2026-09-05T11:00:00Z')).toBe('2026-09-06T10:00:00.000Z');
+    expect(resolve('2026-11-03T11:00:00Z')).toBe('2026-11-04T10:00:00.000Z');
   });
 
   it('honours a zone that is NOT the machine timezone (proof the process TZ is unused)', () => {
-    // On 2026-09-05 New York is EDT (UTC-4), so 17:00 local is 21:00Z. If the
+    // On Tue 3 Nov 2026 New York is EST (UTC-5), so 17:00 local is 22:00Z. If the
     // implementation read the process clock this would be wrong on every machine
     // rather than only on non-Jakarta ones.
     const newYork: PaxelAutoPickupConfig = { ...POLICY, timeZone: 'America/New_York' };
-    expect(resolve('2026-09-05T14:00:00-04:00', newYork)).toBe('2026-09-05T21:00:00.000Z');
-    expect(resolve('2026-09-05T16:00:00-04:00', newYork)).toBe('2026-09-06T21:00:00.000Z');
+    expect(resolve('2026-11-03T14:00:00-05:00', newYork)).toBe('2026-11-03T22:00:00.000Z');
+    expect(resolve('2026-11-03T16:00:00-05:00', newYork)).toBe('2026-11-04T22:00:00.000Z');
   });
 
   it('lands on the right instant across a DST transition in the target zone', () => {
-    // Verified 18:00 EDT on 31 Oct 2026 -> after cutoff -> 1 Nov, the day US
-    // clocks fall back. 17:00 that day is EST (UTC-5), so 22:00Z on the 1st.
-    // A single-pass conversion using the offset at the REFERENCE would answer
-    // 21:00Z — an hour early, to a real courier.
+    // Verified 18:00 EDT on Fri 30 Oct 2026 -> after the cutoff on a Friday ->
+    // Mon 2 Nov, after US clocks fell back on Sun 1 Nov. 17:00 that Monday is EST
+    // (UTC-5), so 22:00Z. A single-pass conversion using the offset at the
+    // REFERENCE would answer 21:00Z — an hour early, to a real courier.
     const newYork: PaxelAutoPickupConfig = { ...POLICY, timeZone: 'America/New_York' };
-    expect(resolve('2026-10-31T18:00:00-04:00', newYork)).toBe('2026-11-01T22:00:00.000Z');
+    expect(resolve('2026-10-30T18:00:00-04:00', newYork)).toBe('2026-11-02T22:00:00.000Z');
   });
 
   it('stays deterministic and valid for a zone far ahead of UTC', () => {
     const kiritimati: PaxelAutoPickupConfig = { ...POLICY, timeZone: 'Pacific/Kiritimati' }; // UTC+14
-    const answer = resolve('2026-09-05T10:00:00+14:00', kiritimati);
-    expect(answer).toBe('2026-09-05T03:00:00.000Z'); // 17:00 local on the 5th
+    const answer = resolve('2026-11-03T10:00:00+14:00', kiritimati);
+    expect(answer).toBe('2026-11-03T03:00:00.000Z'); // 17:00 local on Tue the 3rd
     expect(Number.isNaN(new Date(answer).getTime())).toBe(false);
   });
 });
@@ -176,8 +182,8 @@ describe('date boundaries are civil, not UTC', () => {
   });
 
   it('does not roll the day when the verification is before the cutoff, even late in UTC', () => {
-    // 2026-09-05T14:00 WIB is 07:00Z — no UTC-day rollover anywhere near it.
-    expect(resolve('2026-09-05T14:00:00+07:00')).toBe('2026-09-05T10:00:00.000Z');
+    // 2026-11-03T14:00 WIB is 07:00Z — no UTC-day rollover anywhere near it.
+    expect(resolve('2026-11-03T14:00:00+07:00')).toBe('2026-11-03T10:00:00.000Z');
   });
 });
 
@@ -186,20 +192,20 @@ describe('date boundaries are civil, not UTC', () => {
 describe('the rule can be overridden per environment', () => {
   it('honours a different cutoff', () => {
     const policy: PaxelAutoPickupConfig = { ...POLICY, cutoffTime: '09:00' };
-    expect(resolve('2026-09-05T09:00:00+07:00', policy)).toBe('2026-09-05T10:00:00.000Z');
-    expect(resolve('2026-09-05T09:01:00+07:00', policy)).toBe('2026-09-06T10:00:00.000Z');
+    expect(resolve('2026-11-03T08:59:00+07:00', policy)).toBe('2026-11-03T10:00:00.000Z');
+    expect(resolve('2026-11-03T09:00:00+07:00', policy)).toBe('2026-11-04T10:00:00.000Z');
   });
 
   it('honours a different pickup time', () => {
     const policy: PaxelAutoPickupConfig = { ...POLICY, pickupTime: '07:30' };
     // 07:30 WIB = 00:30Z. Note this pickup is BEFORE the cutoff and even before
     // the verification — allowed, because the cutoff is not a pickup bound.
-    expect(resolve('2026-09-05T08:00:00+07:00', policy)).toBe('2026-09-05T00:30:00.000Z');
+    expect(resolve('2026-11-03T08:00:00+07:00', policy)).toBe('2026-11-03T00:30:00.000Z');
   });
 
   it('accepts midnight as a pickup time without rendering hour 24', () => {
     const policy: PaxelAutoPickupConfig = { ...POLICY, pickupTime: '00:00' };
-    expect(resolve('2026-09-05T08:00:00+07:00', policy)).toBe('2026-09-04T17:00:00.000Z');
+    expect(resolve('2026-11-03T08:00:00+07:00', policy)).toBe('2026-11-02T17:00:00.000Z');
   });
 });
 
@@ -261,25 +267,25 @@ describe('PaxelPickupScheduler', () => {
   it('resolves the configured rule when enabled', () => {
     const scheduler = new PaxelPickupScheduler(configWith(POLICY));
     expect(scheduler.enabled).toBe(true);
-    expect(scheduler.resolveIso(new Date('2026-09-05T15:01:00+07:00'))).toBe('2026-09-06T10:00:00.000Z');
+    expect(scheduler.resolveIso(new Date('2026-11-03T15:01:00+07:00'))).toBe('2026-11-04T10:00:00.000Z');
   });
 
   describe('resolvePolicyIso - the shop-wide slot (used for JNE)', () => {
     it("resolves the shared rule even while Paxel's automatic booking is OFF", () => {
       // The switch decides whether Paxel books on its own - not the shop's pickup time.
       const scheduler = new PaxelPickupScheduler(configWith({ ...POLICY, enabled: false }, DEFAULT_PICKUP_POLICY));
-      expect(scheduler.resolvePolicyIso(new Date('2026-09-05T14:59:00+07:00'))).toBe('2026-09-05T10:00:00.000Z');
-      expect(scheduler.resolvePolicyIso(new Date('2026-09-05T15:01:00+07:00'))).toBe('2026-09-06T10:00:00.000Z');
+      expect(scheduler.resolvePolicyIso(new Date('2026-11-03T14:59:00+07:00'))).toBe('2026-11-03T10:00:00.000Z');
+      expect(scheduler.resolvePolicyIso(new Date('2026-11-03T15:01:00+07:00'))).toBe('2026-11-04T10:00:00.000Z');
     });
 
     it('falls back to the business rule when a config carries no policy, never to "no rule"', () => {
       const scheduler = new PaxelPickupScheduler(configWith(undefined, undefined));
-      expect(scheduler.resolvePolicyIso(new Date('2026-09-05T15:00:00+07:00'))).toBe('2026-09-05T10:00:00.000Z');
+      expect(scheduler.resolvePolicyIso(new Date('2026-11-03T15:00:00+07:00'))).toBe('2026-11-04T10:00:00.000Z');
     });
 
     it('agrees with the Paxel path for the same verification (one rule, two couriers)', () => {
       const scheduler = new PaxelPickupScheduler(configWith(POLICY, DEFAULT_PICKUP_POLICY));
-      const verifiedAt = new Date('2026-09-05T15:01:00+07:00');
+      const verifiedAt = new Date('2026-11-06T15:01:00+07:00'); // a Friday: both move to Monday
       expect(scheduler.resolvePolicyIso(verifiedAt)).toBe(scheduler.resolveIso(verifiedAt));
     });
   });
@@ -427,10 +433,10 @@ function resolveUnderTimezone(tz: string, reference: string): { tz: string; iso:
 }
 
 describe('the resolver does not depend on the process timezone', () => {
-  // 15:01 WIB on the 5th (one minute past the cut-off) -> the NEXT day, 17:00 WIB.
-  const REFERENCE = '2026-09-05T08:01:00.000Z';
-  const EXPECTED_ISO = '2026-09-06T10:00:00.000Z';
-  const EXPECTED_WIRE = '2026-09-06 17:00:00';
+  // 15:01 WIB on Tue 3 Nov (one minute past the cut-off) -> Wed 4 Nov, 17:00 WIB.
+  const REFERENCE = '2026-11-03T08:01:00.000Z';
+  const EXPECTED_ISO = '2026-11-04T10:00:00.000Z';
+  const EXPECTED_WIRE = '2026-11-04 17:00:00';
 
   it('answers identically on a developer host (Asia/Jakarta) and in the container (UTC)', () => {
     const jakarta = resolveUnderTimezone('Asia/Jakarta', REFERENCE);

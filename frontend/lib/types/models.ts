@@ -178,6 +178,26 @@ export interface ShippingProviderMeta {
   destination_name?: string | null
 }
 
+/**
+ * The shop's courier PICKUP schedule, resolved by the backend with the same rule it
+ * books the courier with, evaluated at quote time. It is the hand-over to the
+ * courier — never a delivery estimate — and the final slot is fixed from the
+ * moment the payment is verified, so the storefront words it conditionally.
+ */
+export interface PickupScheduleInfo {
+  /** ISO instant of the pickup appointment if the payment were verified now. */
+  pickupAt: string
+  reason: 'SAME_DAY' | 'NEXT_DAY' | 'MONDAY_AFTER_FRIDAY_CUTOFF' | 'MONDAY_AFTER_WEEKEND'
+  /** ISO instant the backend evaluated the rule at. */
+  referenceAt: string
+  /** IANA zone of the policy times, e.g. Asia/Jakarta. */
+  timeZone: string
+  /** `HH:mm` — a payment verified at or after this misses the day's pickup. */
+  cutoffTime: string
+  /** `HH:mm` — the pickup appointment time. */
+  pickupTime: string
+}
+
 /** A selectable shipping service returned by /checkout/shipping-options. */
 export interface ShippingOption {
   provider: string
@@ -191,6 +211,8 @@ export interface ShippingOption {
    * nothing in checkout may depend on it — identity stays provider + service.
    */
   providerMeta?: ShippingProviderMeta
+  /** OPTIONAL: absent from older APIs; the same value on every option of one response. */
+  pickupSchedule?: PickupScheduleInfo
 }
 
 export interface VoucherPreview {

@@ -8,7 +8,7 @@ import {
   executeShippingRequest,
   ShippingHttpClient,
 } from '../../../shipping/infrastructure/http/shipping-http-client';
-import { SHIPPING_CONFIG, ShippingConfig } from '../../../shipping/shipping.config';
+import { assertPaxelEnvironment, SHIPPING_CONFIG, ShippingConfig } from '../../../shipping/shipping.config';
 import { lookupProviderStatus } from '../../shipment-status.mapper';
 import { formatPaxelDatetime } from './paxel-datetime';
 import { paxelCancelSignature, paxelCreateSignature } from './paxel-signature';
@@ -157,6 +157,13 @@ export class PaxelShipmentProvider implements ShipmentProvider {
   private assertEnabled(): void {
     if (!this.cfg.enabled) {
       throw new PermanentError('Paxel fulfillment is disabled (PAXEL_ENABLED=false)', this.name);
+    }
+    // A booking/cancel/track only ever goes to the explicitly declared endpoint of
+    // the declared tenant (also enforced at boot). Permanent: retrying cannot fix it.
+    try {
+      assertPaxelEnvironment(this.cfg);
+    } catch (err) {
+      throw new PermanentError(err instanceof Error ? err.message : String(err), this.name);
     }
   }
 

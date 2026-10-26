@@ -4,7 +4,7 @@ import { IntegrationLogService } from '../../../../infrastructure/integration-lo
 import { PermanentError } from '../../domain/shipping-errors';
 import { ShippingProvider, ShippingQuote, ShippingRateRequest, TrackingResult } from '../../domain/shipping-provider.interface';
 import { isPersistableCoordinate } from '../../../geocoding/geocoding.service';
-import { SHIPPING_CONFIG, ShippingConfig } from '../../shipping.config';
+import { assertPaxelEnvironment, SHIPPING_CONFIG, ShippingConfig } from '../../shipping.config';
 import {
   defaultShippingHttpClient,
   executeShippingRequest,
@@ -105,6 +105,9 @@ export class PaxelProvider implements ShippingProvider {
     }
 
     if (!this.cfg.enabled) return this.config.allowMockRates ? this.mockRates(request) : [];
+    // The same boundary boot enforces: an explicit endpoint for the declared tenant.
+    // Thrown, so ShippingService isolates it like any other Paxel failure.
+    assertPaxelEnvironment(this.cfg);
 
     const quotes = await Promise.all(
       PAXEL_SERVICES.map(async (service) => {
@@ -134,9 +137,10 @@ export class PaxelProvider implements ShippingProvider {
     const destination = this.buildAddress(request, 'destination');
     const weight = this.assertWeight(request.weightGram, spec.maxWeightGram, service);
 
+    const url = `${this.cfg.baseUrl}${spec.path}`;
     const { text } = await executeShippingRequest({
       http: this.http,
-      url: `${this.cfg.baseUrl}${spec.path}`,
+      url,
       init: {
         method: 'POST',
         headers: {
@@ -159,7 +163,11 @@ export class PaxelProvider implements ShippingProvider {
       maxRetry: this.cfg.maxRetry,
       logger: this.logger,
       // City/district only - never the street address, which is customer data.
-      logBase: { provider: this.name, origin: origin.city, destination: destination.city, service },
+      // `endpoint` is host + path only: no query string, credential or header, so a
+      // failing quote is diagnosable from the log by service, status and endpoint.
+      // Deliberately NOT an IntegrationApiLog record: its raw columns keep the body
+      // verbatim, and a rate body carries the customer's address on every checkout.
+      logBase: { provider: this.name, origin: origin.city, destination: destination.city, service, endpoint: safeEndpoint(url) },
     });
 
     return this.mapResponse(text, service, spec.label);
@@ -304,5 +312,15 @@ export class PaxelProvider implements ShippingProvider {
       }
     })();
     return { provider: this.name, trackingNumber, status, history: [] };
+  }
+}
+
+/** Host + path of a request URL for logs: never the query string or credentials. */
+function safeEndpoint(url: string): string {
+  try {
+    const u = new URL(url);
+    return `${u.host}${u.pathname}`;
+  } catch {
+    return '(invalid url)';
   }
 }

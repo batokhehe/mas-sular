@@ -91,7 +91,9 @@ describe('Product physical attributes — validation', () => {
 // ==================================================== Paxel origin config ====
 
 function config(env: Record<string, string | undefined>) {
-  return loadShippingConfig({ PAXEL_ENABLED: 'true', PAXEL_API_KEY: 'k', PAXEL_API_SECRET: 's', PAXEL_DEFAULT_DIMENSION: '30x35x20', ...env } as NodeJS.ProcessEnv);
+  // An enabled Paxel has no default endpoint any more (Phase 2 environment guard),
+  // so the fixture names the sandbox one explicitly.
+  return loadShippingConfig({ PAXEL_ENABLED: 'true', PAXEL_BASE_URL: 'https://stage-commerce-api.paxel.co/v1', PAXEL_API_KEY: 'k', PAXEL_API_SECRET: 's', PAXEL_DEFAULT_DIMENSION: '30x35x20', ...env } as NodeJS.ProcessEnv);
 }
 
 describe('PAXEL_ORIGIN_PHONE', () => {

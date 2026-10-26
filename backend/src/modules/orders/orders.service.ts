@@ -5,6 +5,7 @@ import { IdempotencyService, SupersededError } from '../../infrastructure/idempo
 import { PaymentUploadTokenService } from '../payments/payment-upload-token.service';
 import { PaymentUniqueCodeService } from '../payments/payment-unique-code.service';
 import { ShippingService } from '../shipping/shipping.service';
+import { CheckoutPickupSchedule, PickupScheduleService } from '../shipping/pickup-schedule.service';
 import { ShippingQuote, ShippingRateRequest } from '../shipping/domain/shipping-provider.interface';
 import { selectPaxelBox } from '../shipping/domain/paxel-box';
 import { DeliveryCoverageService } from '../delivery-coverage/delivery-coverage.service';
@@ -111,6 +112,9 @@ export class OrdersService {
     // PAYMENT_SERVICE_FEE_ENABLED. Optional so positional test construction keeps
     // working; absent -> read from the environment (default: merchant absorbs).
     @Optional() @Inject(PAYMENT_SERVICE_FEE_CONFIG) private readonly feeConfig?: PaymentServiceFeeConfig,
+    // The shop pickup rule, read-only, for the checkout notice. Optional so positional
+    // test construction keeps working; absent -> options carry no pickupSchedule.
+    @Optional() private readonly pickupSchedule?: PickupScheduleService,
   ) {}
 
   /** The channel's pass-through switch: PAYMENT_FEE_<channel>_ENABLED, else PAYMENT_SERVICE_FEE_ENABLED. */
@@ -358,8 +362,18 @@ export class OrdersService {
     return v === null || v === undefined ? undefined : Number(v);
   }
 
-  /** Shipping services available for a cart + address (after the coverage gate). */
-  async getShippingOptions(userId: string, dto: ShippingOptionsDto): Promise<ShippingQuote[]> {
+  /**
+   * Shipping services available for a cart + address (after the coverage gate).
+   *
+   * Each option also carries `pickupSchedule`: the shop pickup rule evaluated NOW,
+   * as an indication for the checkout notice. The courier is booked later from the
+   * real `payment.verifiedAt`, so the storefront words it conditionally. The quote
+   * itself (price, service, courier ETA) is untouched.
+   */
+  async getShippingOptions(
+    userId: string,
+    dto: ShippingOptionsDto,
+  ): Promise<Array<ShippingQuote & { pickupSchedule?: CheckoutPickupSchedule }>> {
     const address = await this.assertAddress(userId, dto.address_id);
     const items = this.normalizeItems(dto.items);
     const { products } = await this.getCartPricing(items);
@@ -367,7 +381,10 @@ export class OrdersService {
     await this.resolveCoverage(address);
     const { request, quotes } = await this.resolveOutletRequest(address, items, this.getShippingWeightGram(items, products));
     // Allocation already priced the chosen outlet; legacy path quotes on demand.
-    return quotes ?? this.shipping.getQuotes(request);
+    const options = quotes ?? (await this.shipping.getQuotes(request));
+    if (!this.pickupSchedule) return options;
+    const pickupSchedule = this.pickupSchedule.forReference(new Date());
+    return options.map((option) => ({ ...option, pickupSchedule }));
   }
 
   private normalizeItems(items: CheckoutItemDto[]): NormalizedCheckoutItem[] {

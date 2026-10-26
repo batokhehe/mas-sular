@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { JneDestinationResolver } from './infrastructure/jne-destination.resolver';
 import { JneProvider } from './infrastructure/providers/jne.provider';
 import { PaxelProvider } from './infrastructure/providers/paxel.provider';
+import { PickupScheduleService } from './pickup-schedule.service';
 import { ShippingController } from './presentation/shipping.controller';
 import { ShippingService } from './shipping.service';
 import { SHIPPING_PROVIDERS, ShippingProviderFactory } from './shipping-provider.factory';
@@ -36,7 +37,10 @@ import { SHIPPING_CONFIG, assertShippingConfigured, loadShippingConfig } from '.
     },
     ShippingProviderFactory,
     ShippingService,
+    // Read-only view of the shop pickup rule for checkout (same SHIPPING_CONFIG
+    // policy the booking path books with).
+    PickupScheduleService,
   ],
-  exports: [ShippingService],
+  exports: [ShippingService, PickupScheduleService],
 })
 export class ShippingModule {}

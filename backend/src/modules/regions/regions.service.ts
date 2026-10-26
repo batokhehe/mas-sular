@@ -30,9 +30,15 @@ export class RegionsService {
     return isActive === false ? false : true;
   }
 
+  /**
+   * Case-insensitive: names are stored in title case ("Kota Bandung") and the
+   * storefront sends the customer's text as typed, so a plain `contains`
+   * (PostgreSQL LIKE) found nothing for "bandung". `mode: 'insensitive'` makes
+   * Prisma emit ILIKE; the stored data is never normalised or rewritten.
+   */
   private searchFilter(search?: string): Prisma.StringFilter | undefined {
     const term = search?.trim();
-    return term ? { contains: term } : undefined;
+    return term ? { contains: term, mode: 'insensitive' } : undefined;
   }
 
   listProvinces(query: ListProvincesQueryDto) {
