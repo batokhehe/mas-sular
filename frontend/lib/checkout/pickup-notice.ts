@@ -41,8 +41,8 @@ export function pickupNotice(options: readonly ShippingOption[]): string | null 
   switch (schedule.reason) {
     case 'MONDAY_AFTER_FRIDAY_CUTOFF':
       return (
-        `Pesanan yang pembayarannya terverifikasi setelah pukul ${idTime(schedule.cutoffTime)} ` +
-        `${zoneLabel(schedule.timeZone)} pada hari Jumat dijadwalkan untuk diserahkan kepada kurir pada hari Senin.`
+        `Pesanan yang pembayarannya terverifikasi pukul ${idTime(schedule.cutoffTime)} ` +
+        `${zoneLabel(schedule.timeZone)} atau setelahnya pada hari Jumat dijadwalkan untuk diserahkan kepada kurir pada hari Senin.`
       )
     case 'MONDAY_AFTER_WEEKEND':
       return 'Pesanan yang pembayarannya terverifikasi pada akhir pekan dijadwalkan untuk diserahkan kepada kurir pada hari Senin.'

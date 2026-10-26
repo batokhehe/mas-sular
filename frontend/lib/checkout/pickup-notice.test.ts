@@ -20,7 +20,7 @@ test('Friday at/after the cut-off: Monday, worded around PAYMENT verification at
   const text = pickupNotice([opt({ pickupSchedule: schedule('MONDAY_AFTER_FRIDAY_CUTOFF') })])
   assert.equal(
     text,
-    'Pesanan yang pembayarannya terverifikasi setelah pukul 15.00 WIB pada hari Jumat dijadwalkan untuk diserahkan kepada kurir pada hari Senin.',
+    'Pesanan yang pembayarannya terverifikasi pukul 15.00 WIB atau setelahnya pada hari Jumat dijadwalkan untuk diserahkan kepada kurir pada hari Senin.',
   )
 })
 

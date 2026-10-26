@@ -488,9 +488,9 @@ function isTestDoubleHost(hostname: string): boolean {
  *     sandbox host or a test host - staging cannot reach a production endpoint by
  *     forgetting one variable, and production cannot run as "sandbox" by accident.
  *
- * Credentials cannot be told apart here (the application sees one set); the
- * deployment preflight compares them against the other environment's. Nothing in
- * any message below is a credential: only the variable names and the HOST.
+ * Credentials cannot be told apart here (the application sees one set); comparing
+ * them against the other environment's is an operational check outside this code.
+ * Nothing in any message below is a credential: only the variable names and the HOST.
  * Nothing infers the environment from the URL or NODE_ENV.
  */
 export function assertPaxelEnvironment(config: PaxelProviderConfig): void {
