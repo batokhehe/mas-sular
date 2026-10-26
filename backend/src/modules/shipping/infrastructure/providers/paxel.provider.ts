@@ -291,6 +291,9 @@ export class PaxelProvider implements ShippingProvider {
     if (!this.cfg.enabled) {
       return { provider: this.name, trackingNumber, status: 'UNKNOWN', history: [] };
     }
+    // Same boundary as getRates and every fulfillment call: never send a tracking
+    // request (with the API key) to an endpoint that does not match the tenant.
+    assertPaxelEnvironment(this.cfg);
     const { text } = await executeShippingRequest({
       http: this.http,
       url: `${this.cfg.baseUrl}${TRACK_PATH}/${encodeURIComponent(trackingNumber)}`,
