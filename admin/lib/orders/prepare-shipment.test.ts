@@ -62,6 +62,6 @@ test('empty selection has no services', () => {
 test('the module exposes no way to choose or send a service', async () => {
   // The override is withdrawn: nothing here may hand the panel a value to
   // submit, or a future change could quietly reinstate the mismatch.
-  const module = await import('./prepare-shipment.ts');
-  assert.deepEqual(Object.keys(module).sort(), ['distinctServices', 'serviceLabel']);
+  const exported = await import('./prepare-shipment.ts');
+  assert.deepEqual(Object.keys(exported).sort(), ['distinctServices', 'serviceLabel']);
 });
