@@ -178,7 +178,7 @@ Tamper detection is **VERIFIED**: a single flipped byte fails decryption / the m
 
 ## 8. PostgreSQL restore
 
-### 8.1 Restore drill — **VERIFIED** (safe on production at any time)
+### 8.1 Restore drill — restore path **VERIFIED**; tmpfs / no-volume isolation **NOT YET VERIFIED on the production Docker daemon**
 
 `scripts/backup/restore-drill.sh` decrypts an artifact (checking the manifest
 checksums first), restores it into a **disposable PostgreSQL 16 container with no
@@ -192,6 +192,65 @@ sudo BACKUP_KEY_FILE=/etc/mas-sular/backup.key bash scripts/backup/restore-drill
 # Expect: DRILL_TABLES=<n>  DRILL_MIGRATIONS_APPLIED=<number of migrations>  DRILL_ROWS_Order=...
 # Optional: DRILL_EXTRA_SQL='select max("createdAt") from "Order"'   (newest order in the backup)
 ```
+
+The restored database is plaintext customer data, so the drill is designed to keep it
+out of Docker volumes and off the disk. PGDATA is a **tmpfs** (RAM) inside the drill container, the container runs
+with `--rm`, and cleanup removes it with `docker rm -f -v`. Cleanup only targets the
+container that carries this run's random `id.baksomassular.restore-drill` label. A
+pre-existing container with the same name makes the drill refuse to run. Cleanup also
+runs on failure and on INT/TERM/HUP; an interrupted drill exits 130/143/129.
+
+**Resources.** These defaults suit a 1 vCPU / 3.8 GiB host whose containers' limits are
+already overcommitted:
+
+| Variable | Default | Why |
+|---|---|---|
+| `DRILL_MEMORY_MB` | `768` | Container RAM cap, with swap disabled (`--memory-swap` equals it). tmpfs pages count against this cap, which stops plaintext pages from reaching the swap file. |
+| `DRILL_TMPFS_MB` | `448` | PGDATA size cap. It must be ≤ `DRILL_MEMORY_MB − 320`, so a growing database fails with a clean `No space left` before it hits an OOM kill. |
+| `DRILL_CPUS` | `0.5` | Leaves half the vCPU to the running stacks. |
+| `DRILL_MIN_HOST_AVAILABLE_MB` | memory + 512 | Read from `MemAvailable` at start. The drill refuses to start below it. `0` **disables** this check, so the drill starts however little memory the host has left. Use `0` only for the offline test or a deliberate operator override. |
+
+The drill also runs the server with `shared_buffers=64MB`, `max_wal_size=128MB`,
+`autovacuum=off`, no parallel maintenance workers, `--pids-limit 128`, and
+`--oom-score-adj 500`. That score makes the host OOM killer strongly prefer the drill
+over the application, but the choice also depends on memory use, so it is not
+guaranteed. If the drill outgrows its tmpfs or memory cap, the failure stays inside the
+drill container. The host risk is bounded but not zero: the drill can still take up to
+`DRILL_MEMORY_MB` of host RAM. The headroom check is a snapshot taken at start, so if
+other services grow during the drill, the host can come under memory pressure or swap
+the running stacks.
+
+Resource inputs must be plain positive decimals (`DRILL_CPUS` > 0; whole MiB without a
+leading zero). The drill rejects `0` before decrypting anything or calling Docker,
+because `--cpus 0` and tmpfs `size=0` would mean *unlimited*.
+
+The drill prints `DRILL_DATA_MB`. When that reaches about half of `DRILL_TMPFS_MB`,
+raise both caps together, keeping memory ≥ tmpfs + 320, and only if the host has room.
+
+The offline test `bash scripts/backup/test-restore-drill-cleanup.sh` checks the
+isolation, caps, input validation, and cleanup paths with fake `docker`/`gpg`. It starts
+no container. It only checks the arguments the drill passes to Docker, not what the
+daemon does with them.
+
+**Not yet verified on the production daemon.** Three behaviours have only been
+reasoned about and tested offline: Docker creating no anonymous volume for the image's
+`VOLUME` path when a tmpfs covers it, the entrypoint initialising PGDATA on that tmpfs,
+and start-up fitting the CPU cap. The first real drill on each host must prove them:
+
+```bash
+docker volume ls -q --filter dangling=true | sort > /tmp/drill-vols-before
+docker ps -aq --no-trunc | sort > /tmp/drill-ctrs-before
+# ... run the drill ...
+docker volume ls -q --filter dangling=true | sort > /tmp/drill-vols-after
+docker ps -aq --no-trunc | sort > /tmp/drill-ctrs-after
+comm -13 /tmp/drill-vols-before /tmp/drill-vols-after   # must print nothing (no new volume)
+comm -13 /tmp/drill-ctrs-before /tmp/drill-ctrs-after   # must print nothing (no leftover container)
+docker ps -aq --filter label=id.baksomassular.restore-drill   # must print nothing
+```
+
+If any of these prints something, do **not** delete it blindly. Record it, then treat a
+new volume as holding plaintext customer data and remove exactly that volume, with
+approval. Until this check has passed once, treat the isolation as unproven.
 
 ### 8.2 Restoring the production database — **MANUAL, DESTRUCTIVE** (not drilled on a VPS)
 
