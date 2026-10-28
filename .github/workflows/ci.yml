@@ -16,5 +16,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # pnpm 10 skips dependency build scripts, so @prisma/client is not generated on install.
+      - run: pnpm --filter backend prisma:generate
       - run: pnpm lint
       - run: pnpm --filter backend test
