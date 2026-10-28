@@ -453,10 +453,19 @@ export function isJneSandboxUrl(url: string): boolean {
   return JNE_SANDBOX_HOSTS.includes(hostOf(url).toLowerCase());
 }
 
+/**
+ * Lower-cased hostname without the DNS root dot: `stage-commerce-api.paxel.co.`
+ * resolves to the same server as `stage-commerce-api.paxel.co`, so the guard must
+ * not treat it as a different host.
+ */
+function normalizedHostname(url: URL): string {
+  return url.hostname.toLowerCase().replace(/\.$/, '');
+}
+
 /** True when `url` addresses Paxel's known non-production host. */
 export function isPaxelSandboxUrl(url: string): boolean {
   try {
-    return PAXEL_SANDBOX_HOSTS.includes(new URL(url).hostname.toLowerCase());
+    return PAXEL_SANDBOX_HOSTS.includes(normalizedHostname(new URL(url)));
   } catch {
     return false;
   }
@@ -467,7 +476,7 @@ export function isPaxelSandboxUrl(url: string): boolean {
  * (`.test`, `.invalid`, `.example`, `.localhost`). Unit and e2e doubles use these.
  */
 function isTestDoubleHost(hostname: string): boolean {
-  const h = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  const h = hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
   return (
     h === 'localhost' ||
     h === '127.0.0.1' ||
@@ -513,7 +522,16 @@ export function assertPaxelEnvironment(config: PaxelProviderConfig): void {
   } catch {
     throw new Error('PAXEL_BASE_URL is not a valid absolute URL');
   }
-  const host = url.hostname.toLowerCase();
+  // Every request URL is `${baseUrl}${path}`: a query string or fragment would swallow
+  // the path, and credentials in the URL would ride along on every call. The value is
+  // not echoed - it is exactly what might hold a secret.
+  if (url.username || url.password || url.search || url.hash) {
+    throw new Error(
+      'PAXEL_BASE_URL must be scheme, host and path prefix only (e.g. https://<host>/v1): ' +
+        'no credentials, query string or fragment.',
+    );
+  }
+  const host = normalizedHostname(url);
 
   if (environment === 'production') {
     if (isPaxelSandboxUrl(config.baseUrl)) {
