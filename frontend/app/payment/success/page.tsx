@@ -15,6 +15,9 @@ const SUPPORT_URL = process.env.NEXT_PUBLIC_SUPPORT_URL || 'mailto:cs@baksomassu
 function SuccessInner() {
   const router = useRouter()
   const params = useSearchParams()
+  // Hooks run before the early return below, so their order never depends on the query.
+  const [showOrders, setShowOrders] = useState(false)
+  useEffect(() => setShowOrders(hasCustomerSession()), [])
 
   // Midtrans's Finish Redirect URL points at this same route, so the two landings
   // share it. A Midtrans redirect carries `order_id` / `transaction_status` /
@@ -27,9 +30,6 @@ function SuccessInner() {
   // Order number is a human-facing identifier (shown on orders + WhatsApp) — NOT the
   // upload token. Passed via query on redirect; absent on a direct visit.
   const orderNumber = params.get('order')
-
-  const [showOrders, setShowOrders] = useState(false)
-  useEffect(() => setShowOrders(hasCustomerSession()), [])
 
   return (
     <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-4 py-8">

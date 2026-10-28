@@ -260,7 +260,12 @@ describe('the template resolves and renders through the existing abstraction', (
   });
 
   it('leaves the existing uploadToken-driven button untouched', () => {
-    const registry = registryWith(TEMPLATE_ID);
+    // order.transfer is the customer invoice: QONTAK_INVOICE_TEMPLATE_ID, not the order.new id.
+    const prev = process.env.QONTAK_INVOICE_TEMPLATE_ID;
+    process.env.QONTAK_INVOICE_TEMPLATE_ID = 'tpl-invoice';
+    const registry = new TemplateRegistry();
+    if (prev === undefined) delete process.env.QONTAK_INVOICE_TEMPLATE_ID;
+    else process.env.QONTAK_INVOICE_TEMPLATE_ID = prev;
     const transfer = registry.resolve(NotificationChannel.WHATSAPP, 'order.transfer');
 
     // No buttonSource ⇒ the provider still falls back to uploadToken.

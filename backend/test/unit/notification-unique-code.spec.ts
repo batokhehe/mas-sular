@@ -48,16 +48,16 @@ describe('NotificationMessageBuilder — order.transfer omits the unique code', 
 describe('TemplateRegistry — WhatsApp order.transfer parameter count', () => {
   it('declares exactly 6 body params and no unique_code (matches the builder)', () => {
     // Provider template id must be present for resolve() to succeed.
-    const prev = process.env.QONTAK_ORDER_TEMPLATE_ID;
-    process.env.QONTAK_ORDER_TEMPLATE_ID = 'wa-order-tmpl';
+    const prev = process.env.QONTAK_INVOICE_TEMPLATE_ID;
+    process.env.QONTAK_INVOICE_TEMPLATE_ID = 'wa-order-tmpl';
     try {
       const registry = new TemplateRegistry();
       const descriptor = registry.resolve(NotificationChannel.WHATSAPP, 'order.transfer');
       expect(descriptor.body).toHaveLength(6);
       expect(descriptor.body?.some((p) => p.source === 'uniqueCode')).toBe(false);
     } finally {
-      if (prev === undefined) delete process.env.QONTAK_ORDER_TEMPLATE_ID;
-      else process.env.QONTAK_ORDER_TEMPLATE_ID = prev;
+      if (prev === undefined) delete process.env.QONTAK_INVOICE_TEMPLATE_ID;
+      else process.env.QONTAK_INVOICE_TEMPLATE_ID = prev;
     }
   });
 });

@@ -43,7 +43,7 @@ function okRes(id = 'q-1') {
 
 describe('QontakWhatsAppProvider', () => {
   beforeAll(() => {
-    process.env.QONTAK_ORDER_TEMPLATE_ID = 'tpl-order';
+    process.env.QONTAK_INVOICE_TEMPLATE_ID = 'tpl-order';
     process.env.QONTAK_COD_TEMPLATE_ID = 'tpl-cod';
   });
 
