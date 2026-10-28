@@ -193,6 +193,35 @@ sudo BACKUP_KEY_FILE=/etc/mas-sular/backup.key bash scripts/backup/restore-drill
 # Optional: DRILL_EXTRA_SQL='select max("createdAt") from "Order"'   (newest order in the backup)
 ```
 
+The restored database is plaintext customer data, so it never reaches a Docker volume
+or the disk. PGDATA is a **tmpfs** (RAM) inside the drill container, the container runs
+with `--rm`, and cleanup removes it with `docker rm -f -v`. Cleanup only targets the
+container that carries this run's random `id.baksomassular.restore-drill` label. A
+pre-existing container with the same name makes the drill refuse to run. Cleanup also
+runs on failure and on INT/TERM/HUP; an interrupted drill exits 130/143/129.
+
+**Resources.** These defaults suit a 1 vCPU / 3.8 GiB host whose containers' limits are
+already overcommitted:
+
+| Variable | Default | Why |
+|---|---|---|
+| `DRILL_MEMORY_MB` | `768` | Container RAM cap, with swap disabled (`--memory-swap` equals it). tmpfs pages count against this cap, which stops plaintext pages from reaching the swap file. |
+| `DRILL_TMPFS_MB` | `448` | PGDATA size cap. It must be ≤ `DRILL_MEMORY_MB − 320`, so a growing database fails with a clean `No space left` before it hits an OOM kill. |
+| `DRILL_CPUS` | `0.5` | Leaves half the vCPU to the running stacks. |
+| `DRILL_MIN_HOST_AVAILABLE_MB` | memory + 512 | Read from `MemAvailable` at start. The drill refuses to start below it. |
+
+The drill also runs the server with `shared_buffers=64MB`, `max_wal_size=128MB`,
+`autovacuum=off`, no parallel maintenance workers, `--pids-limit 128`, and
+`--oom-score-adj 500`, so the host OOM killer picks the drill before the application.
+If the drill runs out of memory or tmpfs space, the drill fails and production is
+untouched.
+
+The drill prints `DRILL_DATA_MB`. When that reaches about half of `DRILL_TMPFS_MB`,
+raise both caps together, keeping memory ≥ tmpfs + 320, and only if the host has room.
+
+The offline test `bash scripts/backup/test-restore-drill-cleanup.sh` checks the
+isolation, caps, and cleanup paths with fake `docker`/`gpg`. It starts no container.
+
 ### 8.2 Restoring the production database — **MANUAL, DESTRUCTIVE** (not drilled on a VPS)
 
 > **Only after 8.1 has passed on the SAME artifact.** This replaces the live database;
