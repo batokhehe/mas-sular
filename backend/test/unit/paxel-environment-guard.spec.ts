@@ -190,6 +190,77 @@ describe('PAXEL_ENVIRONMENT', () => {
   });
 });
 
+describe('the API path prefix', () => {
+  // Paths are appended bare (`/rates/city`, `/shipments`), so a real endpoint must carry
+  // its version prefix. Only its PRESENCE is enforced: production's own prefix has not
+  // been confirmed against Paxel, so no particular value (such as /v1) is assumed.
+  const BARE_PROD = 'https://production-api.courier-vendor.id';
+  const PREFIX_ERROR = /PAXEL_BASE_URL must include the API path prefix/;
+
+  it.each([BARE_PROD, `${BARE_PROD}/`, `${BARE_PROD}///`])('production refuses a bare host: %s', (url) => {
+    expect(boot({ PAXEL_ENVIRONMENT: 'production', PAXEL_BASE_URL: url })).toThrow(PREFIX_ERROR);
+  });
+
+  it('production refuses a root path even when the config bypasses the loader trim', () => {
+    const cfg = { ...load({ PAXEL_ENVIRONMENT: 'production' }).paxel, baseUrl: `${BARE_PROD}/` };
+    expect(() => assertPaxelEnvironment(cfg)).toThrow(PREFIX_ERROR);
+  });
+
+  it.each([
+    'https://stage-commerce-api.paxel.co',
+    'https://stage-commerce-api.paxel.co/',
+    'https://STAGE-COMMERCE-API.PAXEL.CO',
+    'https://stage-commerce-api.paxel.co.',
+  ])('the known sandbox host refuses a bare host: %s', (url) => {
+    expect(boot({ PAXEL_ENVIRONMENT: 'sandbox', PAXEL_BASE_URL: url })).toThrow(PREFIX_ERROR);
+    expect(boot({ PAXEL_BASE_URL: url })).toThrow(PREFIX_ERROR);
+  });
+
+  it('the known sandbox host with its /v1 prefix is accepted', () => {
+    expect(boot({ PAXEL_ENVIRONMENT: 'sandbox', PAXEL_BASE_URL: 'https://stage-commerce-api.paxel.co/v1' })).not.toThrow();
+  });
+
+  it.each([
+    'https://paxel.invalid',
+    'https://paxel.test/',
+    'https://paxel.example',
+    'https://paxel.localhost',
+    'http://localhost:4010',
+    'http://127.0.0.1:4010/',
+  ])('a test double keeps its bare host: %s', (url) => {
+    expect(boot({ PAXEL_BASE_URL: url })).not.toThrow();
+  });
+
+  it.each([`${PROD_LIKE}/`, `${PROD_LIKE}///`])('a trailing slash after the prefix is trimmed and valid: %s', (url) => {
+    expect(load({ PAXEL_ENVIRONMENT: 'production', PAXEL_BASE_URL: url }).paxel.baseUrl).toBe(PROD_LIKE);
+    expect(boot({ PAXEL_ENVIRONMENT: 'production', PAXEL_BASE_URL: url })).not.toThrow();
+  });
+
+  it.each(['/v2', '/api', '/commerce/v1', '/api/v1'])('any non-root prefix is accepted, not only /v1: %s', (path) => {
+    expect(boot({ PAXEL_ENVIRONMENT: 'production', PAXEL_BASE_URL: `${BARE_PROD}${path}` })).not.toThrow();
+  });
+
+  it('the refusal names the variable and the rule, never the endpoint', () => {
+    let message = '';
+    try {
+      boot({ PAXEL_ENVIRONMENT: 'production', PAXEL_BASE_URL: BARE_PROD })();
+    } catch (err) {
+      message = err instanceof Error ? err.message : String(err);
+    }
+    expect(message).toMatch(PREFIX_ERROR);
+    expect(message).not.toContain('production-api.courier-vendor.id');
+    expect(message).not.toContain(SECRET_KEY);
+    expect(message).not.toContain(SECRET);
+  });
+
+  it.each(['', BARE_PROD, 'https://stage-commerce-api.paxel.co'])(
+    'a disabled Paxel boots with endpoint %p',
+    (url) => {
+      expect(boot({ PAXEL_ENABLED: 'false', PAXEL_ENVIRONMENT: 'production', PAXEL_BASE_URL: url })).not.toThrow();
+    },
+  );
+});
+
 describe('the known sandbox host', () => {
   it('is exactly the staging endpoint host', () => {
     expect(PAXEL_SANDBOX_HOSTS).toEqual(['stage-commerce-api.paxel.co']);
@@ -212,6 +283,10 @@ describe('no credential ever reaches an error message', () => {
     { PAXEL_ENVIRONMENT: 'production', PAXEL_BASE_URL: `https://commerce-api.paxel.example/v1?api_key=${SECRET_KEY}` },
     { PAXEL_BASE_URL: `https://api.paxel.co/v1#${SECRET}` },
     { PAXEL_BASE_URL: `http//${SECRET_KEY}` },
+    // A bare host carrying a credential, query or fragment: refused, never echoed.
+    { PAXEL_ENVIRONMENT: 'production', PAXEL_BASE_URL: `https://merchant:${SECRET}@production-api.courier-vendor.id` },
+    { PAXEL_ENVIRONMENT: 'production', PAXEL_BASE_URL: `https://production-api.courier-vendor.id?key=${SECRET_KEY}` },
+    { PAXEL_ENVIRONMENT: 'production', PAXEL_BASE_URL: `https://production-api.courier-vendor.id#${SECRET}` },
   ])('%p', (extra) => {
     let message = '';
     try {

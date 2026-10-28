@@ -495,7 +495,8 @@ function isTestDoubleHost(hostname: string): boolean {
  *   - production must use https and may not use the known sandbox host or a test host;
  *   - sandbox (the default when PAXEL_ENVIRONMENT is unset) may use ONLY the known
  *     sandbox host or a test host - staging cannot reach a production endpoint by
- *     forgetting one variable, and production cannot run as "sandbox" by accident.
+ *     forgetting one variable, and production cannot run as "sandbox" by accident;
+ *   - a real endpoint (production, or the sandbox host) must carry an API path prefix.
  *
  * Credentials cannot be told apart here (the application sees one set); comparing
  * them against the other environment's is an operational check outside this code.
@@ -545,6 +546,7 @@ export function assertPaxelEnvironment(config: PaxelProviderConfig): void {
     if (url.protocol !== 'https:') {
       throw new Error('PAXEL_BASE_URL must use https when PAXEL_ENVIRONMENT=production.');
     }
+    assertPaxelPathPrefix(url);
     return;
   }
 
@@ -553,6 +555,24 @@ export function assertPaxelEnvironment(config: PaxelProviderConfig): void {
       `PAXEL_ENVIRONMENT=sandbox${config.environment ? '' : ' (the default when unset)'} but PAXEL_BASE_URL ` +
         `(${host}) is not the known Paxel sandbox host (${PAXEL_SANDBOX_HOSTS.join(', ')}). ` +
         'Set PAXEL_ENVIRONMENT=production to use a production endpoint.',
+    );
+  }
+  // Test doubles keep their bare hosts: they serve whatever paths the test wires up.
+  if (isPaxelSandboxUrl(config.baseUrl)) assertPaxelPathPrefix(url);
+}
+
+/**
+ * Every Paxel path is appended bare (`/rates/city`, `/shipments`): the providers rely
+ * on the base URL carrying the API version prefix, as the Postman collection's does
+ * (`/v1`). A bare host is how production quotes ended up at `https://api.paxel.co/rates/city`
+ * and answered 404. Only the PRESENCE of a prefix is enforced - production's own prefix
+ * has not been confirmed against Paxel, so no particular value is assumed.
+ */
+function assertPaxelPathPrefix(url: URL): void {
+  if (url.pathname === '/' || url.pathname === '') {
+    throw new Error(
+      'PAXEL_BASE_URL must include the API path prefix (e.g. /v1): every Paxel path is appended to it, ' +
+        'so a bare host sends requests to the wrong endpoint.',
     );
   }
 }
