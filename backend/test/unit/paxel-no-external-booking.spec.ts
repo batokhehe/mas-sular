@@ -82,6 +82,8 @@ describe('a booking or cancellation is refused before any HTTP request', () => {
     ['sandbox (unset) points at a non-sandbox host', { baseUrl: PROD_LIKE }, /PAXEL_ENVIRONMENT=sandbox/],
     ['production points at the sandbox host', { environment: 'production', baseUrl: SANDBOX }, /known Paxel sandbox host/],
     ['production uses plain http', { environment: 'production', baseUrl: PROD_LIKE.replace('https:', 'http:') }, /must use https/],
+    ['production has no API path prefix', { environment: 'production', baseUrl: 'https://production-api.courier-vendor.id' }, /must include the API path prefix/],
+    ['the sandbox host has no API path prefix', { baseUrl: 'https://stage-commerce-api.paxel.co' }, /must include the API path prefix/],
     ['the endpoint embeds a credential', { baseUrl: `https://m:${API_SECRET}@stage-commerce-api.paxel.co/v1` }, /path prefix only/],
     ['the environment is unknown', { environment: 'prod' as never, baseUrl: PROD_LIKE }, /must be "sandbox" or "production"/],
   ] as const)('when %s', async (_why, paxel, expected) => {
