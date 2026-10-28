@@ -70,6 +70,34 @@ describe('there is no default Paxel endpoint', () => {
       'https://stage-commerce-api.paxel.co/v1',
     );
   });
+
+  // Every request URL is `${baseUrl}${path}`: a query or fragment swallows the path and
+  // credentials would travel on every call. Refused in BOTH environments.
+  it.each([
+    ['credentials', (base: string) => base.replace('https://', 'https://user:pass@')],
+    ['a query string', (base: string) => `${base}?tenant=x`],
+    ['a fragment', (base: string) => `${base}#rates`],
+  ])('an endpoint with %s refuses to boot', (_what, withExtra) => {
+    expect(boot({ PAXEL_BASE_URL: withExtra('https://stage-commerce-api.paxel.co/v1') })).toThrow(
+      /scheme, host and path prefix only/,
+    );
+    expect(boot({ PAXEL_ENVIRONMENT: 'production', PAXEL_BASE_URL: withExtra(PROD_LIKE) })).toThrow(
+      /scheme, host and path prefix only/,
+    );
+  });
+});
+
+describe('PAXEL_ENABLED', () => {
+  it.each(['true', '1'])('%p enables Paxel', (value) => {
+    expect(load({ PAXEL_ENABLED: value }).paxel.enabled).toBe(true);
+  });
+
+  // Anything else is OFF - a typo can never switch a courier on.
+  it.each(['TRUE', 'True', 'yes', 'on', 'enabled', 'flase', ' true', ''])('%p leaves Paxel disabled', (value) => {
+    expect(load({ PAXEL_ENABLED: value }).paxel.enabled).toBe(false);
+    // ...and a disabled courier boots whatever its endpoint says.
+    expect(boot({ PAXEL_ENABLED: value, PAXEL_BASE_URL: 'not a url', PAXEL_ENVIRONMENT: 'nope' })).not.toThrow();
+  });
 });
 
 describe('PAXEL_ENVIRONMENT', () => {
@@ -84,6 +112,18 @@ describe('PAXEL_ENVIRONMENT', () => {
     );
   });
 
+  // Exact and case-sensitive: "Production" is refused rather than guessed at.
+  it.each(['Production', 'PRODUCTION', 'live', 'staging'])('rejects %p', (value) => {
+    expect(boot({ PAXEL_ENVIRONMENT: value, PAXEL_BASE_URL: PROD_LIKE })).toThrow(
+      /PAXEL_ENVIRONMENT must be "sandbox" or "production"/,
+    );
+  });
+
+  it('surrounding whitespace is trimmed, as an env file may leave it', () => {
+    expect(load({ PAXEL_ENVIRONMENT: ' production ', PAXEL_BASE_URL: PROD_LIKE }).paxel.environment).toBe('production');
+    expect(boot({ PAXEL_ENVIRONMENT: ' production ', PAXEL_BASE_URL: PROD_LIKE })).not.toThrow();
+  });
+
   describe('sandbox', () => {
     it.each([
       'https://stage-commerce-api.paxel.co/v1',
@@ -92,6 +132,7 @@ describe('PAXEL_ENVIRONMENT', () => {
       'https://paxel.invalid',
       'http://localhost:4010/v1',
       'http://127.0.0.1:4010',
+      'https://stage-commerce-api.paxel.co./v1',
     ])('accepts the known sandbox host or a reserved test host: %s', (url) => {
       expect(boot({ PAXEL_ENVIRONMENT: 'sandbox', PAXEL_BASE_URL: url })).not.toThrow();
     });
@@ -117,7 +158,18 @@ describe('PAXEL_ENVIRONMENT', () => {
       );
     });
 
-    it.each(['https://paxel.test', 'http://localhost:4010'])('refuses a test host: %s', (url) => {
+    // The same server under another spelling: an explicit port, upper case, or the DNS
+    // root dot (`host.` resolves exactly like `host`).
+    it.each([
+      'https://stage-commerce-api.paxel.co:443/v1',
+      'https://stage-commerce-api.paxel.co:8443/v1',
+      'https://STAGE-COMMERCE-API.PAXEL.CO/v1',
+      'https://stage-commerce-api.paxel.co./v1',
+    ])('refuses the known sandbox host spelled %s', (url) => {
+      expect(boot({ PAXEL_ENVIRONMENT: 'production', PAXEL_BASE_URL: url })).toThrow(/known Paxel sandbox host/);
+    });
+
+    it.each(['https://paxel.test', 'http://localhost:4010', 'https://paxel.test.'])('refuses a test host: %s', (url) => {
       expect(boot({ PAXEL_ENVIRONMENT: 'production', PAXEL_BASE_URL: url })).toThrow(/test host/);
     });
 
@@ -155,6 +207,11 @@ describe('no credential ever reaches an error message', () => {
     { PAXEL_ENVIRONMENT: 'production', PAXEL_BASE_URL: 'https://stage-commerce-api.paxel.co/v1' },
     { PAXEL_ENVIRONMENT: 'production', PAXEL_BASE_URL: 'http://commerce-api.paxel.example' },
     { PAXEL_ENVIRONMENT: 'nope', PAXEL_BASE_URL: 'https://paxel.test' },
+    // The endpoint itself carrying a credential: the message must not echo the URL.
+    { PAXEL_BASE_URL: `https://merchant:${SECRET}@stage-commerce-api.paxel.co/v1` },
+    { PAXEL_ENVIRONMENT: 'production', PAXEL_BASE_URL: `https://commerce-api.paxel.example/v1?api_key=${SECRET_KEY}` },
+    { PAXEL_BASE_URL: `https://api.paxel.co/v1#${SECRET}` },
+    { PAXEL_BASE_URL: `http//${SECRET_KEY}` },
   ])('%p', (extra) => {
     let message = '';
     try {
