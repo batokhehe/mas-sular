@@ -21,7 +21,7 @@
 # The manifest is optional but recommended: when given, the artifact AND the
 # decrypted dump must match its checksums before anything is restored.
 # Resource caps (RUNBOOK §8.1): DRILL_MEMORY_MB, DRILL_TMPFS_MB, DRILL_CPUS,
-# DRILL_MIN_HOST_AVAILABLE_MB.
+# DRILL_MIN_HOST_AVAILABLE_MB (0 disables the host-memory headroom check).
 # Prints DRILL_* summary lines; exits non-zero on any failure or interruption.
 #
 set -Eeuo pipefail
@@ -71,13 +71,19 @@ manifest_field() { # manifest_field <section> <key>  -> value (flat JSON written
   ' "$MANIFEST"
 }
 
-[[ "$DRILL_MEMORY_MB" =~ ^[0-9]+$ && "$DRILL_TMPFS_MB" =~ ^[0-9]+$ ]] || fail "DRILL_MEMORY_MB and DRILL_TMPFS_MB must be whole MiB"
-[[ "$DRILL_CPUS" =~ ^[0-9]+(\.[0-9]+)?$ ]] || fail "DRILL_CPUS must be a number of CPUs, e.g. 0.5"
+# Zero would silently lift a cap (Docker --cpus 0 and tmpfs size=0 mean "unlimited"), and a
+# leading zero would be read as octal, so only plain positive decimals are accepted.
+[[ "$DRILL_MEMORY_MB" =~ ^[1-9][0-9]*$ && "$DRILL_TMPFS_MB" =~ ^[1-9][0-9]*$ ]] \
+  || fail "DRILL_MEMORY_MB and DRILL_TMPFS_MB must be positive whole MiB without a leading zero"
+[[ "$DRILL_CPUS" =~ ^([1-9][0-9]*(\.[0-9]+)?|0\.[0-9]*[1-9][0-9]*)$ ]] \
+  || fail "DRILL_CPUS must be a positive number of CPUs, e.g. 0.5"
 # shared_buffers (64MB) + /dev/shm (<=64MB) + server and pg_restore processes need ~320 MiB
 # beside the tmpfs, so a growing database hits ENOSPC (a clean pg_restore error) before OOM.
 (( DRILL_TMPFS_MB + 320 <= DRILL_MEMORY_MB )) || fail "DRILL_MEMORY_MB must be at least DRILL_TMPFS_MB + 320"
 DRILL_MIN_HOST_AVAILABLE_MB="${DRILL_MIN_HOST_AVAILABLE_MB:-$(( DRILL_MEMORY_MB + 512 ))}"
-[[ "$DRILL_MIN_HOST_AVAILABLE_MB" =~ ^[0-9]+$ ]] || fail "DRILL_MIN_HOST_AVAILABLE_MB must be whole MiB"
+# 0 disables the host headroom check (operator override; the offline test uses it).
+[[ "$DRILL_MIN_HOST_AVAILABLE_MB" =~ ^(0|[1-9][0-9]*)$ ]] \
+  || fail "DRILL_MIN_HOST_AVAILABLE_MB must be 0 or positive whole MiB without a leading zero"
 
 [[ -s "$ARTIFACT" ]] || fail "artifact not found or empty: $ARTIFACT"
 [[ -s "$BACKUP_KEY_FILE" ]] || fail "key file not found or empty"

@@ -176,5 +176,40 @@ env PATH="$T/bin:$PATH" DOCKER_HOST="unix://$T/no-docker.sock" FAKE_STATE="$T/ta
 check "artifact checksum mismatch: refused" test "$RC" -ne 0
 check "artifact checksum mismatch: nothing started" never_ran tamper
 
+echo "== 7. resource inputs: zero or malformed values are refused before anything runs"
+untouched() { ! grep -qE '^(gpg|docker) ' "$T/$1/state/calls" 2>/dev/null; }
+# refuse <case> <expected message> VAR=value
+refuse() {
+  local c="$1" msg="$2"; shift 2
+  run_drill "$c" "$@"
+  check "$*: exits non-zero" test "$RC" -ne 0
+  check "$*: validation message, not a shell error" grep -q "ERROR: .*${msg}" "$T/$c/out"
+  check "$*: no docker or gpg call at all" untouched "$c"
+}
+refuse cpus0     'DRILL_CPUS must be a positive number'      DRILL_CPUS=0
+refuse cpus00    'DRILL_CPUS must be a positive number'      DRILL_CPUS=0.0
+refuse cpus000   'DRILL_CPUS must be a positive number'      DRILL_CPUS=0.00
+refuse cpusneg   'DRILL_CPUS must be a positive number'      DRILL_CPUS=-1
+refuse cpusword  'DRILL_CPUS must be a positive number'      DRILL_CPUS=abc
+refuse tmpfs0    'must be positive whole MiB'                DRILL_TMPFS_MB=0
+refuse mem0768   'must be positive whole MiB'                DRILL_MEMORY_MB=0768
+refuse minmem00  'DRILL_MIN_HOST_AVAILABLE_MB must be 0 or'  DRILL_MIN_HOST_AVAILABLE_MB=00
+refuse minmem01  'DRILL_MIN_HOST_AVAILABLE_MB must be 0 or'  DRILL_MIN_HOST_AVAILABLE_MB=0512
+
+echo "== 8. valid resource inputs are accepted unchanged"
+check "defaults (768 MiB / 448 MiB / 0.5 CPU) accepted: see section 1" grep -q -- ' --memory 768m .* --cpus 0.5 ' <<< "$(run_line ok)"
+run_drill cpus025 DRILL_CPUS=0.25
+check "DRILL_CPUS=0.25: exits 0" test "$RC" -eq 0
+check "DRILL_CPUS=0.25: passed to docker as given" grep -q -- ' --cpus 0.25 ' <<< "$(run_line cpus025)"
+run_drill cpus1 DRILL_CPUS=1
+check "DRILL_CPUS=1: exits 0" test "$RC" -eq 0
+run_drill bigger DRILL_MEMORY_MB=1024 DRILL_TMPFS_MB=512
+check "1024/512 MiB: exits 0" test "$RC" -eq 0
+check "1024/512 MiB: passed to docker as given" bash -c 'grep -q -- " --memory 1024m --memory-swap 1024m " <<< "$1" && grep -q "size=512m," <<< "$1"' _ "$(run_line bigger)"
+run_drill minmem1 DRILL_MIN_HOST_AVAILABLE_MB=1
+check "DRILL_MIN_HOST_AVAILABLE_MB=1 (headroom check enforced): exits 0" test "$RC" -eq 0
+check "DRILL_MIN_HOST_AVAILABLE_MB=1: check logged" grep -q 'host memory available: .* (need 1)' "$T/minmem1/out"
+check "DRILL_MIN_HOST_AVAILABLE_MB=0 (used by every case above) disables the check" grep -q '(need 0)' "$T/ok/out"
+
 echo "== result: ${PASS} passed, ${FAILS} failed"
 (( FAILS == 0 ))
