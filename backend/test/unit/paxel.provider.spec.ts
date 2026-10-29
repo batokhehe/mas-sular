@@ -385,9 +385,9 @@ describe('PAXEL_DEFAULT_DIMENSION validation', () => {
 
 describe('PaxelBox integration (PAXELBOX-3)', () => {
   it.each([
-    ['S', '12x48x48'],
-    ['M', '24x48x48'],
-    ['L', '36x48x48'],
+    ['S', '20x20x8'],
+    ['M', '30x22x12'],
+    ['L', '35x30x25'],
     ['XL', '59x48x48'],
   ] as Array<[PaxelBoxSize, string]>)('sends the %s box as dimension "%s", not PAXEL_DEFAULT_DIMENSION', async (paxelBoxSize, expected) => {
     const { provider, calls } = build(config({ dimension: '30x35x20' }));
@@ -439,7 +439,7 @@ describe('PaxelBox integration (PAXELBOX-3)', () => {
     const quotes = await provider.getRates({ ...completeRequest, paxelBoxSize: 'S' });
 
     // The request still carries OUR local box, unaffected by any prior response.
-    for (const call of calls) expect(bodyOf(call).dimension).toBe('12x48x48');
+    for (const call of calls) expect(bodyOf(call).dimension).toBe('20x20x8');
     // okBody() returns fixed_size: "large" regardless of the S box we sent —
     // the provider's answer is exposed as-is, never reconciled with ours.
     for (const quote of quotes) expect(quote.fixedSize).toBe('large');

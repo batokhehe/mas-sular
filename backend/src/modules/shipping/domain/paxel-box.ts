@@ -16,10 +16,9 @@
  * no provider. Deterministic for a given quantity.
  *
  * SCOPE: this module knows the boxes and the rule. It deliberately does NOT
- * produce a Paxel `dimension` request string — the wire format for a 47.5 cm
- * side is unresolved (Paxel documents `dimension` as max:11 characters, and
- * "12x47.5x47.5" is 12), so formatting is left to a later phase rather than
- * guessed at here. The dimensions below are business data only.
+ * produce a Paxel `dimension` request string - that is `paxelBoxRateDimension`
+ * (infrastructure/providers/paxel-box-dimension.ts). The dimensions below are
+ * business data only.
  */
 
 /** Every box Paxel documents, smallest first. Reference data, NOT the selectable set. */
@@ -52,14 +51,16 @@ export interface PaxelBoxSpec {
 }
 
 /**
- * Every box shares a 47.5 x 47.5 cm face and differs only in depth. Kept as
- * separate numeric fields rather than a formatted string so that nothing here
- * depends on the unresolved Paxel dimension wire format.
+ * Outer carton per box, length x width x height in cm. S/M/L are the current
+ * boxes (2026-10): S 20x20x8, M 30x22x12, L 35x30x25. XL keeps its earlier
+ * 59 x 47.5 x 47.5 reference values - it is not selectable and was not part of
+ * that change. Kept as separate numeric fields rather than a formatted string;
+ * `paxelBoxRateDimension` is the one place a Paxel wire value is built.
  */
 const SPECS: Record<PaxelBoxSize, PaxelBoxSpec> = {
-  S: { maxQuantity: 3, lengthCm: 12, widthCm: 47.5, heightCm: 47.5 },
-  M: { maxQuantity: 10, lengthCm: 24, widthCm: 47.5, heightCm: 47.5 },
-  L: { maxQuantity: 20, lengthCm: 36, widthCm: 47.5, heightCm: 47.5 },
+  S: { maxQuantity: 3, lengthCm: 20, widthCm: 20, heightCm: 8 },
+  M: { maxQuantity: 10, lengthCm: 30, widthCm: 22, heightCm: 12 },
+  L: { maxQuantity: 20, lengthCm: 35, widthCm: 30, heightCm: 25 },
   XL: { maxQuantity: null, lengthCm: 59, widthCm: 47.5, heightCm: 47.5 },
 };
 

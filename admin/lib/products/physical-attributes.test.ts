@@ -156,9 +156,10 @@ test('limits match the backend DTO exactly', () => {
   assert.deepEqual(PHYSICAL_LIMITS.heightCm, { min: 1, max: 50, unit: 'cm' });
 });
 
-test('no PaxelBox dimension can ever appear here - these are PRODUCT fields', () => {
-  // PaxelBox is 12/24/36/59 x 47.5 x 47.5 and belongs to the shipment carton,
-  // never to a product. 47.5 is not even an integer, and 59 exceeds the cap.
+test('these are PRODUCT fields - the XL PaxelBox carton values are not valid here', () => {
+  // The PaxelBox is the shipment carton (backend paxel-box.ts), never a product.
+  // XL's reference size 59 x 47.5 x 47.5 cannot be entered: 47.5 is not an
+  // integer, and 59 exceeds the cap.
   assert.notEqual(validatePhysicalField('lengthCm', '59'), null);
   assert.notEqual(validatePhysicalField('widthCm', '47.5'), null);
   assert.notEqual(validatePhysicalField('heightCm', '47.5'), null);

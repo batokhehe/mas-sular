@@ -88,7 +88,7 @@ describe('the selector and the dimension builder agree', () => {
     for (const quantity of [1, 2, 3, 4, 10, 11, 20]) {
       const box = selectPaxelBox(quantity);
       if (box === null) throw new Error(`expected a box for ${quantity}`);
-      expect(paxelBoxRateDimension(box)).toMatch(/^\d+x48x48$/);
+      expect(paxelBoxRateDimension(box)).toBe({ S: '20x20x8', M: '30x22x12', L: '35x30x25', XL: '59x48x48' }[box]);
       expect(box).not.toBe('XL');
     }
     for (const quantity of [21, 22, 50]) {
