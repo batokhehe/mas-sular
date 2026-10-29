@@ -20,3 +20,21 @@ jobs:
       - run: pnpm --filter backend prisma:generate
       - run: pnpm lint
       - run: pnpm --filter backend test
+
+  # Each Docker image installs from its own app directory with that app's lockfile
+  # (`pnpm install --frozen-lockfile`, no workspace), so the root install above cannot
+  # catch an app lockfile that has fallen behind its package.json.
+  app-lockfiles:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [frontend, admin, backend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4   # version comes from packageManager in package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: pnpm install --frozen-lockfile --lockfile-only --ignore-workspace
+        working-directory: ${{ matrix.app }}
