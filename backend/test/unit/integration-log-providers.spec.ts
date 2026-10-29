@@ -480,6 +480,9 @@ describe('Paxel keeps its own operation words', () => {
     expect(created).toBeDefined();
     expect(created).toMatchObject({ provider: IntegrationProvider.PAXEL, orderId: 'order-123', correlationId: 'BMS-20260914-QSVGENC3' });
     expect(JSON.stringify(created)).not.toContain('paxel-secret-key');
+    // Only RATE drops the raw body; a booking keeps its raw capture for the SUPER_ADMIN view.
+    expect(typeof created?.requestBody).toBe('string');
+    expect(created?.requestPayload).toBeUndefined();
   });
 });
 

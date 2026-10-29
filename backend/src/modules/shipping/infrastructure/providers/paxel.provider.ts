@@ -138,6 +138,10 @@ export class PaxelProvider implements ShippingProvider {
     const weight = this.assertWeight(request.weightGram, spec.maxWeightGram, service);
 
     const url = `${this.cfg.baseUrl}${spec.path}`;
+    // PaxelBox drives this whenever the order has one (every real checkout call);
+    // PAXEL_DEFAULT_DIMENSION is the fallback for callers that have not computed a
+    // box (JNE-only paths, legacy tests) - unchanged from before this field existed.
+    const dimension = request.paxelBoxSize ? paxelBoxRateDimension(request.paxelBoxSize) : this.cfg.defaultDimension;
     const { text } = await executeShippingRequest({
       http: this.http,
       url,
@@ -147,17 +151,7 @@ export class PaxelProvider implements ShippingProvider {
           'X-Paxel-API-Key': this.cfg.apiKey ?? '',
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          origin,
-          destination,
-          weight,
-          // PaxelBox drives this whenever the order has one (every real
-          // checkout call); PAXEL_DEFAULT_DIMENSION is the fallback for
-          // callers that have not computed a box (JNE-only paths, legacy
-          // tests) - unchanged from before this field existed.
-          dimension: request.paxelBoxSize ? paxelBoxRateDimension(request.paxelBoxSize) : this.cfg.defaultDimension,
-          service_type: spec.serviceType,
-        }),
+        body: JSON.stringify({ origin, destination, weight, dimension, service_type: spec.serviceType }),
         timeoutMs: this.cfg.timeoutMs,
       },
       maxRetry: this.cfg.maxRetry,
@@ -165,9 +159,22 @@ export class PaxelProvider implements ShippingProvider {
       // City/district only - never the street address, which is customer data.
       // `endpoint` is host + path only: no query string, credential or header, so a
       // failing quote is diagnosable from the log by service, status and endpoint.
-      // Deliberately NOT an IntegrationApiLog record: its raw columns keep the body
-      // verbatim, and a rate body carries the customer's address on every checkout.
       logBase: { provider: this.name, origin: origin.city, destination: destination.city, service, endpoint: safeEndpoint(url) },
+      // Recorded as RATE, but the body itself is never stored: it carries the
+      // customer's street address, postal code and coordinates on every checkout.
+      // The summary keeps only what a failing quote is diagnosed from.
+      integration: {
+        ...this.integration('RATE'),
+        redactedRequest: {
+          summary: {
+            service_type: spec.serviceType,
+            weight,
+            dimension,
+            origin: { province: origin.province, city: origin.city, district: origin.district },
+            destination: { province: destination.province, city: destination.city, district: destination.district },
+          },
+        },
+      },
     });
 
     return this.mapResponse(text, service, spec.label);
