@@ -17,8 +17,8 @@ import {
   IntegrationProvider,
 } from '@/lib/admin';
 import {
+  bodyView,
   contextLabel,
-  exactBody,
   exactEndpoint,
   formatAttempt,
   formatDuration,
@@ -76,8 +76,9 @@ export default function IntegrationLogsPage() {
       <div className="mb-6">
         <h2 className="text-xl font-semibold text-gray-900">Log Integrasi</h2>
         <p className="mt-1 text-sm text-gray-500">
-          Setiap pertukaran API eksternal dengan Paxel, JNE, dan Midtrans — satu catatan per percobaan HTTP, beserta hasil di aplikasi. Tampilan
-          detail menunjukkan request dan respons persis seperti yang dipertukarkan, termasuk kredensial dan data pribadi.
+          Setiap pertukaran API eksternal dengan Paxel, JNE, dan Midtrans — satu catatan per percobaan HTTP, beserta hasil di aplikasi. Bila
+          tersimpan, tampilan detail menunjukkan request dan respons persis seperti yang dipertukarkan, termasuk kredensial dan data pribadi.
+          Panggilan yang membawa data pelanggan (mis. tarif Paxel) hanya menyimpan ringkasan tersanitasi, bukan payload asli.
         </p>
       </div>
 
@@ -212,7 +213,7 @@ function LogDrawer({ log, loading, onClose }: { log?: IntegrationLogDetail; load
                   <Field label="Metode" value={log.method ?? '—'} />
                   <Field label="URL" value={<span className="break-all font-mono text-xs">{exactEndpoint(log) ?? '—'}</span>} />
                 </dl>
-                <ExactPayload title="Body request" value={log.rawRequestBody} />
+                <BodyPayload title="Body request" raw={log.rawRequestBody} sanitized={log.sanitizedRequest} />
               </section>
 
               <section>
@@ -223,7 +224,7 @@ function LogDrawer({ log, loading, onClose }: { log?: IntegrationLogDetail; load
                   {log.errorMessage ? <Field label="Error" value={<span className="whitespace-pre-wrap break-words text-right">{log.errorMessage}</span>} /> : null}
                   {log.errorClass ? <Field label="Kelas error" value={log.errorClass} /> : null}
                 </dl>
-                <ExactPayload title="Body respons" value={log.rawResponseBody} />
+                <BodyPayload title="Body respons" raw={log.rawResponseBody} sanitized={log.sanitizedResponse} />
               </section>
 
               <section>
@@ -254,14 +255,26 @@ function LogDrawer({ log, loading, onClose }: { log?: IntegrationLogDetail; load
  * The body EXACTLY as exchanged with the provider — rendered verbatim (whitespace
  * preserved, no pretty-printing, masking or truncation). Collapsed by default:
  * opened deliberately, because it can hold credentials and personal data.
+ *
+ * Without an exact capture (a Paxel RATE record never keeps one), the stored
+ * sanitized summary is shown instead, labelled as a summary and not the payload.
  */
-function ExactPayload({ title, value }: { title: string; value: string | null }) {
-  const body = exactBody(value);
-  if (!body.captured) return <p className="mt-2 text-xs text-gray-400">{title}: tidak tercatat untuk data ini</p>;
-  if (body.empty) return <p className="mt-2 text-xs text-gray-400">{title}: (empty body)</p>;
+function BodyPayload({ title, raw, sanitized }: { title: string; raw: string | null; sanitized: unknown }) {
+  const body = bodyView(title, raw, sanitized);
+  if (body.kind === 'none') return <p className="mt-2 text-xs text-gray-400">{body.label}</p>;
+  if (body.kind === 'summary') {
+    return (
+      <details className="mt-2 rounded-lg border border-gray-100">
+        <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-gray-600">{body.label}</summary>
+        <p className="px-3 pb-2 text-xs text-amber-700">{body.note}</p>
+        <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-b-lg bg-amber-50 p-3 font-mono text-xs text-gray-700">{body.text}</pre>
+      </details>
+    );
+  }
+  if (body.empty) return <p className="mt-2 text-xs text-gray-400">{body.label}</p>;
   return (
     <details className="mt-2 rounded-lg border border-gray-100">
-      <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-gray-600">{title} (exact)</summary>
+      <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-gray-600">{body.label}</summary>
       <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all rounded-b-lg bg-gray-50 p-3 font-mono text-xs text-gray-700">{body.text}</pre>
     </details>
   );
