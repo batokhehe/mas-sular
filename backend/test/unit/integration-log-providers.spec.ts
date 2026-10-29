@@ -210,10 +210,12 @@ describe('JNE PICKUP_CASHLESS — booking against the confirmed response', () =>
       expect([secret, stored.includes(secret)]).toEqual([secret, false]);
     }
     const outcomeRow = rows.find((row) => row.attempt == null);
-    // ...and the exact exchange is kept verbatim for the detail view.
+    // ...and the exchange is kept for the detail view, credential values replaced.
     const attemptRow = rows.find((row) => row.attempt === 1);
-    expect(attemptRow.rawRequestBody).toBe(http.mock.calls[0][1].body);
-    expect(attemptRow.rawRequestBody).toContain('api_key=jne-secret');
+    expect(attemptRow.rawRequestBody).toBe(
+      (http.mock.calls[0][1].body as string).replace('api_key=jne-secret', 'api_key=[REDACTED:len10]').replace('username=store', 'username=[REDACTED:len5]'),
+    );
+    expect(JSON.stringify(rows)).not.toContain('jne-secret');
     expect(attemptRow.rawResponseBody).toBe(JNE_TOP_LEVEL_REJECTION);
     expect(outcomeRow.rawResponseBody).toBe(JNE_TOP_LEVEL_REJECTION);
     expect(outcomeRow).toMatchObject({
@@ -408,14 +410,16 @@ describe('JNE PICKUP_CASHLESS — the send path', () => {
     for (const secret of ['jne-secret', '"store"', 'Budi Santoso', '6285861470308', 'Jl. Veteran', 'Kebon Pisang', 'Pic Test', '081200000001', '081200000002', 'Jl. Gudang Test']) {
       expect([secret, stored.includes(secret)]).toEqual([secret, false]);
     }
-    // ...while the exact-exchange columns hold the request/response byte-for-byte.
+    // ...while the exchange columns hold the request/response byte-for-byte, except
+    // the credential values, which are replaced in place.
     const [sent] = http.mock.calls;
     expect(rows[0].rawEndpoint).toBe(sent[0]);
-    expect(rows[0].rawRequestBody).toBe(sent[1].body);
+    expect(rows[0].rawRequestBody).toBe((sent[1].body as string).replace('api_key=jne-secret', 'api_key=[REDACTED:len10]').replace('username=store', 'username=[REDACTED:len5]'));
     expect(rows[0].rawResponseBody).toBe(JNE_SUCCESS);
-    for (const exact of ['api_key=jne-secret', 'username=store', 'RECEIVER_NAME=Budi+Santoso', 'RECEIVER_PHONE=6285861470308']) {
+    for (const exact of ['api_key=[REDACTED:len10]', 'username=[REDACTED:len5]', 'RECEIVER_NAME=Budi+Santoso', 'RECEIVER_PHONE=6285861470308']) {
       expect([exact, rows[0].rawRequestBody.includes(exact)]).toEqual([exact, true]);
     }
+    expect(JSON.stringify(rows)).not.toContain('jne-secret');
     const [attemptRow, outcomeRow] = rows;
     expect(attemptRow.sanitizedRequest).toMatchObject({
       username: '[REDACTED]',

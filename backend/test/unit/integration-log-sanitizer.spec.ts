@@ -182,6 +182,10 @@ describe('endpoints and odd bodies', () => {
       'https://api.example.com/api/v1/payments/upload/[REDACTED]/file',
     );
     expect(sanitizeEndpoint('https://api.example.com/v2/status?api_key=secret&order_id=BMS-1')).toContain('api_key=[REDACTED]');
+    // The integration-log key list applies to the query too, not only the request-log one.
+    expect(sanitizeEndpoint('https://api.example.com/v2/charge?server_key=SECRET&username=store&order_id=BMS-1#x')).toBe(
+      'https://api.example.com/v2/charge?server_key=[REDACTED]&username=[REDACTED]&order_id=BMS-1#x',
+    );
     expect(sanitizeEndpoint(null)).toBeNull();
   });
 
