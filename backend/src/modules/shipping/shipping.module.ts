@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { JneDestinationDiagnostics } from './infrastructure/jne-destination.diagnostics';
 import { JneDestinationResolver } from './infrastructure/jne-destination.resolver';
 import { JneProvider } from './infrastructure/providers/jne.provider';
 import { PaxelProvider } from './infrastructure/providers/paxel.provider';
@@ -26,6 +27,7 @@ import { SHIPPING_CONFIG, assertShippingConfigured, loadShippingConfig } from '.
     // at quote time (PAXELBOX-61S). PrismaService comes from the global
     // DatabaseModule, so no extra import is needed here.
     JneDestinationResolver,
+    JneDestinationDiagnostics,
     JneProvider,
     // === Courier registry ===
     // Add a new courier (J&T, SiCepat, Anteraja, POS Indonesia, …) by implementing
@@ -41,6 +43,6 @@ import { SHIPPING_CONFIG, assertShippingConfigured, loadShippingConfig } from '.
     // policy the booking path books with).
     PickupScheduleService,
   ],
-  exports: [ShippingService, PickupScheduleService],
+  exports: [ShippingService, PickupScheduleService, JneDestinationDiagnostics],
 })
 export class ShippingModule {}

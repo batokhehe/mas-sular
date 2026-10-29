@@ -126,3 +126,45 @@ describe('JneDestinationResolver', () => {
     });
   });
 });
+
+/**
+ * Bojongsoang (32.04.08, Kabupaten Bandung) -> BDO10104 ("BOJONG SOANG,SOREANG"):
+ * the first REGENCY district, mapped by hand. The resolver needs no special case;
+ * these pin that a MANUAL mapping is answered exactly like a name-matched one, and
+ * only once it is approved and both sides are active.
+ */
+describe('Bojongsoang, a manually mapped REGENCY district', () => {
+  const bojongsoang = (over: Partial<Row> = {}) =>
+    row({ districtId: 'dist-bojongsoang', code: 'BDO10104', ...over });
+
+  it('resolves to BDO10104 once the MANUAL candidate is approved', async () => {
+    const { resolver, seen } = resolverFor([bojongsoang()]);
+    await expect(resolver.resolve('dist-bojongsoang')).resolves.toBe('BDO10104');
+    expect(seen[0]).toMatchObject({
+      districtId: 'dist-bojongsoang',
+      isActive: true,
+      status: 'MATCHED',
+      jneLocation: { kind: 'DESTINATION', isActive: true },
+    });
+  });
+
+  it('is not used while the candidate is still REVIEW_REQUIRED', async () => {
+    const { resolver } = resolverFor([bojongsoang({ status: 'REVIEW_REQUIRED' })]);
+    await expect(resolver.resolve('dist-bojongsoang')).resolves.toBeNull();
+  });
+
+  it('is not used once the mapping is deactivated', async () => {
+    const { resolver } = resolverFor([bojongsoang({ isActive: false })]);
+    await expect(resolver.resolve('dist-bojongsoang')).resolves.toBeNull();
+  });
+
+  it('is not used if BDO10104 is deactivated or only exists as an ORIGIN', async () => {
+    await expect(resolverFor([bojongsoang({ locationActive: false })]).resolver.resolve('dist-bojongsoang')).resolves.toBeNull();
+    await expect(resolverFor([bojongsoang({ kind: 'ORIGIN' })]).resolver.resolve('dist-bojongsoang')).resolves.toBeNull();
+  });
+
+  it('does not leak to another Kabupaten Bandung district', async () => {
+    const { resolver } = resolverFor([bojongsoang()]);
+    await expect(resolver.resolve('dist-soreang')).resolves.toBeNull();
+  });
+});
