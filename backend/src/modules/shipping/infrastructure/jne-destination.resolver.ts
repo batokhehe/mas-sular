@@ -54,6 +54,11 @@ export class JneDestinationResolver {
         status: 'MATCHED',
         jneLocation: { kind: 'DESTINATION', isActive: true },
       },
+      // At most one row can match (migration 20261030090000 makes a second active
+      // MATCHED row impossible), so this order only matters if that index were ever
+      // missing: then the EARLIEST approval keeps answering, never whichever row the
+      // planner happens to return first, and a later rogue approval cannot displace it.
+      orderBy: [{ reviewedAt: { sort: 'asc', nulls: 'last' } }, { id: 'asc' }],
       select: { jneLocation: { select: { code: true } } },
     });
 

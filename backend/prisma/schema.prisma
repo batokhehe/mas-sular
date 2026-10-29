@@ -1455,6 +1455,9 @@ model JneDistrictMapping {
   updatedAt DateTime @updatedAt
 
   @@unique([districtId, jneLocationId])
+  // Also: at most ONE active MATCHED row per district - a PARTIAL unique index
+  // ("JneDistrictMapping_one_active_matched_per_district", migration
+  // 20261030090000) that this schema language cannot express. Never drop it.
   @@index([status])
   @@index([districtId])
   @@index([isActive])
