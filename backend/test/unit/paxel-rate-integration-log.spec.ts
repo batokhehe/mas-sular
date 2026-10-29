@@ -157,6 +157,15 @@ describe('Paxel quotes are recorded as RATE', () => {
       expect(row.rawRequestBody).toBeNull();
       expect(row.rawResponseBody).toBeNull();
       expect(row.sanitizedRequest).toMatchObject({ destination: { district: 'Bojongsoang' } });
+      // The admin drawer shows this column verbatim when the raw body is null, so its
+      // exact key set is the contract: no address, village, postal code or coordinate.
+      expect(row.sanitizedRequest).toEqual({
+        service_type: expect.any(String),
+        weight: 1500,
+        dimension: '30x35x20',
+        origin: { province: 'Jawa Barat', city: 'Kota Bandung', district: 'Coblong' },
+        destination: { province: 'Jawa Barat', city: 'Kabupaten Bandung', district: 'Bojongsoang' },
+      });
       expect(row.endpoint).toMatch(/^https:\/\/paxel\.test\/v1\/rates\/(city|instant)$/);
       expect(typeof row.durationMs).toBe('number');
     }
@@ -268,6 +277,90 @@ describe('a provider error in free text is never stored as-is', () => {
     expect(rows[0].sanitizedResponse).toMatchObject({ code: 200, data: { fixed_price: 18000, service_type: 'SAMEDAY', destination: { lat: '[NUMBER]' } } });
     expect(rows[0].errorMessage).toBeNull();
     expect(JSON.stringify(rows)).not.toContain(PLAIN_STREET);
+  });
+});
+
+describe('a successful quote keeps the business values a quote is debugged from', () => {
+  // The shape of a real production RATE response (keys and nesting as stored for a
+  // SAMEDAY quote); every value here is synthetic.
+  const serviceWindow = (service: string, overrides: Record<string, unknown> = {}) => ({
+    service,
+    available_day: { day_details: 'Senin - Jumat 08:00', unavailable_days: 'Minggu', unavailable_day_details: '' },
+    time_pickup_start: '08:00',
+    time_pickup_end: '14:00:00',
+    time_delivery_start: '2026-10-29 10:00:00',
+    time_delivery_end: '2026-10-29T18:30:00+07:00',
+    ...overrides,
+  });
+  const quote = (data: Record<string, unknown>) => JSON.stringify({ status_code: 200, message: 'OK', data });
+  const PRICES = { fixed_price: 101000, small_price: 18000, medium_price: 26000, large_price: 39000, custom_price: '101000', response_code: 200 };
+
+  async function stored(body: string) {
+    const { provider, rec } = build(async () => res(200, body));
+    await provider.getRates(request);
+    return (await persisted(rec.entries))[0];
+  }
+
+  it('prices, the response code and well-formed service times are stored as received', async () => {
+    const row = await stored(quote({ ...PRICES, city_origin: 'KOTA BANDUNG', fixed_price_type: 'dimension', time_detail: [serviceWindow('same_day')] }));
+    expect(row.sanitizedResponse).toEqual({
+      status_code: 200,
+      message: 'OK',
+      data: {
+        ...PRICES,
+        city_origin: 'KOTA BANDUNG',
+        fixed_price_type: 'dimension',
+        time_detail: [
+          {
+            service: 'same_day',
+            // Free text with a digit is still hidden: only the strict time fields are opened.
+            available_day: { day_details: '[TEXT]', unavailable_days: 'Minggu', unavailable_day_details: '' },
+            time_pickup_start: '08:00',
+            time_pickup_end: '14:00:00',
+            time_delivery_start: '2026-10-29 10:00:00',
+            time_delivery_end: '2026-10-29T18:30:00+07:00',
+          },
+        ],
+      },
+    });
+  });
+
+  it('a time field that is not exactly a time, and a price field that is not a price, stay hidden', async () => {
+    const row = await stored(
+      quote({
+        fixed_price: `Bearer ${API_SECRET}`,
+        small_price: API_KEY,
+        medium_price: POSTAL + '0000',
+        large_price: { lat: LAT },
+        time_detail: [
+          serviceWindow('same_day', {
+            time_pickup_start: `08:00 ${STREET}`,
+            time_pickup_end: POSTAL,
+            time_delivery_start: `${LAT},${LNG}`,
+            time_delivery_end: '25:00',
+            time_note: '08:00 Bojongsari',
+          }),
+        ],
+      }),
+    );
+    const data = (row.sanitizedResponse as { data: Record<string, unknown> }).data;
+    expect(data).toMatchObject({ fixed_price: '[TEXT]', small_price: '[TEXT]', medium_price: '[TEXT]', large_price: { lat: '[NUMBER]' } });
+    expect((data.time_detail as Array<Record<string, unknown>>)[0]).toMatchObject({
+      time_pickup_start: '[TEXT]',
+      time_pickup_end: '[TEXT]',
+      time_delivery_start: '[TEXT]',
+      time_delivery_end: '[TEXT]',
+      time_note: '[TEXT]',
+    });
+    const all = JSON.stringify(row);
+    for (const secret of [...FORBIDDEN, 'Bearer', 'Pelanggan']) expect(all).not.toContain(secret);
+  });
+
+  it('the raw columns stay empty and the request summary carries no customer data', async () => {
+    const row = await stored(quote(PRICES));
+    expect(row.rawRequestBody).toBeNull();
+    expect(row.rawResponseBody).toBeNull();
+    expect(JSON.stringify(row.sanitizedRequest)).not.toMatch(new RegExp([STREET, POSTAL, VILLAGE, String(LAT), String(LNG), API_KEY].map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')));
   });
 });
 
