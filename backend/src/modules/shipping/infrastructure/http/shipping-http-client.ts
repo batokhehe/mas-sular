@@ -3,7 +3,11 @@ import { randomUUID } from 'crypto';
 import { IntegrationDirection, IntegrationOutcome } from '@prisma/client';
 import { PermanentError, TransientError } from '../../domain/shipping-errors';
 import { safeRecord } from '../../../../infrastructure/integration-log/safe-record';
-import { IntegrationCallContext } from '../../../../infrastructure/integration-log/integration-log.types';
+import { IntegrationCallContext, IntegrationLogEntry } from '../../../../infrastructure/integration-log/integration-log.types';
+import { sentValues, summarizeRedactedResponse } from '../../../../infrastructure/integration-log/redacted-response';
+
+/** Location levels a redacted summary already stores; a provider repeating them leaks nothing new. */
+const SUMMARIZED_KEYS: ReadonlySet<string> = new Set(['province', 'city', 'district', 'service_type']);
 
 export interface ShippingHttpResponse {
   status: number;
@@ -93,6 +97,9 @@ export async function executeShippingRequest(
   // Shared by every attempt of this ONE logical call, and by the application-outcome
   // record a provider may add after parsing (see JneShipmentProvider.createShipment).
   const operationId = integration ? (integration.operationId ?? randomUUID()) : '';
+  // What a redacted call sent, computed once and only when a response is summarized.
+  let sentCache: string[] | undefined;
+  const sent = () => (sentCache ??= sentValues(init.body, init.headers, SUMMARIZED_KEYS));
 
   /** Best-effort: handed to the shared safeRecord(), which can never throw or reject. */
   const record = (fields: {
@@ -105,6 +112,18 @@ export async function executeShippingRequest(
     responseBody?: string | null;
   }): void => {
     if (!integration?.recorder) return;
+    // Raw bodies go to the raw columns. A redacted call stores only the caller's
+    // summary and an allowlisted summary of the response - which also replaces the
+    // provider's free-text error, since that text can repeat what it was sent.
+    let bodies: Pick<IntegrationLogEntry, 'requestBody' | 'requestContentType' | 'responseBody' | 'requestPayload' | 'responsePayload'>;
+    let errorMessage = fields.errorMessage ?? null;
+    if (integration.redactedRequest) {
+      const response = fields.responseBody ? summarizeRedactedResponse(fields.responseBody, sent()) : undefined;
+      bodies = { requestPayload: integration.redactedRequest.summary, responsePayload: response };
+      if (response !== undefined && errorMessage !== null) errorMessage = sanitize(JSON.stringify(response));
+    } else {
+      bodies = { requestBody: init.body ?? null, requestContentType: contentTypeOf(init), responseBody: fields.responseBody ?? null };
+    }
     safeRecord(
       integration.recorder,
       {
@@ -124,10 +143,8 @@ export async function executeShippingRequest(
         durationMs: fields.durationMs,
         applicationOutcome: fields.outcome,
         errorClass: fields.errorClass ?? null,
-        errorMessage: fields.errorMessage ?? null,
-        requestBody: init.body ?? null,
-        requestContentType: contentTypeOf(init),
-        responseBody: fields.responseBody ?? null,
+        errorMessage,
+        ...bodies,
       },
       (err) => logger.warn({ event: 'integration_log.record_failed', reason: err instanceof Error ? err.message : String(err) }),
     );

@@ -65,4 +65,13 @@ export interface IntegrationCallContext {
   paymentId?: string | null;
   shipmentId?: string | null;
   correlationId?: string | null;
+  /**
+   * For calls whose request carries customer data that no log may keep (a Paxel
+   * quote sends the street address, postal code and coordinates on every checkout):
+   * the caller's own minimal summary is persisted as the sanitized request, and NO
+   * raw request or response body is stored - so `rawRequestBody`/`rawResponseBody`
+   * stay null. The response is still kept sanitized, the error summary is kept, and
+   * status, duration and outcome are unchanged.
+   */
+  redactedRequest?: { summary: Record<string, unknown> };
 }
