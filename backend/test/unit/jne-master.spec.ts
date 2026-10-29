@@ -261,13 +261,22 @@ describe('import diff', () => {
 
 describe('the import CLI', () => {
   it('requires an explicit confirm flag to attempt any write', () => {
-    expect(parseArgs(['--snapshot', 's.json']).confirmed).toBe(false);
-    expect(parseArgs(['--snapshot', 's.json', CONFIRM_FLAG]).confirmed).toBe(true);
+    expect(parseArgs(['--snapshot', 's.json', '--source', 'SANDBOX']).confirmed).toBe(false);
+    expect(parseArgs(['--snapshot', 's.json', '--source', 'SANDBOX', CONFIRM_FLAG]).confirmed).toBe(true);
   });
 
   it('rejects an unknown kind or source', () => {
-    expect(() => parseArgs(['--kind', 'VILLAGE'])).toThrow(/--kind must be/);
+    expect(() => parseArgs(['--kind', 'VILLAGE', '--source', 'SANDBOX'])).toThrow(/--kind must be/);
     expect(() => parseArgs(['--source', 'STAGING'])).toThrow(/--source must be/);
+    expect(() => parseArgs(['--source', 'sandbox'])).toThrow(/--source must be/);
+  });
+
+  it('has no default source: omitting --source is refused, with or without --confirm', () => {
+    expect(() => parseArgs(['--snapshot', 's.json'])).toThrow(/--source SANDBOX\|PRODUCTION is required/);
+    expect(() => parseArgs(['--snapshot', 's.json', CONFIRM_FLAG])).toThrow(/there is no default/);
+    expect(() => parseArgs(['--snapshot', 's.json', '--source'])).toThrow(/is required/);
+    expect(parseArgs(['--snapshot', 's.json', '--source', 'PRODUCTION']).source).toBe('PRODUCTION');
+    expect(parseArgs(['--snapshot', 's.json', '--source', 'SANDBOX']).source).toBe('SANDBOX');
   });
 
   it('unwraps a 61C capture and reads its fetch date', () => {

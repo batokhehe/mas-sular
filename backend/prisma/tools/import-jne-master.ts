@@ -13,15 +13,16 @@
  * ---------------------------------------------------------------------------
  * THE DATABASE WRITE IS DELIBERATELY SEPARATE
  *
- * `--emit` transforms and verifies; `--confirm` additionally writes. The write
- * requires migration 20260901000000_add_jne_master_data to have been applied,
- * because `JneLocation` does not otherwise exist. That migration is intentionally
- * UNAPPLIED, so `--confirm` will fail until an operator applies it deliberately.
- * The default path therefore proves the transform is correct without touching a
- * production database holding real orders.
+ * `--emit` transforms and verifies; `--confirm` additionally writes. Without
+ * `--confirm` nothing touches the database, so the default path proves the
+ * transform is correct without touching a production database holding real orders.
  *
- *   npx tsx prisma/tools/import-jne-master.ts --snapshot <file> --emit <out.json>
- *   npx tsx prisma/tools/import-jne-master.ts --snapshot <file> --confirm
+ * `--source SANDBOX|PRODUCTION` is REQUIRED and is recorded on every row: it says
+ * which JNE environment the snapshot was captured from. There is no default - a
+ * sandbox snapshot must never be labelled, or a production one mistaken, by omission.
+ *
+ *   npx tsx prisma/tools/import-jne-master.ts --snapshot <file> --source SANDBOX --emit <out.json>
+ *   npx tsx prisma/tools/import-jne-master.ts --snapshot <file> --source PRODUCTION --confirm
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -59,7 +60,10 @@ export function parseArgs(argv: string[]): ImportOptions {
     throw new Error(`--kind must be ORIGIN or DESTINATION, got "${kind}"`);
   }
   const source = get('--source');
-  if (source && source !== 'SANDBOX' && source !== 'PRODUCTION') {
+  if (source === undefined) {
+    throw new Error('--source SANDBOX|PRODUCTION is required: name the JNE environment the snapshot came from (there is no default)');
+  }
+  if (source !== 'SANDBOX' && source !== 'PRODUCTION') {
     throw new Error(`--source must be SANDBOX or PRODUCTION, got "${source}"`);
   }
   return {
@@ -68,7 +72,7 @@ export function parseArgs(argv: string[]): ImportOptions {
     confirmed: argv.includes(CONFIRM_FLAG),
     overrideRowCount: argv.includes('--override-row-count'),
     kind: (kind as JneLocationKind) ?? 'DESTINATION',
-    source: (source as JneDataSource) ?? 'SANDBOX',
+    source: source as JneDataSource,
   };
 }
 

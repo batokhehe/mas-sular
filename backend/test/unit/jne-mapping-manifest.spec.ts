@@ -5,7 +5,7 @@
  */
 import { toCsv } from '../../prisma/tools/csv';
 import { APPROVAL_TIMEOUT_MS, decideApprovals, runApprovals, type ApprovalStore } from '../../prisma/tools/approve-jne-mappings';
-import { ManifestChangedError, runImport, WRITE_CHUNK, type ImportStore } from '../../prisma/tools/import-jne-mapping-manifest';
+import { ManifestChangedError, parseImportArgs, runImport, WRITE_CHUNK, type ImportStore } from '../../prisma/tools/import-jne-mapping-manifest';
 import {
   MANIFEST_COLUMNS,
   parseManifest,
@@ -193,6 +193,33 @@ function importStore(existing: Array<{ districtId: string; jneLocationId: string
 }
 const quiet = () => undefined;
 const OPTS = { confirm: true, allowPartial: false, allowedSources: ['SANDBOX', 'PRODUCTION'], manifestId: 'sha256:test' };
+
+describe('the import source is explicit', () => {
+  it('--allow-source has no default and accepts only known sources', () => {
+    expect(parseImportArgs(['--manifest', 'm.csv']).allowedSources).toEqual([]);
+    expect(parseImportArgs(['--manifest', 'm.csv', '--allow-source', 'PRODUCTION']).allowedSources).toEqual(['PRODUCTION']);
+    expect(parseImportArgs(['--manifest', 'm.csv', '--allow-source', 'sandbox, production']).allowedSources).toEqual(['SANDBOX', 'PRODUCTION']);
+    expect(() => parseImportArgs(['--manifest', 'm.csv', '--allow-source', 'SANDBOX,STAGING'])).toThrow(/accepts SANDBOX, PRODUCTION; got STAGING/);
+    expect(parseImportArgs(['--manifest', 'm.csv', '--confirm']).confirm).toBe(true);
+    expect(parseImportArgs(['--manifest', 'm.csv']).confirm).toBe(false);
+  });
+
+  it('without an accepted source nothing is read, validated or written - even with --confirm', async () => {
+    const { store, writes } = importStore();
+    const findMany = jest.spyOn(store.district, 'findMany');
+    const res = await runImport(store, manifest(row('32.04.08', 'BDO10104')), { ...OPTS, allowedSources: [] }, quiet, NOW);
+    expect(res).toMatchObject({ code: 2, written: 0, report: { accepted: 0, rejected: 0 } });
+    expect(findMany).not.toHaveBeenCalled();
+    expect(writes).toHaveLength(0);
+  });
+
+  it('PRODUCTION only refuses a sandbox-sourced code; SANDBOX must be named to accept it', async () => {
+    const prod = await runImport(importStore().store, manifest(row('32.04.08', 'BDO10104')), { ...OPTS, confirm: false, allowedSources: ['PRODUCTION'] }, quiet, NOW);
+    expect(prod.report.byReason).toEqual({ JNE_SOURCE_NOT_ALLOWED: 1 });
+    const sandbox = await runImport(importStore().store, manifest(row('32.04.08', 'BDO10104')), { ...OPTS, confirm: false, allowedSources: ['SANDBOX'] }, quiet, NOW);
+    expect(sandbox.report.accepted).toBe(1);
+  });
+});
 
 describe('runImport', () => {
   it('is a dry run unless --confirm', async () => {
