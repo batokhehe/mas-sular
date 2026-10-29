@@ -78,3 +78,34 @@ export function exactBody(value: string | null | undefined): ExactBody {
   if (value === null || value === undefined) return { captured: false };
   return { captured: true, empty: value.length === 0, text: value };
 }
+
+export const SANITIZED_SUMMARY_NOTE = 'ringkasan tersanitasi — bukan payload asli';
+/** Shown under every summary: the placeholders are the logger's, not values the provider sent. */
+export const PLACEHOLDER_NOTE = '[NUMBER] dan [TEXT] = nilai yang disembunyikan saat disimpan, bukan nilai dari provider. Payload asli tidak tersimpan dan tidak dapat dipulihkan.';
+
+export type BodyView =
+  | { kind: 'exact'; label: string; empty: boolean; text: string }
+  | { kind: 'summary'; label: string; text: string; note: string }
+  | { kind: 'none'; label: string };
+
+/**
+ * What the detail drawer shows for one body. The exact capture always wins. Without
+ * one, the sanitized column is shown as what it is - a redacted summary, never the
+ * payload: a Paxel RATE record keeps no raw body by design (it carries the customer's
+ * street address, postal code and coordinates), only the summary the backend stored.
+ * Nothing is reconstructed or re-redacted here; the stored value is only formatted.
+ */
+export function bodyView(title: string, raw: string | null | undefined, sanitized: unknown): BodyView {
+  const exact = exactBody(raw);
+  if (exact.captured) {
+    return exact.empty
+      ? { kind: 'exact', label: `${title}: (empty body)`, empty: true, text: '' }
+      : { kind: 'exact', label: `${title} (exact)`, empty: false, text: exact.text };
+  }
+  if (sanitized === null || sanitized === undefined || sanitized === '') {
+    return { kind: 'none', label: `${title}: tidak tercatat untuk data ini` };
+  }
+  // A non-JSON body is stored by the sanitizer as plain text; anything else is JSON.
+  const text = typeof sanitized === 'string' ? sanitized : JSON.stringify(sanitized, null, 2);
+  return { kind: 'summary', label: `${title} (${SANITIZED_SUMMARY_NOTE})`, text, note: PLACEHOLDER_NOTE };
+}

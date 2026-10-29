@@ -12,6 +12,8 @@
  *   - booleans and null are kept;
  *   - a number is kept only under a status/price key; elsewhere it is "[NUMBER]"
  *     (coordinates, postal codes and house numbers are numbers);
+ *   - under a `time_*` key, a string that is exactly a clock time or a date-time is
+ *     kept (a quote's pickup/delivery window); any other value there is "[TEXT]";
  *   - a string is kept only if it is short, has no digit, no token-shaped run, and
  *     contains none of the values this request actually sent; anything else is "[TEXT]".
  *
@@ -27,10 +29,19 @@ const NUMERIC_KEYS = new Set([
   'statusCode',
   'error_code',
   'errorCode',
+  'response_code',
   'fixed_price',
+  'small_price',
+  'medium_price',
+  'large_price',
+  'custom_price',
   'price',
   'total_price',
 ]);
+/** Paxel's service window fields: time_pickup_start, time_delivery_end, ... */
+const TIME_KEY = /^time_/;
+/** HH:MM[:SS], optionally after a YYYY-MM-DD date (space or T) and before Z/±HH:MM. Nothing else. */
+const TIME_VALUE = /^(\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])[ T])?([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?(Z|[+-]([01]\d|2[0-3]):?[0-5]\d)?$/;
 const MAX_TEXT = 200;
 const MAX_DEPTH = 5;
 const MAX_ITEMS = 10;
@@ -80,6 +91,7 @@ function summarize(value: unknown, sent: readonly string[], key: string | undefi
   if (typeof value === 'number') return key !== undefined && NUMERIC_KEYS.has(key) ? value : REDACTED_NUMBER;
   if (typeof value === 'string') {
     if (key !== undefined && NUMERIC_KEYS.has(key) && /^\d{1,6}$/.test(value)) return value;
+    if (key !== undefined && TIME_KEY.test(key) && TIME_VALUE.test(value) && !sent.some((s) => value.toLowerCase().includes(s))) return value;
     return safeText(value, sent) ? value : REDACTED_TEXT;
   }
   if (depth >= MAX_DEPTH) return REDACTED_TEXT;

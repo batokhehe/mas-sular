@@ -150,7 +150,20 @@ repository envelope `{ items, page, limit, total, totalPages }`.
 UI: **Admin → System → Integration Logs**, a filter row, a table
 (Time / Provider / Operation / Direction / HTTP / Duration / Order / Outcome) and a
 detail drawer with request, response and context. The drawer shows the exact URL,
-request body and response body verbatim (collapsed by default).
+request body and response body verbatim (collapsed by default). Where no exact body
+was captured - every Paxel `RATE` record, by design - it shows the stored
+`sanitizedRequest` / `sanitizedResponse` instead, pretty-printed and labelled
+"ringkasan tersanitasi — bukan payload asli", with a note that `[NUMBER]` / `[TEXT]`
+are placeholders written by the logger and that the payload itself cannot be
+recovered; only when neither exists does it say "tidak tercatat untuk data ini".
+
+A Paxel `RATE` response summary (`redacted-response.ts`) keeps, as received: the
+status/response codes, every price key (`fixed_price`, `small_price`, `medium_price`,
+`large_price`, `custom_price`, `price`, `total_price`), and `time_*` service-window
+fields whose value is exactly `HH:MM[:SS]`, optionally with a `YYYY-MM-DD` date and a
+zone. Any other value under those keys, free text containing a digit, and anything
+the request sent (address, postal code, village, coordinates, API key) stays
+`[NUMBER]` / `[TEXT]`. Records written before this rule keep their old placeholders.
 
 ## Troubleshooting a provider failure
 
