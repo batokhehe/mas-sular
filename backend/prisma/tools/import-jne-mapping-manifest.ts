@@ -1,8 +1,11 @@
 /**
  * Propose JNE destination mappings from a reviewed manifest (jne-mapping-manifest.ts).
  *
- *   npx tsx prisma/tools/import-jne-mapping-manifest.ts --manifest <file.csv> [--report <out.csv>]
+ *   npx tsx prisma/tools/import-jne-mapping-manifest.ts --manifest <file.csv> --allow-source <SOURCES> [--report <out.csv>]
  *     dry run (the default): validates every row, prints the summary, writes nothing.
+ *     --allow-source (REQUIRED, no default): which JneLocation.source values a mapping
+ *     may point at - PRODUCTION, SANDBOX, or SANDBOX,PRODUCTION. Accepting sandbox
+ *     codes is a decision the operator states on the command line, never an omission.
  *   ... --confirm
  *     writes the ACCEPTED rows as REVIEW_REQUIRED / MANUAL candidates - only when no
  *     row was rejected, unless --allow-partial is also given. All of them or none:
@@ -25,7 +28,7 @@ import {
   type ManifestReport,
 } from './jne-mapping-manifest';
 
-export const DEFAULT_ALLOWED_SOURCES = ['SANDBOX', 'PRODUCTION'] as const;
+export const KNOWN_SOURCES = ['SANDBOX', 'PRODUCTION'] as const;
 /** Rows per INSERT statement. Every chunk runs inside the ONE transaction below. */
 export const WRITE_CHUNK = 500;
 /** A nationwide manifest (~5,000 rows) inserts in seconds; this only bounds a stuck run. */
@@ -59,12 +62,15 @@ export function parseImportArgs(argv: string[]): ImportOptions {
     return i >= 0 ? argv[i + 1] : undefined;
   };
   const sources = get('--allow-source');
+  const allowedSources = sources ? sources.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean) : [];
+  const unknown = allowedSources.filter((s) => !(KNOWN_SOURCES as readonly string[]).includes(s));
+  if (unknown.length > 0) throw new Error(`--allow-source accepts ${KNOWN_SOURCES.join(', ')}; got ${unknown.join(', ')}`);
   return {
     manifest: get('--manifest') ?? '',
     report: get('--report'),
     confirm: argv.includes('--confirm'),
     allowPartial: argv.includes('--allow-partial'),
-    allowedSources: sources ? sources.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean) : [...DEFAULT_ALLOWED_SOURCES],
+    allowedSources,
   };
 }
 
@@ -92,6 +98,10 @@ export async function runImport(
   log: (line: string) => void = console.log,
   now: () => string = () => new Date().toISOString(),
 ): Promise<ImportResult> {
+  if (opts.allowedSources.length === 0) {
+    log('--allow-source is required: state which JNE sources (PRODUCTION, SANDBOX) a mapping may point at');
+    return { code: 2, report: { rows: [], accepted: 0, noop: 0, rejected: 0, byReason: {} }, written: 0 };
+  }
   const entries = parseManifest(manifestText);
   const districtCodes = [...new Set(entries.map((e) => e.districtCode))];
   const jneCodes = [...new Set(entries.map((e) => e.jneCode))];
@@ -180,9 +190,15 @@ export async function runImport(
 }
 
 if (require.main === module) {
-  const opts = parseImportArgs(process.argv.slice(2));
-  if (!opts.manifest) {
-    console.error('usage: --manifest <file.csv> [--report <out.csv>] [--confirm [--allow-partial]] [--allow-source SANDBOX,PRODUCTION]');
+  let opts: ImportOptions;
+  try {
+    opts = parseImportArgs(process.argv.slice(2));
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(2);
+  }
+  if (!opts.manifest || opts.allowedSources.length === 0) {
+    console.error('usage: --manifest <file.csv> --allow-source PRODUCTION|SANDBOX|SANDBOX,PRODUCTION [--report <out.csv>] [--confirm [--allow-partial]]');
     process.exit(2);
   }
   const text = readFileSync(opts.manifest, 'utf8');
