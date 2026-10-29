@@ -5,11 +5,13 @@ import { LifecycleModule } from '../../infrastructure/lifecycle/lifecycle.module
 import { OrderCancellationService } from '../orders/order-cancellation.service';
 import { PaymentSettlementModule } from '../payments/settlement/payment-settlement.module';
 import { ShipmentModule } from '../shipment/shipment.module';
+import { ShippingModule } from '../shipping/shipping.module';
 import { AdminCmsController } from './presentation/admin-cms.controller';
 import { AdminCatalogController } from './presentation/admin-catalog.controller';
 import { AdminOperationsController } from './presentation/admin-operations.controller';
 import { AdminSystemLogController } from './presentation/admin-system-log.controller';
 import { AdminIntegrationLogController } from './presentation/admin-integration-log.controller';
+import { AdminJneDestinationController } from './presentation/admin-jne-destination.controller';
 import { AdminQueueController } from './presentation/admin-queue.controller';
 import { AdminIncidentController } from './presentation/admin-incident.controller';
 import { AdminNotificationCenterController } from './presentation/admin-notification-center.controller';
@@ -24,8 +26,8 @@ import { InvoicesModule } from '../invoices/invoices.module';
 import { AdminInvoiceLinkService } from './admin-invoice-link.service';
 
 @Module({
-  imports: [ShipmentModule, LifecycleModule, PaymentSettlementModule, InvoicesModule],
-  controllers: [AdminCatalogController, AdminCmsController, AdminOperationsController, AdminSystemLogController, AdminIntegrationLogController, AdminQueueController, AdminIncidentController, AdminNotificationCenterController, AdminCommunicationController, AdminAuditController, AdminBellController, AdminPushController],
+  imports: [ShipmentModule, ShippingModule, LifecycleModule, PaymentSettlementModule, InvoicesModule],
+  controllers: [AdminCatalogController, AdminCmsController, AdminOperationsController, AdminSystemLogController, AdminIntegrationLogController, AdminJneDestinationController, AdminQueueController, AdminIncidentController, AdminNotificationCenterController, AdminCommunicationController, AdminAuditController, AdminBellController, AdminPushController],
   providers: [AdminService, ExecutiveDashboardService, AdminOrderNotesService, OrderCancellationService, CustomerCommunicationService, AdminInvoiceLinkService, PackingSlipService, PermissionGuard],
   exports: [AdminService],
 })

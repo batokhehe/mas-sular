@@ -121,6 +121,9 @@ export class JneProvider implements ShippingProvider {
         outcome: 'skipped',
         reason: 'no_jne_destination_mapping',
         hasDistrictId: request.destinationDistrictId !== undefined,
+        // A region id, not customer data: it names WHICH district to look up in the
+        // admin JNE destination diagnostics.
+        destinationDistrictId: request.destinationDistrictId ?? null,
       });
       return [];
     }
