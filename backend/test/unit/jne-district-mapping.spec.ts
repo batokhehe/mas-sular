@@ -8,7 +8,7 @@ import {
   type InternalDistrict,
   type JneCandidateRow,
 } from '../../prisma/tools/jne-district-mapping';
-import { parseArgs, formatCandidates } from '../../prisma/tools/generate-jne-mapping-candidates';
+import { parseArgs, formatCandidates, main, RETIRED_FLAGS } from '../../prisma/tools/generate-jne-mapping-candidates';
 
 /**
  * PAXELBOX-61F. Resolving internal districts against JNE master data.
@@ -266,11 +266,13 @@ describe('determinism and the CLI', () => {
     expect(JSON.stringify(a)).toBe(JSON.stringify(b));
   });
 
-  it('generation and approval are separate flags', () => {
-    expect(parseArgs(['--generate']).generate).toBe(true);
-    expect(parseArgs(['--generate']).approve).toEqual([]);
-    expect(parseArgs(['--approve', 'Andir,Cicendo']).approve).toEqual(['Andir', 'Cicendo']);
-    expect(parseArgs(['--approve', 'Andir']).generate).toBe(false);
+  it('the retired write flags are refused, not ignored', () => {
+    for (const flag of RETIRED_FLAGS) expect(parseArgs([flag, 'x'])).toEqual({ refused: expect.stringContaining('read-only') });
+    expect(parseArgs(['--city', 'Kota Bandung', '--approve', 'Andir,Cicendo', '--reviewer', 'ops'])).toEqual({
+      refused: expect.stringContaining('--approve, --reviewer'),
+    });
+    expect(parseArgs(['--city', 'Kota Cimahi'])).toEqual({ city: 'Kota Cimahi' });
+    expect(parseArgs([])).toEqual({ city: 'Kota Bandung' });
   });
 
   it('confidence fits the VarChar(32) column', () => {
@@ -440,10 +442,10 @@ describe('approval gate', () => {
     expect(statuses.filter((s) => approvalDecision(s).promotable)).toEqual(['REVIEW_REQUIRED']);
   });
 
-  it('approval requires a reviewer', () => {
-    // The CLI refuses --approve without --reviewer; parseArgs surfaces the gap.
-    expect(parseArgs(['--approve', 'Andir']).reviewer).toBe('');
-    expect(parseArgs(['--approve', 'Andir', '--reviewer', 'someone']).reviewer).toBe('someone');
+  it('this CLI no longer approves at all - with or without a reviewer', () => {
+    // Approval moved to approve-jne-mappings.ts, which requires --reviewer and explicit pairs.
+    expect(parseArgs(['--approve', 'Andir'])).toEqual({ refused: expect.stringContaining('approve-jne-mappings.ts') });
+    expect(parseArgs(['--approve', 'Andir', '--reviewer', 'someone'])).toEqual({ refused: expect.stringContaining('read-only') });
   });
 
   it('approval cannot introduce a new alias — the alias tables are the only source', () => {
@@ -476,5 +478,70 @@ describe('approval gate', () => {
       expect(c.evidence.aliasRationale).toBeTruthy();
       expect(c.evidence.aliasTransformation).toBeTruthy();
     }
+  });
+});
+
+// ------------------------------- the legacy CLI can no longer write or approve
+
+describe('generate-jne-mapping-candidates is read-only', () => {
+  const WRITES = ['create', 'createMany', 'update', 'updateMany', 'upsert', 'delete', 'deleteMany', '$executeRaw', '$executeRawUnsafe', '$transaction'];
+
+  /** A store answering the two reads; touching ANY other member - a write - fails the test. */
+  function store() {
+    const touched: string[] = [];
+    const prismaDistrict = (d: InternalDistrict) => ({
+      id: d.id,
+      name: d.name,
+      city: { id: d.cityId, name: d.cityName, type: d.cityType, province: { id: d.provinceId, name: d.provinceName } },
+    });
+    const model = (name: string, reads: Record<string, unknown>) =>
+      new Proxy(reads, {
+        get(target, prop: string) {
+          if (prop in target) return target[prop];
+          touched.push(`${name}.${prop}`);
+          throw new Error(`write attempted: ${name}.${prop}`);
+        },
+      });
+    const db = new Proxy(
+      {
+        district: model('district', { findMany: async () => [prismaDistrict(district('Andir')), prismaDistrict(district('Cicendo'))] }),
+        jneLocation: model('jneLocation', { findMany: async () => POOL }),
+      } as Record<string, unknown>,
+      {
+        get(target, prop: string) {
+          if (prop in target) return target[prop];
+          touched.push(prop);
+          throw new Error(`unexpected access: ${prop}`);
+        },
+      },
+    );
+    let opened = 0;
+    return { touched, open: () => (opened++, db as never), opened: () => opened };
+  }
+
+  it('lists candidates using two reads and nothing else', async () => {
+    const s = store();
+    const lines: string[] = [];
+    await expect(main(['--city', 'Kota Bandung'], s.open, (l) => lines.push(l))).resolves.toBe(0);
+    expect(s.touched).toEqual([]);
+    const out = lines.join('\n');
+    expect(out).toContain('BDO10041');
+    expect(out).toContain('REVIEW_REQUIRED');
+    expect(out).toContain('read-only: nothing was written');
+  });
+
+  it.each(RETIRED_FLAGS.map((f) => [f]))('%s exits 2 before the database is even opened', async (flag) => {
+    const s = store();
+    const lines: string[] = [];
+    await expect(main(['--city', 'Kota Bandung', flag, 'Andir,Cicendo'], s.open, (l) => lines.push(l))).resolves.toBe(2);
+    expect(s.opened()).toBe(0);
+    expect(s.touched).toEqual([]);
+    expect(lines.join('\n')).toMatch(/import-jne-mapping-manifest\.ts.*approve-jne-mappings\.ts/);
+  });
+
+  it('the source has no write call left', () => {
+    const src = require('fs').readFileSync(require('path').join(__dirname, '../../prisma/tools/generate-jne-mapping-candidates.ts'), 'utf8') as string;
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+    for (const w of WRITES) expect(code).not.toContain(`.${w}(`);
   });
 });
