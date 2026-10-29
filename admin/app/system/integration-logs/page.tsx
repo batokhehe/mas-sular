@@ -28,6 +28,7 @@ import {
   operationOptions,
   outcomeTone,
 } from '@/lib/system/integration-log-view';
+import { buildCurl, CurlFlavor } from '@/lib/system/curl-export';
 
 const dt = (iso: string) => new Date(iso).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'medium' });
 
@@ -214,6 +215,7 @@ function LogDrawer({ log, loading, onClose }: { log?: IntegrationLogDetail; load
                   <Field label="URL" value={<span className="break-all font-mono text-xs">{exactEndpoint(log) ?? '—'}</span>} />
                 </dl>
                 <BodyPayload title="Body request" raw={log.rawRequestBody} sanitized={log.sanitizedRequest} />
+                <CopyCurl log={log} />
               </section>
 
               <section>
@@ -248,6 +250,43 @@ function LogDrawer({ log, loading, onClose }: { log?: IntegrationLogDetail; load
         </div>
       </aside>
     </>
+  );
+}
+
+/**
+ * Copy the stored OUTBOUND request as a cURL command (shell or Postman). Built only from
+ * the exact method, URL and body; credentials become variables the operator fills in
+ * locally. When something needed is not stored, the reason is shown instead.
+ */
+function CopyCurl({ log }: { log: IntegrationLogDetail }) {
+  const [copied, setCopied] = useState<CurlFlavor | null>(null);
+  const shell = buildCurl(log, 'shell');
+  if (!shell.ok) return <p className="mt-2 text-xs text-gray-400">cURL: {shell.reason}</p>;
+  const postman = buildCurl(log, 'postman');
+  const copy = (flavor: CurlFlavor, text: string) =>
+    void navigator.clipboard?.writeText(text).then(() => setCopied(flavor), () => setCopied(null));
+  return (
+    <div className="mt-2 rounded-lg border border-gray-100 p-3">
+      <div className="flex flex-wrap gap-2">
+        <button type="button" onClick={() => copy('shell', shell.command)} className="rounded-md border border-gray-200 px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50">
+          {copied === 'shell' ? 'Tersalin' : 'Salin cURL (shell)'}
+        </button>
+        {postman.ok ? (
+          <button type="button" onClick={() => copy('postman', postman.command)} className="rounded-md border border-gray-200 px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50">
+            {copied === 'postman' ? 'Tersalin' : 'Salin cURL (Postman)'}
+          </button>
+        ) : null}
+      </div>
+      <ul className="mt-2 list-disc space-y-0.5 pl-4 text-xs text-gray-500">
+        {shell.notes.map((n) => (
+          <li key={n}>{n}</li>
+        ))}
+      </ul>
+      <details className="mt-2">
+        <summary className="cursor-pointer text-xs font-semibold text-gray-600">Pratinjau cURL (shell)</summary>
+        <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap break-all rounded bg-gray-50 p-2 font-mono text-xs text-gray-700">{shell.command}</pre>
+      </details>
+    </div>
   );
 }
 

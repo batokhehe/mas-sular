@@ -165,6 +165,18 @@ zone. Any other value under those keys, free text containing a digit, and anythi
 the request sent (address, postal code, village, coordinates, API key) stays
 `[NUMBER]` / `[TEXT]`. Records written before this rule keep their old placeholders.
 
+**Copy cURL** (drawer, request section; `admin/lib/system/curl-export.ts`): for an
+OUTBOUND record whose exact method, URL and (for POST/PUT/PATCH) body were stored, the
+drawer copies a cURL command - shell (`"$JNE_API_KEY"`) or Postman (`{{JNE_API_KEY}}`).
+Every body field and query parameter whose key is a credential (the sanitizer's
+`SENSITIVE_KEY`) becomes such a variable; everything else is the stored text,
+byte-for-byte. Content-Type is inferred only from an unambiguous JSON or
+form-urlencoded body. Request headers are not stored, so none is added - provider
+authentication headers must be added by the operator. Not offered, with the reason
+shown, for INBOUND records, a missing URL/method/body (every Paxel `RATE`), a URL with
+userinfo or a fragment, any other body format, or a credential holding an object. The
+command sends a REAL request when run.
+
 ## Troubleshooting a provider failure
 
 1. Open **System → Integration Logs** and filter by the order number (`search`).
