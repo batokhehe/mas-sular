@@ -1,20 +1,20 @@
 import { paxelBoxRateDimension } from '../../src/modules/shipping/infrastructure/providers/paxel-box-dimension';
-import { PAXEL_BOX_SIZES, paxelBoxSpec, PaxelBoxSize, selectPaxelBox } from '../../src/modules/shipping/domain/paxel-box';
+import { PAXEL_BOX_SIZES, paxelBoxSpec, PaxelBoxSize, SELECTABLE_PAXEL_BOX_SIZES, selectPaxelBox } from '../../src/modules/shipping/domain/paxel-box';
+import { isPaxelDimension } from '../../src/modules/shipping/shipping.config';
 
 /**
- * PaxelBoxSize -> Paxel RATE `dimension` string.
+ * PaxelBoxSize -> Paxel RATE `dimension` string ("LxWxH", whole cm).
  *
- * PAXELBOX-3's whole job is this one mapping, and the boundary of the phase is
- * exactly here: the official PaxelBox packaging dimension (47.5 cm) is never
- * altered anywhere else in the codebase. This file pins both halves — the
- * mapping itself, and that nothing outside it touches 47.5.
+ * The box dimensions live only in paxel-box.ts; this mapping reads them and
+ * rounds a fractional side (XL's 47.5) for the wire alone. This file pins the
+ * mapping, and that the spec itself is never altered by it.
  */
 
 describe('paxelBoxRateDimension — the box → RATE dimension mapping', () => {
   it.each([
-    ['S', '12x48x48'],
-    ['M', '24x48x48'],
-    ['L', '36x48x48'],
+    ['S', '20x20x8'],
+    ['M', '30x22x12'],
+    ['L', '35x30x25'],
     ['XL', '59x48x48'],
   ] as Array<[PaxelBoxSize, string]>)('%s -> %s', (size, expected) => {
     expect(paxelBoxRateDimension(size)).toBe(expected);
@@ -22,7 +22,7 @@ describe('paxelBoxRateDimension — the box → RATE dimension mapping', () => {
 
   it('produces a string for every declared box size, in one pass', () => {
     const all = PAXEL_BOX_SIZES.map((size) => paxelBoxRateDimension(size));
-    expect(all).toEqual(['12x48x48', '24x48x48', '36x48x48', '59x48x48']);
+    expect(all).toEqual(['20x20x8', '30x22x12', '35x30x25', '59x48x48']);
   });
 
   it('XL is sendable even though 59 exceeds the generic city-rate 1-50 example range', () => {
@@ -33,17 +33,21 @@ describe('paxelBoxRateDimension — the box → RATE dimension mapping', () => {
     expect(xl).toBe('59x48x48');
   });
 
-  it('47.5 is rounded to 48 ONLY in this mapping — the official spec keeps 47.5', () => {
-    for (const size of PAXEL_BOX_SIZES) {
+  it('is the spec in length x width x height order; S/M/L pass through exactly, unrounded', () => {
+    for (const size of SELECTABLE_PAXEL_BOX_SIZES) {
       const spec = paxelBoxSpec(size);
-      // The official business packaging dimension, from PAXELBOX-1, untouched.
-      expect(spec.widthCm).toBe(47.5);
-      expect(spec.heightCm).toBe(47.5);
-      // The RATE-only rounded representation.
-      const dimension = paxelBoxRateDimension(size);
-      expect(dimension).not.toContain('47.5');
-      expect(dimension.split('x')).toEqual([String(Math.round(spec.lengthCm)), '48', '48']);
+      expect(paxelBoxRateDimension(size)).toBe(`${spec.lengthCm}x${spec.widthCm}x${spec.heightCm}`);
     }
+  });
+
+  it('every selectable box is within the 1-50 cm LxWxH range the project validates Paxel dimensions with', () => {
+    for (const size of SELECTABLE_PAXEL_BOX_SIZES) expect(isPaxelDimension(paxelBoxRateDimension(size))).toBe(true);
+  });
+
+  it('a fractional side (XL 47.5) is rounded ONLY in this mapping — the spec keeps 47.5', () => {
+    const spec = paxelBoxSpec('XL');
+    expect([spec.widthCm, spec.heightCm]).toEqual([47.5, 47.5]);
+    expect(paxelBoxRateDimension('XL')).toBe('59x48x48');
   });
 
   it('does not duplicate the box thresholds — it composes selectPaxelBox() + paxelBoxSpec(), not its own table', () => {
@@ -51,9 +55,9 @@ describe('paxelBoxRateDimension — the box → RATE dimension mapping', () => {
     // threshold would silently desync the two. Proven here by driving the
     // dimension purely through the reused selector for every boundary.
     const cases: Array<[number, string]> = [
-      [1, '12x48x48'], [3, '12x48x48'],
-      [4, '24x48x48'], [10, '24x48x48'],
-      [11, '36x48x48'], [20, '36x48x48'],
+      [1, '20x20x8'], [3, '20x20x8'],
+      [4, '30x22x12'], [10, '30x22x12'],
+      [11, '35x30x25'], [20, '35x30x25'],
     ];
     for (const [quantity, expected] of cases) {
       const box = selectPaxelBox(quantity);

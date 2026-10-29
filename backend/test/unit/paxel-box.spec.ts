@@ -119,21 +119,17 @@ describe('PaxelBox specs — business metadata', () => {
   });
 
   it.each([
-    ['S', 3, 12],
-    ['M', 10, 24],
-    ['L', 20, 36],
-  ] as Array<[PaxelBoxSize, number, number]>)(
-    '%s holds up to %i pcs and is %i x 47.5 x 47.5',
-    (size, maxQuantity, lengthCm) => {
-      const spec = paxelBoxSpec(size);
-      expect(spec.maxQuantity).toBe(maxQuantity);
-      expect(spec.lengthCm).toBe(lengthCm);
-      expect(spec.widthCm).toBe(47.5);
-      expect(spec.heightCm).toBe(47.5);
+    ['S', 3, 20, 20, 8],
+    ['M', 10, 30, 22, 12],
+    ['L', 20, 35, 30, 25],
+  ] as Array<[PaxelBoxSize, number, number, number, number]>)(
+    '%s holds up to %i pcs and is %i x %i x %i cm (L x W x H)',
+    (size, maxQuantity, lengthCm, widthCm, heightCm) => {
+      expect(paxelBoxSpec(size)).toEqual({ maxQuantity, lengthCm, widthCm, heightCm });
     },
   );
 
-  it('XL is open-ended and 59 x 47.5 x 47.5', () => {
+  it('XL keeps its earlier reference values: open-ended and 59 x 47.5 x 47.5', () => {
     const spec = paxelBoxSpec('XL');
     expect(spec.maxQuantity).toBeNull();
     expect(spec.lengthCm).toBe(59);
@@ -141,11 +137,7 @@ describe('PaxelBox specs — business metadata', () => {
     expect(spec.heightCm).toBe(47.5);
   });
 
-  /**
-   * Guards the scope boundary of this phase: the Paxel wire format for a 47.5 cm
-   * side is unresolved (documented `dimension` is max:11 chars; "12x47.5x47.5"
-   * is 12), so this module must not be the place a request string appears.
-   */
+  /** The Paxel wire string is built only in paxel-box-dimension.ts, never here. */
   it('exposes no Paxel dimension request string', () => {
     for (const size of PAXEL_BOX_SIZES) {
       const spec = paxelBoxSpec(size) as unknown as Record<string, unknown>;
