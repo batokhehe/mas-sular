@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { buildCurl, NOTE_HEADERS_NOT_STORED, NOTE_REAL_REQUEST, SENSITIVE_KEY, type CurlExport } from './curl-export.ts';
+import { buildCurl, NOTE_HEADERS_NOT_STORED, NOTE_REAL_REQUEST, SENSITIVE_KEY, sideEffectOf, type CurlExport } from './curl-export.ts';
 
 // Synthetic credentials: none of these may ever appear in a generated command or note.
 const KEY = 'jne-key-DO-NOT-LEAK-123';
@@ -12,6 +12,7 @@ const SECRET_VALUES = [KEY, USER, 'mid-server-key-DO-NOT-LEAK', 'pin-9876'];
 
 const jneRate = {
   provider: 'JNE' as const,
+  operation: 'RATE',
   direction: 'OUTBOUND' as const,
   method: 'POST',
   rawEndpoint: 'https://apiv2.jne.co.id:10102/tracing/api/pricedev',
@@ -62,7 +63,7 @@ test('Postman flavour uses {{VARIABLE}} references inside one quoted word', () =
 
 test('JSON body: only credential values are cut out; the rest of the stored text is untouched', () => {
   const raw = '{\n  "transaction_details": {"order_id": "MS-1", "gross_amount": 25000},\n  "server_key": "mid-server-key-DO-NOT-LEAK",\n  "pin": 9876,\n  "note": "it\'s $HOME `x` \\"q\\" Ñ\\n"\n}';
-  const log = { provider: 'MIDTRANS' as const, direction: 'OUTBOUND' as const, method: 'post', rawEndpoint: 'https://api.sandbox.midtrans.com/v2/charge', rawRequestBody: raw };
+  const log = { provider: 'MIDTRANS' as const, operation: 'charge', direction: 'OUTBOUND' as const, method: 'post', rawEndpoint: 'https://api.sandbox.midtrans.com/v2/charge', rawRequestBody: raw };
   const r = ok(buildCurl(log, 'shell'));
   assert.match(r.command, /^curl -X POST 'https:\/\/api\.sandbox\.midtrans\.com\/v2\/charge' \\\n  -H 'Content-Type: application\/json' \\\n  --data-raw /);
   assert.deepEqual(r.placeholders, ['MIDTRANS_PIN', 'MIDTRANS_SERVER_KEY']);
@@ -89,7 +90,7 @@ test('an empty stored body is sent empty, without a guessed Content-Type', () =>
 test('a body-less GET with no stored body is fine; a POST without its body is refused', () => {
   assert.equal(ok(buildCurl({ ...jneRate, method: 'GET', rawRequestBody: null }, 'shell')).command, "curl -X GET 'https://apiv2.jne.co.id:10102/tracing/api/pricedev'");
   // A Paxel RATE record: the body was never stored - say so, never reconstruct it.
-  const rate = buildCurl({ provider: 'PAXEL', direction: 'OUTBOUND', method: 'POST', rawEndpoint: 'https://commerce-api.paxel.co/v1/rates/city', rawRequestBody: null }, 'shell');
+  const rate = buildCurl({ provider: 'PAXEL', operation: 'RATE', direction: 'OUTBOUND', method: 'POST', rawEndpoint: 'https://commerce-api.paxel.co/v1/rates/city', rawRequestBody: null }, 'shell');
   assert.equal(rate.ok, false);
   assert.match((rate as { reason: string }).reason, /Body request POST tidak tersimpan/);
 });
@@ -130,4 +131,27 @@ test('the drawer offers the copy under the request body and shows the reason whe
   assert.match(page, /if \(!shell\.ok\) return <p className="mt-2 text-xs text-gray-400">cURL: \{shell\.reason\}<\/p>;/);
   // The clipboard only ever receives the generated command, never a raw body.
   assert.deepEqual(page.match(/writeText\([^)]*\)/g), ['writeText(text)']);
+});
+
+test('a replay that can create or change something is flagged as a WRITE; only known reads are not', () => {
+  for (const op of ['RATE', 'QUOTE', 'TRACK', 'status']) assert.equal(sideEffectOf(op), 'read', op);
+  // Fail-safe: bookings, pickups, cancellations, cnotes, charges - and anything unknown - are writes.
+  for (const op of ['CREATE_SHIPMENT', 'PICKUP_CASHLESS', 'CANCEL', 'CANCEL_CNOTE', 'GENERATE_CNOTE', 'charge', 'cancel', 'expire', 'SOMETHING_NEW', 'rate']) {
+    assert.equal(sideEffectOf(op), 'write', op);
+  }
+  const rate = ok(buildCurl(jneRate, 'shell'));
+  assert.equal(rate.sideEffect, 'read');
+  assert.equal(rate.warning, null);
+  const pickup = ok(buildCurl({ ...jneRate, operation: 'PICKUP_CASHLESS' }, 'shell'));
+  assert.equal(pickup.sideEffect, 'write');
+  assert.match(pickup.warning!, /^PICKUP_CASHLESS MEMBUAT ATAU MENGUBAH data nyata di provider/);
+  assert.match(pickup.warning!, /sandbox/);
+  // Every replay, read or write, still says it sends a real request.
+  assert.ok(rate.notes.includes(NOTE_REAL_REQUEST) && pickup.notes.includes(NOTE_REAL_REQUEST));
+});
+
+test('the drawer shows the write warning above red buttons labelled as a write', () => {
+  const page = readFileSync(join(process.cwd(), 'app/system/integration-logs/page.tsx'), 'utf8');
+  assert.match(page, /\{shell\.warning \? <p className="mb-2 rounded bg-red-50 p-2 text-xs font-semibold text-red-700">\{shell\.warning\}<\/p> : null\}/);
+  assert.match(page, /write \? `Salin cURL \$\{name\} — OPERASI TULIS` : `Salin cURL \$\{name\}`/);
 });

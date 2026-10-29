@@ -175,7 +175,10 @@ form-urlencoded body. Request headers are not stored, so none is added - provide
 authentication headers must be added by the operator. Not offered, with the reason
 shown, for INBOUND records, a missing URL/method/body (every Paxel `RATE`), a URL with
 userinfo or a fragment, any other body format, or a credential holding an object. The
-command sends a REAL request when run.
+command sends a REAL request when run. Only `RATE`, `QUOTE`, `TRACK` and `status` count
+as reads; every other operation (bookings, pickups, cancellations, cnotes, charges, and
+any operation added later) is flagged as a WRITE: a red warning above red buttons
+labelled "OPERASI TULIS", telling the operator to use sandbox credentials and URLs.
 
 ## Troubleshooting a provider failure
 

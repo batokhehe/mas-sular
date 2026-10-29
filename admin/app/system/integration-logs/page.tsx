@@ -265,15 +265,21 @@ function CopyCurl({ log }: { log: IntegrationLogDetail }) {
   const postman = buildCurl(log, 'postman');
   const copy = (flavor: CurlFlavor, text: string) =>
     void navigator.clipboard?.writeText(text).then(() => setCopied(flavor), () => setCopied(null));
+  const write = shell.sideEffect === 'write';
+  const label = (flavor: CurlFlavor, name: string) => (copied === flavor ? 'Tersalin' : write ? `Salin cURL ${name} — OPERASI TULIS` : `Salin cURL ${name}`);
+  const buttonClass = write
+    ? 'rounded-md border border-red-300 bg-red-50 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-100'
+    : 'rounded-md border border-gray-200 px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50';
   return (
-    <div className="mt-2 rounded-lg border border-gray-100 p-3">
+    <div className={`mt-2 rounded-lg border p-3 ${write ? 'border-red-200' : 'border-gray-100'}`}>
+      {shell.warning ? <p className="mb-2 rounded bg-red-50 p-2 text-xs font-semibold text-red-700">{shell.warning}</p> : null}
       <div className="flex flex-wrap gap-2">
-        <button type="button" onClick={() => copy('shell', shell.command)} className="rounded-md border border-gray-200 px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50">
-          {copied === 'shell' ? 'Tersalin' : 'Salin cURL (shell)'}
+        <button type="button" onClick={() => copy('shell', shell.command)} className={buttonClass}>
+          {label('shell', '(shell)')}
         </button>
         {postman.ok ? (
-          <button type="button" onClick={() => copy('postman', postman.command)} className="rounded-md border border-gray-200 px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50">
-            {copied === 'postman' ? 'Tersalin' : 'Salin cURL (Postman)'}
+          <button type="button" onClick={() => copy('postman', postman.command)} className={buttonClass}>
+            {label('postman', '(Postman)')}
           </button>
         ) : null}
       </div>

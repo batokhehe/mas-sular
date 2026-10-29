@@ -19,10 +19,26 @@ import type { IntegrationLogDetail } from '@/lib/admin';
 export type CurlFlavor = 'shell' | 'postman';
 
 export type CurlExport =
-  | { ok: true; command: string; placeholders: string[]; notes: string[] }
+  | { ok: true; command: string; placeholders: string[]; notes: string[]; sideEffect: SideEffect; warning: string | null }
   | { ok: false; reason: string };
 
-type LogFields = Pick<IntegrationLogDetail, 'provider' | 'direction' | 'method' | 'rawEndpoint' | 'rawRequestBody'>;
+type LogFields = Pick<IntegrationLogDetail, 'provider' | 'operation' | 'direction' | 'method' | 'rawEndpoint' | 'rawRequestBody'>;
+
+/**
+ * Whether replaying the operation can CHANGE something at the provider. Fail-safe:
+ * only operations known to be reads are 'read'; anything else - booking, pickup,
+ * cancel, cnote, charge, an operation added later - is 'write'.
+ */
+export type SideEffect = 'read' | 'write';
+const READ_OPERATIONS = new Set(['RATE', 'QUOTE', 'TRACK', 'status']);
+
+export function sideEffectOf(operation: string): SideEffect {
+  return READ_OPERATIONS.has(operation) ? 'read' : 'write';
+}
+
+export function writeWarning(operation: string): string {
+  return `${operation} MEMBUAT ATAU MENGUBAH data nyata di provider (booking, pickup, pembatalan, atau charge). Jangan dijalankan untuk debugging tanpa izin eksplisit; gunakan kredensial dan URL sandbox.`;
+}
 
 /**
  * Same pattern as SENSITIVE_KEY in backend/src/infrastructure/integration-log/
@@ -106,7 +122,8 @@ export function buildCurl(log: LogFields, flavor: CurlFlavor): CurlExport {
   const lines = [`curl -X ${method} ${quote(url.parts)}`];
   if (contentType) lines.push(`  -H ${quote([{ text: `Content-Type: ${contentType}` }])}`);
   if (body) lines.push(`  --data-raw ${quote(body)}`);
-  return { ok: true, command: lines.join(' \\\n'), placeholders, notes };
+  const sideEffect = sideEffectOf(log.operation);
+  return { ok: true, command: lines.join(' \\\n'), placeholders, notes, sideEffect, warning: sideEffect === 'write' ? writeWarning(log.operation) : null };
 }
 
 // ------------------------------------------------------------------ quoting
