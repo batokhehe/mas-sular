@@ -96,15 +96,25 @@ display as well. Stored rows are never rewritten.
   `SENSITIVE_KEY` (`api_key`, `username`, `password`, `server_key`, `signature_key`,
   `token`, `cookie`, ...) in a JSON body (at any depth; an object/array under such a
   key is replaced whole), a form-urlencoded body or a URL query; URL userinfo and the
-  capability path tokens `redactSensitivePath` knows; and `Bearer` / `Basic`
-  credentials and `Cookie:` / `Set-Cookie:` values wherever they appear as text.
+  capability path tokens `redactSensitivePath` knows; credential parameters in a
+  URL fragment; and `Bearer` / `Basic` credentials, `Cookie:` / `Set-Cookie:` values
+  and JWTs wherever they appear as text. Text that only looks like JSON (truncated,
+  NDJSON, single quotes) is handled as text: `"key": "value"` pairs are still found.
+  Inside a JSON string value only unmistakable keys (`api_key`, `password`,
+  `Authorization`, `X-...-API-Key`, ...) are treated as `key: value` pairs, so prose
+  such as `"session: pagi"` is left alone.
+- **Kept on purpose:** an empty credential value (it hides nothing), and a URL under a
+  `signature` key - Paxel/JNE `signature` / `pdo_signature` are proof-of-delivery
+  image links, not credentials - minus any credential in that URL's own query.
 - **How:** the text is edited in place - never parsed and re-serialized - so a JSON
   body stays valid with its key order, whitespace, escapes and exact numbers, and a
   form body stays a clean pair list. `true` / `false` / `null` are kept.
-- **The marker** is `[REDACTED:len<N>]`, plus `:sha256-<8 hex>` for values of 20+
-  characters: an operator confirms which key was sent with
-  `printf %s "$JNE_API_KEY" | sha256sum | cut -c1-8`. Short values (usernames, PINs)
-  get no fingerprint, so nothing guessable can be brute-forced against it.
+- **The marker** is `[REDACTED:len<N>]`, plus `:sha256-<8 hex>` for machine-generated
+  values of 20+ characters (API/server keys, tokens, signatures, Bearer tokens): an
+  operator confirms which key was sent with
+  `printf %s "$JNE_API_KEY" | sha256sum | cut -c1-8`. Usernames, passwords, PINs,
+  card/account numbers, Basic credentials and URL userinfo never get a fingerprint,
+  whatever their length, so nothing guessable can be confirmed against it.
 - **Lost for debugging:** the credential values themselves (e.g. a typo inside a key
   is visible only as a fingerprint/length mismatch), and the exact bytes of those
   fields. Copy cURL already replaces them with `$VARIABLES`, so replay is unaffected.

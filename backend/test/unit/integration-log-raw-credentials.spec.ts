@@ -144,3 +144,49 @@ describe('idempotent: masking an already-redacted value changes nothing', () => 
     expect(redactRawUrl(once)).toBe(once);
   });
 });
+
+describe('pre-merge review findings', () => {
+  // Bypasses found by probing: credentials in text the strict JSON reader cannot parse.
+  it.each([
+    ['truncated JSON', `{"api_key": "${KEY}", "order": "MS-1"`, `{"api_key": "${LONG_MARK}", "order": "MS-1"`],
+    ['NDJSON', `{"api_key":"${KEY}"}\n{"ok":1}`, `{"api_key":"${LONG_MARK}"}\n{"ok":1}`],
+    ['single-quoted pseudo-JSON', `{'api_key': '${KEY}'}`, `{'api_key': '${LONG_MARK}'}`],
+    ['a form-like body with a trailing newline and a comma in a value', `api_key=${KEY}&password=ab,cd\n`, `api_key=${LONG_MARK}&password=[REDACTED:len5]\n`],
+  ])('%s is redacted', (_what, raw, expected) => {
+    expect(redactRawBody(raw)).toBe(expected);
+  });
+
+  it('inside a JSON string: header-style API keys, credential URL parameters and JWTs are scrubbed', () => {
+    const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abcdefgh';
+    const out = JSON.parse(redactRawBody(JSON.stringify({ debug: `X-Paxel-API-Key: ${KEY}`, redirect_url: `https://x.test/pay?order=MS-1&token=${KEY}`, note: jwt }))!);
+    expect(out).toEqual({ debug: `X-Paxel-API-Key: ${LONG_MARK}`, redirect_url: `https://x.test/pay?order=MS-1&token=${LONG_MARK}`, note: credentialMarker(jwt) });
+  });
+
+  it('a credential in a URL fragment is replaced', () => {
+    expect(redactRawUrl(`https://x.test/cb#state=ok&access_token=${KEY}`)).toBe(`https://x.test/cb#state=ok&access_token=${LONG_MARK}`);
+  });
+
+  // False positives found against the key names in real stored payloads.
+  it('Paxel/JNE proof-of-delivery signature URLs are business data and are kept', () => {
+    const raw = JSON.stringify({ airwaybill_code: 'PXL1', signature: 'https://cdn.paxel.co/sig/1.png', pdo_signature: '', photo: 'https://cdn.paxel.co/p.png' });
+    expect(redactRawBody(raw)).toBe(raw);
+    // ...minus any credential the link itself carries.
+    expect(JSON.parse(redactRawBody(JSON.stringify({ signature: `https://cdn.test/s.png?X-Amz-Signature=${KEY}&w=1` }))!).signature).toBe(`https://cdn.test/s.png?X-Amz-Signature=${LONG_MARK}&w=1`);
+    // A signature that is NOT a URL (Midtrans signature_key) is still a credential.
+    expect(redactRawBody(JSON.stringify({ signature_key: KEY }))).toBe(JSON.stringify({ signature_key: LONG_MARK }));
+  });
+
+  it('an empty credential value hides nothing and is left as it is', () => {
+    expect(redactRawBody('{"password":"","api_key":""}')).toBe('{"password":"","api_key":""}');
+  });
+
+  it('usernames, passwords, PINs, Basic credentials and URL userinfo never get a fingerprint, however long', () => {
+    const long = 'MASSULARBANDUNGSTORE01';
+    expect(redactRawBody(`username=${long}&password=${long}`)).toBe('username=[REDACTED:len22]&password=[REDACTED:len22]');
+    expect(redactRawBody(JSON.stringify({ pin: long, card_number: long }))).toBe(JSON.stringify({ pin: '[REDACTED:len22]', card_number: '[REDACTED:len22]' }));
+    expect(redactRawBody(`Authorization: Basic ${Buffer.from(`${long}:${long}`).toString('base64')}`)).toMatch(/^Authorization: Basic \[REDACTED:len60\]$/);
+    expect(redactRawUrl(`https://${long}:${long}@x.test/a`)).toBe('https://[REDACTED:len45]@x.test/a');
+    // Machine-generated keys still do.
+    expect(redactRawBody(`api_key=${KEY}`)).toBe(`api_key=${LONG_MARK}`);
+  });
+});

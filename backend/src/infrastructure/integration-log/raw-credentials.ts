@@ -40,9 +40,19 @@ export function isRedactionMarker(value: string): boolean {
   return MARKER.test(value);
 }
 
-export function credentialMarker(value: string): string {
+/**
+ * Keys whose values are chosen by people or short by nature (usernames, passwords,
+ * PINs, card and account numbers): never fingerprinted, whatever their length, since a
+ * hash prefix would let a guess be confirmed offline. API keys, server keys, tokens and
+ * signatures are machine-generated and can be.
+ */
+const NO_FINGERPRINT_KEY = /user|pass|^pin$|otp|cvv|cvc|card|^pan$|account/i;
+
+/** The marker for one credential value; `key` (when known) decides whether a fingerprint is allowed. */
+export function credentialMarker(value: string, key?: string): string {
   if (isRedactionMarker(value)) return value;
-  const fp = value.length >= FINGERPRINT_MIN ? `:sha256-${createHash('sha256').update(value, 'utf8').digest('hex').slice(0, 8)}` : '';
+  const fingerprint = value.length >= FINGERPRINT_MIN && !(key !== undefined && NO_FINGERPRINT_KEY.test(key));
+  const fp = fingerprint ? `:sha256-${createHash('sha256').update(value, 'utf8').digest('hex').slice(0, 8)}` : '';
   return `[REDACTED:len${value.length}${fp}]`;
 }
 
@@ -50,23 +60,57 @@ export function credentialMarker(value: string): string {
 const BEARER = /\b(Bearer|Basic)(\s+)([A-Za-z0-9._~+/=-]{8,})/gi;
 /** A `Cookie:` / `Set-Cookie:` header line in text: the whole value is a credential. */
 const COOKIE_LINE = /\b((?:Set-)?Cookie)(\s*:\s*)([^\r\n]+)/gi;
-/** `key=value` / `key: value` pairs in FREE TEXT whose key is a credential. */
-const TEXT_PAIR = /\b([A-Za-z0-9_.-]{1,64})(=|\s*:\s*)("?)([^"&,;}\s]{1,512})\3/g;
+/** Any JWT (three base64url segments, header starting `eyJ`), as in common/logging/redact.ts. */
+const JWT = /eyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]*/g;
+/** A query or fragment parameter inside text (a URL in a string, a callback link). */
+const URL_PARAM = /([?&#])([A-Za-z0-9_.%-]{1,64})=([^&#\s"'<>]+)/g;
+/**
+ * `key=value`, `key: value`, `"key": "value"`, `'key': 'value'` in TEXT - including a
+ * JSON-looking body that is not valid JSON (truncated, NDJSON, single quotes), where
+ * the span reader cannot help. A quoted value runs to its closing quote; an unquoted
+ * one to the next separator (`&`/space for `=`, also `,;}` for `:`).
+ */
+const TEXT_PAIR = /(["']?)\b([A-Za-z0-9_.-]{1,64})\1(=|\s*:\s*)(?:"((?:[^"\\]|\\.){1,512})"|'((?:[^'\\]|\\.){1,512})'|([^"'\s&]{1,512}))/g;
+/**
+ * Inside a JSON STRING value only keys that cannot be ordinary prose are treated as a
+ * `key: value` pair: "session: pagi" or "token: none" in a note stays as written,
+ * while "X-Paxel-API-Key: ..." or "password=..." does not.
+ */
+const STRONG_KEY = /api[-_]?key|apikey|secret|passw(or)?d|passwd|server[-_]?key|client[-_]?key|authorization|private[-_]?key|access[-_]?token|refresh[-_]?token|auth[-_]?token/i;
+
+function decodeKey(key: string): string {
+  try {
+    return decodeURIComponent(key);
+  } catch {
+    return key;
+  }
+}
 
 /**
- * Credential SHAPES in text. `pairs` also replaces `key=value` / `key: value` whose
- * key is a credential - used for a free-text body, but not inside a JSON string
- * value, where ordinary business prose ("session: pagi") would be mistaken for one.
+ * Credential SHAPES in text: Bearer/Basic, Cookie lines, JWTs, credential parameters of
+ * URLs, and `key=value` / `key: value` pairs. `strict` (a free-text body) treats every
+ * credential-named key as a pair; inside a JSON string value only STRONG_KEY does, so
+ * business prose is not mistaken for a credential.
  */
-function scrubText(text: string, pairs: boolean): string {
-  const shapes = text
-    .replace(BEARER, (m, scheme: string, space: string, cred: string) => (isRedactionMarker(cred) ? m : `${scheme}${space}${credentialMarker(cred)}`))
-    .replace(COOKIE_LINE, (m, name: string, sep: string, value: string) => (isRedactionMarker(value.trim()) ? m : `${name}${sep}${credentialMarker(value.trim())}`));
-  if (!pairs) return shapes;
-  return shapes.replace(TEXT_PAIR, (m, key: string, sep: string, quote: string, value: string) =>
-    // `Authorization: Bearer <marker>`: the scheme word is not the credential; the token after it was handled above.
-    isSensitiveKey(key) && !isRedactionMarker(value) && !/^(bearer|basic)$/i.test(value) ? `${key}${sep}${quote}${credentialMarker(value)}${quote}` : m,
-  );
+function scrubText(text: string, strict: boolean): string {
+  const isPairKey = (key: string) => (strict ? isSensitiveKey(key) : STRONG_KEY.test(key));
+  return text
+    .replace(BEARER, (m, scheme: string, space: string, cred: string) => (isRedactionMarker(cred) ? m : `${scheme}${space}${credentialMarker(cred, /^basic$/i.test(scheme) ? 'password' : undefined)}`))
+    .replace(COOKIE_LINE, (m, name: string, sep: string, value: string) => (isRedactionMarker(value.trim()) ? m : `${name}${sep}${credentialMarker(value.trim())}`))
+    .replace(JWT, (m) => credentialMarker(m))
+    .replace(URL_PARAM, (m, sep: string, key: string, value: string) =>
+      isSensitiveKey(decodeKey(key)) && !isRedactionMarker(value) ? `${sep}${key}=${credentialMarker(decodeKey(value), decodeKey(key))}` : m,
+    )
+    .replace(TEXT_PAIR, (m, q: string, key: string, sep: string, dq?: string, sq?: string, bare?: string) => {
+      const value = dq ?? sq ?? bare ?? '';
+      // `Authorization: Bearer <marker>`: the scheme word is not the credential; the token after it was handled above.
+      if (!value || !isPairKey(key) || isRedactionMarker(value) || /^(bearer|basic)$/i.test(value)) return m;
+      const quote = dq !== undefined ? '"' : sq !== undefined ? "'" : '';
+      // An unquoted value after `:` stops at , ; } so the rest of a sentence or object survives.
+      const cut = !quote && sep !== '=' ? (/^[^,;}]+/.exec(value)?.[0] ?? value) : value;
+      if (isRedactionMarker(cut)) return m;
+      return `${q}${key}${q}${sep}${quote}${credentialMarker(cut, key)}${quote}${value.slice(cut.length)}`;
+    });
 }
 
 // ------------------------------------------------------------------ JSON, by span
@@ -153,7 +197,7 @@ function redactJson(text: string, root: Node): string {
   const visit = (node: Node) => {
     if (node.type === 'object') {
       for (const { key, value } of node.entries) {
-        if (isSensitiveKey(key)) cut(value);
+        if (isSensitiveKey(key)) cut(key, value);
         else visit(value);
       }
     } else if (node.type === 'array') node.items.forEach(visit);
@@ -165,12 +209,21 @@ function redactJson(text: string, root: Node): string {
       if (scrubbed !== decoded) cuts.push({ start: node.start, end: node.end, with: JSON.stringify(scrubbed) });
     }
   };
-  const cut = (value: Node) => {
+  const cut = (key: string, value: Node) => {
     const raw = text.slice(value.start, value.end);
     if (value.type === 'string') {
       const decoded = JSON.parse(raw) as string;
-      if (!isRedactionMarker(decoded)) cuts.push({ ...value, with: JSON.stringify(credentialMarker(decoded)) });
-    } else if (value.type === 'number') cuts.push({ ...value, with: JSON.stringify(credentialMarker(raw)) });
+      // An empty value hides nothing; a marker is already redacted.
+      if (decoded === '' || isRedactionMarker(decoded)) return;
+      // Paxel/JNE `signature` / `pdo_signature` hold the proof-of-delivery IMAGE URL, not
+      // a credential: keep the link, minus any credential it carries in its query.
+      if (/signature/i.test(key) && /^https?:\/\/\S+$/i.test(decoded)) {
+        const url = redactRawUrl(decoded)!;
+        if (url !== decoded) cuts.push({ ...value, with: JSON.stringify(url) });
+        return;
+      }
+      cuts.push({ ...value, with: JSON.stringify(credentialMarker(decoded, key)) });
+    } else if (value.type === 'number') cuts.push({ ...value, with: JSON.stringify(credentialMarker(raw, key)) });
     else if (value.type === 'object' || value.type === 'array') cuts.push({ ...value, with: JSON.stringify(`[REDACTED:${value.type}]`) });
     // true / false / null carry no secret and keep their meaning.
   };
@@ -202,7 +255,7 @@ function redactPairs(text: string): string | null {
       const key = decode(segment.slice(0, eq));
       const value = decode(segment.slice(eq + 1));
       if (key === null || value === null || !isSensitiveKey(key) || isRedactionMarker(value)) return segment;
-      return `${segment.slice(0, eq)}=${credentialMarker(value)}`;
+      return `${segment.slice(0, eq)}=${credentialMarker(value, key)}`;
     })
     .join('&');
 }
@@ -228,7 +281,7 @@ export function redactRawUrl(url: string | null | undefined): string | null {
   let base = q >= 0 ? beforeHash.slice(0, q) : beforeHash;
   const query = q >= 0 ? beforeHash.slice(q + 1) : null;
 
-  base = base.replace(/^([a-z][a-z0-9+.-]*:\/\/)([^/@]*)@/i, (_m, scheme: string, userinfo: string) => `${scheme}${credentialMarker(decode(userinfo) ?? userinfo)}@`);
+  base = base.replace(/^([a-z][a-z0-9+.-]*:\/\/)([^/@]*)@/i, (_m, scheme: string, userinfo: string) => `${scheme}${credentialMarker(decode(userinfo) ?? userinfo, 'userinfo')}@`);
   // Capability tokens in the PATH (upload / invoice links, JWT-shaped segments).
   base = redactSensitivePath(base);
 
@@ -242,9 +295,13 @@ export function redactRawUrl(url: string | null | undefined): string | null {
         const key = decode(segment.slice(0, eq));
         const value = decode(segment.slice(eq + 1));
         if (key === null || value === null || !isSensitiveKey(key) || isRedactionMarker(value)) return segment;
-        return `${segment.slice(0, eq)}=${credentialMarker(value)}`;
+        return `${segment.slice(0, eq)}=${credentialMarker(value, key)}`;
       })
       .join('&');
   }
-  return `${base}${redactedQuery === null ? '' : `?${redactedQuery}`}${fragment}`;
+  // A fragment can carry credentials too (`#access_token=...` in OAuth-style callbacks).
+  const redactedFragment = fragment.includes('=') ? fragment.replace(URL_PARAM, (m, sep: string, key: string, value: string) =>
+    isSensitiveKey(decodeKey(key)) && !isRedactionMarker(value) ? `${sep}${key}=${credentialMarker(decodeKey(value), decodeKey(key))}` : m,
+  ) : fragment;
+  return `${base}${redactedQuery === null ? '' : `?${redactedQuery}`}${redactedFragment}`;
 }
