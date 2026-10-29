@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import 'reflect-metadata';
 import { Logger } from '@nestjs/common';
 import { IntegrationDirection, IntegrationOutcome, IntegrationProvider } from '@prisma/client';
@@ -7,6 +8,8 @@ import { IntegrationLogEntry } from '../../src/infrastructure/integration-log/in
 import { REDACTED, REDACTED_PII } from '../../src/infrastructure/integration-log/integration-log.sanitizer';
 
 /** The recorder: sanitizes, truncates to the column widths, and NEVER throws. */
+
+const sha8 = (v: string) => createHash('sha256').update(v).digest('hex').slice(0, 8);
 
 const ENTRY: IntegrationLogEntry = {
   provider: IntegrationProvider.JNE,
@@ -165,7 +168,7 @@ describe('IntegrationLogService', () => {
     expect(data.attempt).toBeNull();
   });
 
-  it('stores the exchange EXACTLY as captured beside the sanitized copy: URL, request body, response body', async () => {
+  it('stores the exchange as captured beside the sanitized copy, with only credential values replaced', async () => {
     const { service, create } = build();
     const endpoint = 'https://api.example.test/v2/charge?server_key=SECRET&token=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig';
     const responseBody = '{\n  "error" : "Please do not let paramaters empty.",\n  "status" : false\n}\n';
@@ -173,14 +176,16 @@ describe('IntegrationLogService', () => {
     await flush();
     const { data } = create.mock.calls[0][0];
 
-    // Verbatim: credentials, PII, JWT, spacing and trailing newline all kept.
-    expect(data.rawEndpoint).toBe(endpoint);
-    expect(data.rawRequestBody).toBe(ENTRY.requestBody);
+    // Credential VALUES are replaced by a length marker; PII, business fields, spacing
+    // and the trailing newline are kept byte-for-byte.
+    expect(data.rawEndpoint).toBe('https://api.example.test/v2/charge?server_key=[REDACTED:len6]&token=[REDACTED:len40:sha256-' + sha8('eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig') + ']');
+    expect(data.rawRequestBody).toBe('username=[REDACTED:len5]&api_key=[REDACTED:len6]&order_no=BMS-1&receiver_name=Budi&destination_zip=40112');
     expect(data.rawResponseBody).toBe(responseBody);
     // The sanitized columns are unchanged by it.
     expect(data.sanitizedRequest).toMatchObject({ username: REDACTED, api_key: REDACTED, receiver_name: REDACTED_PII });
     expect(data.endpoint).toContain('token=[REDACTED]');
-    expect(data.rawEndpoint).toContain('token=eyJhbGciOiJIUzI1NiJ9');
+    expect(JSON.stringify(data)).not.toContain('SECRET');
+    expect(JSON.stringify(data)).not.toContain('eyJhbGciOiJIUzI1NiJ9');
   });
 
   it('never truncates the exact bodies, even far past the sanitized payload cap', async () => {
@@ -190,7 +195,7 @@ describe('IntegrationLogService', () => {
     service.record({ ...ENTRY, requestBody, responseBody });
     await flush();
     const { data } = create.mock.calls[0][0];
-    expect(data.rawRequestBody).toBe(requestBody);
+    expect(data.rawRequestBody).toBe(`api_key=[REDACTED:len6]&blob=${'a'.repeat(300_000)}`);
     expect(data.rawResponseBody).toBe(responseBody);
     expect(JSON.stringify(data.sanitizedResponse).length).toBeLessThan(responseBody.length);
   });
@@ -213,7 +218,7 @@ describe('IntegrationLogService', () => {
     expect(second.sanitizedResponse).toMatchObject({ status_code: '406' });
   });
 
-  it('an INBOUND webhook keeps its raw body verbatim while the sanitized column comes from the parsed payload', async () => {
+  it('an INBOUND webhook keeps its raw body (credentials masked) while the sanitized column comes from the parsed payload', async () => {
     const { service, create } = build();
     const raw = '{"order_id":"BMS-1","signature_key":"' + 'a'.repeat(128) + '","customer_details":{"email":"buyer@example.com"}}';
     service.record({
@@ -229,7 +234,10 @@ describe('IntegrationLogService', () => {
     });
     await flush();
     const { data } = create.mock.calls[0][0];
-    expect(data.rawRequestBody).toBe(raw);
+    // The signature is a credential: replaced by a marker whose fingerprint still lets
+    // an operator match it against a recomputed signature. The PII stays in the raw body.
+    expect(data.rawRequestBody).toBe(raw.replace('a'.repeat(128), `[REDACTED:len128:sha256-${sha8('a'.repeat(128))}]`));
+    expect(data.rawRequestBody).toContain('buyer@example.com');
     expect(data.rawResponseBody).toBe('{"received":true,"handled":false}');
     expect(data.sanitizedRequest).toMatchObject({ signature_key: REDACTED });
     expect(JSON.stringify(data.sanitizedRequest)).not.toContain('buyer@example.com');

@@ -60,19 +60,18 @@ classification words (`network`, `timeout`, `rate_limited`, `provider_5xx`,
 
 ## Exact exchange (detail view)
 
-Every row also stores the exchange **exactly as captured**, for the SUPER_ADMIN detail
-view (**Admin → System → Integration Logs → detail**):
+Every row also stores the exchange **as captured**, for the SUPER_ADMIN detail view
+(**Admin → System → Integration Logs → detail**) - byte-for-byte except credential
+values (see *Credentials in the raw columns* below):
 
 | Column | Holds |
 |---|---|
-| `rawEndpoint` | the request URL exactly as called |
-| `rawRequestBody` | the request body exactly as sent (outbound) or received (inbound webhook, from `req.rawBody`) |
-| `rawResponseBody` | the response body exactly as received (outbound) or sent (inbound, the serialized JSON answer) |
+| `rawEndpoint` | the request URL as called |
+| `rawRequestBody` | the request body as sent (outbound) or received (inbound webhook, from `req.rawBody`) |
+| `rawResponseBody` | the response body as received (outbound) or sent (inbound, the serialized JSON answer) |
 
-No redaction, masking, truncation, normalization or pretty-printing is applied — to
-the stored value or in the drawer. **These columns contain provider credentials (JNE
-`username`/`api_key` form fields, Midtrans `signature_key`, …) and customer personal
-data.** Rules:
+No truncation, normalization or pretty-printing is applied, and business data and
+customer personal data are kept. Rules:
 
 - Only `GET /admin/integration-logs/:id` returns them (`Cache-Control: no-store`).
   The list and `/operations/:operationId` omit them (`RAW_EXCHANGE_OMIT`). Never add
@@ -85,6 +84,30 @@ data.** Rules:
   do not appear.
 - Rows are deleted by the same retention policies below; database backups contain
   the raw values too.
+
+### Credentials in the raw columns
+
+`raw-credentials.ts` replaces credential VALUES - and nothing else - when a row is
+written (`IntegrationLogService`) and again when the detail endpoint reads one
+(`IntegrationLogQueryService.get`), so rows written before this rule are masked on
+display as well. Stored rows are never rewritten.
+
+- **What counts as a credential:** the value of any key matching the sanitizer's
+  `SENSITIVE_KEY` (`api_key`, `username`, `password`, `server_key`, `signature_key`,
+  `token`, `cookie`, ...) in a JSON body (at any depth; an object/array under such a
+  key is replaced whole), a form-urlencoded body or a URL query; URL userinfo and the
+  capability path tokens `redactSensitivePath` knows; and `Bearer` / `Basic`
+  credentials and `Cookie:` / `Set-Cookie:` values wherever they appear as text.
+- **How:** the text is edited in place - never parsed and re-serialized - so a JSON
+  body stays valid with its key order, whitespace, escapes and exact numbers, and a
+  form body stays a clean pair list. `true` / `false` / `null` are kept.
+- **The marker** is `[REDACTED:len<N>]`, plus `:sha256-<8 hex>` for values of 20+
+  characters: an operator confirms which key was sent with
+  `printf %s "$JNE_API_KEY" | sha256sum | cut -c1-8`. Short values (usernames, PINs)
+  get no fingerprint, so nothing guessable can be brute-forced against it.
+- **Lost for debugging:** the credential values themselves (e.g. a typo inside a key
+  is visible only as a fingerprint/length mismatch), and the exact bytes of those
+  fields. Copy cURL already replaces them with `$VARIABLES`, so replay is unaffected.
 
 ## Redaction policy (sanitized columns)
 
@@ -111,8 +134,9 @@ the policy below; the list view and every non-detail consumer read only these.
 5. The payload is capped (`INTEGRATION_LOG_MAX_BYTES`, default 16 KB); over the cap
    it is replaced by `{ truncated: true, marker: "[TRUNCATED]", bytes, limitBytes, preview }`.
 
-Endpoints pass through `redactSensitivePath`, so capability tokens in paths and
-credential query values never land in the `endpoint` column.
+Endpoints pass through `redactSensitivePath` and then the integration-log
+`SENSITIVE_KEY` list for query keys (`server_key`, `username`, ...), so capability
+tokens in paths and credential query values never land in the `endpoint` column.
 
 ## Reliability
 

@@ -5,6 +5,7 @@ import { getRequestId } from '../logging/request-context';
 import { INTEGRATION_LOG_CONFIG, IntegrationLogConfig } from './integration-log.config';
 import { sanitizeBody, sanitizeEndpoint, sanitizeErrorText, sanitizePayload } from './integration-log.sanitizer';
 import { IntegrationLogEntry, IntegrationRecorder } from './integration-log.types';
+import { redactRawBody, redactRawUrl } from './raw-credentials';
 
 const ERROR_MESSAGE_MAX = 512;
 const OPERATION_MAX = 48;
@@ -79,11 +80,14 @@ export class IntegrationLogService implements IntegrationRecorder {
       errorMessage: sanitizeErrorText(entry.errorMessage, ERROR_MESSAGE_MAX),
       sanitizedRequest: (request ?? undefined) as Prisma.InputJsonValue | undefined,
       sanitizedResponse: (response ?? undefined) as Prisma.InputJsonValue | undefined,
-      // The exchange EXACTLY as captured, for the SUPER_ADMIN detail view only: no
-      // redaction, masking, truncation or reformatting. Contains credentials and PII.
-      rawEndpoint: entry.endpoint ?? null,
-      rawRequestBody: entry.requestBody ?? null,
-      rawResponseBody: entry.responseBody ?? null,
+      // The exchange as captured, for the SUPER_ADMIN detail view only: no masking,
+      // truncation or reformatting of business data or PII - but credential VALUES
+      // (api_key, username, password, tokens, Authorization/Cookie, credential query
+      // parameters) are replaced in place by a length/fingerprint marker
+      // (raw-credentials.ts). Everything else is byte-for-byte what was exchanged.
+      rawEndpoint: redactRawUrl(entry.endpoint),
+      rawRequestBody: redactRawBody(entry.requestBody),
+      rawResponseBody: redactRawBody(entry.responseBody),
     };
   }
 

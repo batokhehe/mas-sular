@@ -153,12 +153,15 @@ describe('query service', () => {
     expect(findMany).toHaveBeenCalledWith({ where: { operationId: 'op-1' }, orderBy: { createdAt: 'asc' }, omit: RAW_EXCHANGE_OMIT });
   });
 
-  it('the exact exchange (credentials + PII) is returned by the detail query ONLY', async () => {
-    const detailRow = { id: 'l1', rawEndpoint: 'https://jne.test/pickupcashless', rawRequestBody: 'username=store&api_key=jne-secret', rawResponseBody: '{"status":false}' };
+  it('the exchange (PII included, credentials masked on read) is returned by the detail query ONLY', async () => {
+    // A row stored before write-time redaction existed: the key is masked on the way out.
+    const detailRow = { id: 'l1', rawEndpoint: 'https://jne.test/pickupcashless', rawRequestBody: 'username=store&api_key=jne-secret&RECEIVER_NAME=Budi', rawResponseBody: '{"status":false}' };
     const { service, findMany, findUnique } = build();
     findUnique.mockResolvedValue(detailRow);
 
-    await expect(service.get('l1')).resolves.toEqual(detailRow);
+    await expect(service.get('l1')).resolves.toEqual({ ...detailRow, rawRequestBody: 'username=[REDACTED:len5]&api_key=[REDACTED:len10]&RECEIVER_NAME=Budi' });
+    // The stored row object itself is not modified.
+    expect(detailRow.rawRequestBody).toBe('username=store&api_key=jne-secret&RECEIVER_NAME=Budi');
     expect(findUnique.mock.calls[0][0]).not.toHaveProperty('omit');
     expect(findUnique.mock.calls[0][0]).not.toHaveProperty('select');
 

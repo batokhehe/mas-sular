@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { IntegrationDirection, IntegrationOutcome, IntegrationProvider, Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { pageArgs, paginate } from '../../common/pagination/pagination';
+import { redactRawBody, redactRawUrl } from './raw-credentials';
 
 export interface IntegrationLogQuery {
   page?: number;
@@ -85,11 +86,21 @@ export class IntegrationLogQueryService {
     return paginate(items, total, page, limit);
   }
 
-  /** The detail view: every column, including the exact request/response as captured. */
+  /**
+   * The detail view: every column, including the request/response as captured - with
+   * credential values masked on the way out, so rows written before write-time
+   * redaction existed never show a key either. Idempotent for newer rows; the stored
+   * row itself is never modified.
+   */
   async get(id: string) {
     const log = await this.prisma.integrationApiLog.findUnique({ where: { id } });
     if (!log) throw new NotFoundException('Integration log not found');
-    return log;
+    return {
+      ...log,
+      rawEndpoint: redactRawUrl(log.rawEndpoint),
+      rawRequestBody: redactRawBody(log.rawRequestBody),
+      rawResponseBody: redactRawBody(log.rawResponseBody),
+    };
   }
 
   /** Every record of ONE logical call (all attempts + the application outcome). */

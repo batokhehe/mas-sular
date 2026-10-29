@@ -254,6 +254,16 @@ export function sanitizeErrorText(text: string | null | undefined, maxLength = 5
 /** Host + path, with capability tokens and credential query values removed. */
 export function sanitizeEndpoint(url: string | undefined | null): string | null {
   if (!url) return null;
-  const redacted = redactSensitivePath(url);
+  // redactSensitivePath knows the request-log key list; this column also follows the
+  // integration-log one (server_key, username, client_key, ...), as the payloads do.
+  const redacted = redactSensitivePath(url).replace(/([?&])([^=&#]+)=([^&#]*)/g, (pair, sep: string, key: string) => {
+    let name = key;
+    try {
+      name = decodeURIComponent(key.replace(/\+/g, ' '));
+    } catch {
+      // keep the raw key
+    }
+    return isSensitiveKey(name) ? `${sep}${key}=${REDACTED}` : pair;
+  });
   return redacted.length > 512 ? redacted.slice(0, 512) : redacted;
 }

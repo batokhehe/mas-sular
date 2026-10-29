@@ -36,7 +36,7 @@ export class AdminIntegrationLogController {
     return this.logs.byOperation(operationId);
   }
 
-  /** Detail: includes rawEndpoint / rawRequestBody / rawResponseBody verbatim. Never cached. */
+  /** Detail: includes rawEndpoint / rawRequestBody / rawResponseBody, credential values masked. Never cached. */
   @Permissions('IntegrationLog.read')
   @Get(':id')
   @Header('Cache-Control', 'no-store')
