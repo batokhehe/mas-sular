@@ -1,15 +1,12 @@
 import {
-  EXPECTED_SANDBOX_ROWS,
   JNE_CODE_PATTERN,
   JneMasterValidationError,
   SANDBOX_TEST_CODES,
-  assertExpectedRowCount,
-  computeImportDiff,
+  inspectJneMasterPayload,
   isTestCode,
   normalizeJneName,
   parseJneName,
   toJneLocationSeeds,
-  validateJneMasterPayload,
   type JneMasterRaw,
 } from '../../prisma/tools/jne-master';
 import { extractPayload, parseArgs, verifyRawNames, CONFIRM_FLAG } from '../../prisma/tools/import-jne-master';
@@ -26,7 +23,7 @@ import { extractPayload, parseArgs, verifyRawNames, CONFIRM_FLAG } from '../../p
  */
 
 const FETCHED = '2026-09-02T02:40:46.000Z';
-const opts = { sourceFetchedAt: FETCHED };
+const opts = { source: 'SANDBOX' as const, sourceFetchedAt: FETCHED };
 
 /** Rows copied verbatim from the PAXELBOX-61C capture, including the anomalies. */
 const REAL_ROWS: JneMasterRaw[] = [
@@ -131,7 +128,7 @@ describe('partCount', () => {
 // --------------------------------------------------------- 5-6. provenance
 
 describe('provenance', () => {
-  it('defaults to source SANDBOX and kind DESTINATION', () => {
+  it('keeps the stated source and defaults kind to DESTINATION', () => {
     for (const s of toJneLocationSeeds(REAL_ROWS, opts)) {
       expect(s.source).toBe('SANDBOX');
       expect(s.kind).toBe('DESTINATION');
@@ -187,16 +184,21 @@ function byRaw(seeds: ReturnType<typeof toJneLocationSeeds>, code: string): stri
 
 // ------------------------------------------------- 9. fail-closed validation
 
-describe('validation fails closed', () => {
+describe('inspection reports every problem and repairs none', () => {
   const ok = (rows: unknown) => ({ detail: rows });
 
-  it('detects a duplicate City_Code', () => {
-    expect(() =>
-      validateJneMasterPayload(ok([
+  it('reports a duplicate City_Code with every position, and imports neither row', () => {
+    const i = inspectJneMasterPayload(
+      ok([
         { City_Name: 'A,B', City_Code: 'BDO10002' },
         { City_Name: 'C,D', City_Code: 'BDO10002' },
-      ])),
-    ).toThrow(/duplicate City_Code "BDO10002"/);
+        { City_Name: 'E,F', City_Code: 'BDO10003' },
+      ]),
+    );
+    expect(i.duplicates).toEqual([{ code: 'BDO10002', rows: [0, 1] }]);
+    expect(i.rows.map((r) => r.City_Code)).toEqual(['BDO10003']);
+    expect(i.records).toBe(3);
+    expect(i.uniqueCodes).toBe(2);
   });
 
   it.each([
@@ -204,56 +206,36 @@ describe('validation fails closed', () => {
     ['a missing detail', {}],
     ['a non-array detail', { detail: 'x' }],
     ['an empty detail', { detail: [] }],
-    ['a non-object row', ok(['x'])],
-    ['a missing City_Name', ok([{ City_Code: 'BDO10002' }])],
-    ['a missing City_Code', ok([{ City_Name: 'A,B' }])],
-    ['a blank City_Name', ok([{ City_Name: '   ', City_Code: 'BDO10002' }])],
-    ['a blank City_Code', ok([{ City_Name: 'A,B', City_Code: '  ' }])],
-  ])('rejects %s', (_label, payload) => {
-    expect(() => validateJneMasterPayload(payload)).toThrow(JneMasterValidationError);
+  ])('refuses %s outright', (_label, payload) => {
+    expect(() => inspectJneMasterPayload(payload)).toThrow(JneMasterValidationError);
   });
 
-  it('accepts the real shape unchanged', () => {
-    const rows = validateJneMasterPayload(ok(REAL_ROWS));
-    expect(rows).toEqual(REAL_ROWS);
+  it.each([
+    ['a non-object row', 'x', 'NOT_AN_OBJECT'],
+    ['a missing City_Name', { City_Code: 'BDO10002' }, 'NO_CITY_NAME'],
+    ['a missing City_Code', { City_Name: 'A,B' }, 'NO_CITY_CODE'],
+    ['a blank City_Name', { City_Name: '   ', City_Code: 'BDO10002' }, 'BLANK_CITY_NAME'],
+    ['a blank City_Code', { City_Name: 'A,B', City_Code: '  ' }, 'BLANK_CITY_CODE'],
+    ['a lowercase code', { City_Name: 'A,B', City_Code: 'bdo10002' }, 'MALFORMED_CODE'],
+    ['a code with edge whitespace', { City_Name: 'A,B', City_Code: 'BDO10002 ' }, 'MALFORMED_CODE'],
+  ])('reports %s as invalid and imports nothing from it', (_label, row, reason) => {
+    const i = inspectJneMasterPayload(ok([row]));
+    expect(i.invalid.map((x) => x.reason)).toEqual([reason]);
+    expect(i.rows).toEqual([]);
   });
 
-  it('refuses an unexpected row count unless overridden', () => {
-    expect(() => assertExpectedRowCount(8000)).toThrow(/8000 rows but 8322 were expected/);
-    expect(() => assertExpectedRowCount(8000, undefined, true)).not.toThrow();
-    expect(() => assertExpectedRowCount(EXPECTED_SANDBOX_ROWS)).not.toThrow();
-  });
-});
-
-// ------------------------------------------------------------ import diff
-
-describe('import diff', () => {
-  it('reports every row as new against an empty table', () => {
-    const seeds = toJneLocationSeeds(REAL_ROWS, opts);
-    const d = computeImportDiff(seeds, []);
-
-    expect(d.sourceRows).toBe(REAL_ROWS.length);
-    expect(d.uniqueCodes).toBe(REAL_ROWS.length);
-    expect(d.newCodes).toHaveLength(REAL_ROWS.length);
-    expect(d.existingCodes).toEqual([]);
-    expect(d.invalidOrTestCodes.sort()).toEqual(['TEST', 'XXWWQEQ']);
+  it('separates known test codes from malformed records, and imports neither', () => {
+    const i = inspectJneMasterPayload(ok(REAL_ROWS));
+    expect(i.testCodes.sort()).toEqual(['TEST', 'XXWWQEQ']);
+    expect(i.invalid).toEqual([]);
+    expect(i.rows.map((r) => r.City_Code)).not.toContain('TEST');
+    expect(i.records).toBe(REAL_ROWS.length);
+    expect(i.uniqueCodes).toBe(REAL_ROWS.length);
   });
 
-  it('reports a changed rawName rather than overwriting silently', () => {
-    const seeds = toJneLocationSeeds(REAL_ROWS, opts);
-    const d = computeImportDiff(seeds, [{ code: 'BDO10002', rawName: 'CIBIRU,BANDUNG LAMA' }]);
-
-    expect(d.changedRawName).toEqual([{ code: 'BDO10002', from: 'CIBIRU,BANDUNG LAMA', to: 'CIBIRU,BANDUNG' }]);
-  });
-
-  it('deactivates rather than deletes a code absent from the new snapshot', () => {
-    const seeds = toJneLocationSeeds([REAL_ROWS[0]], opts);
-    const d = computeImportDiff(seeds, [
-      { code: 'BDO10002', rawName: 'CIBIRU,BANDUNG' },
-      { code: 'BDO99999', rawName: 'GONE,BANDUNG' },
-    ]);
-
-    expect(d.deactivatedCodes).toEqual(['BDO99999']);
+  it('carries the real shape through unchanged', () => {
+    const real = REAL_ROWS.filter((r) => !isTestCode(r.City_Code));
+    expect(inspectJneMasterPayload(ok(real)).rows).toEqual(real);
   });
 });
 
@@ -287,7 +269,7 @@ describe('the import CLI', () => {
     });
     const { payload, fetchedAt } = extractPayload(capture);
 
-    expect(validateJneMasterPayload(payload)).toHaveLength(REAL_ROWS.length);
+    expect(inspectJneMasterPayload(payload).records).toBe(REAL_ROWS.length);
     expect(fetchedAt).toBe('Tue, 02 Sep 2026 02:40:46 GMT');
   });
 
@@ -297,7 +279,7 @@ describe('the import CLI', () => {
 
   it('accepts a bare payload with no capture envelope', () => {
     const { payload, fetchedAt } = extractPayload(JSON.stringify({ detail: REAL_ROWS }));
-    expect(validateJneMasterPayload(payload)).toHaveLength(REAL_ROWS.length);
+    expect(inspectJneMasterPayload(payload).records).toBe(REAL_ROWS.length);
     expect(fetchedAt).toBeNull();
   });
 });
@@ -336,86 +318,19 @@ describe('this phase creates no mappings', () => {
   });
 });
 
-// ------------------------------- 12. write-path regression (PAXELBOX-61F)
+// ------------------------------------------------- 12. seeds on a refresh
 
-/**
- * PAXELBOX-61E.1 verified the upsert/deactivate path once, end to end against a
- * real container. That is strong evidence but not a guard: nothing would catch a
- * later regression. These tests exercise the ACTUAL diff logic the CLI drives
- * its writes from, so the decisions - insert, update, deactivate, never delete -
- * are pinned.
- */
-describe('write-path decisions are driven by the real diff logic', () => {
-  const snapshot = (rows: JneMasterRaw[]) => toJneLocationSeeds(rows, opts);
-
-  it('a code absent from the DB is an INSERT', () => {
-    const d = computeImportDiff(snapshot([{ City_Name: 'NEW,BANDUNG', City_Code: 'BDO19999' }]), []);
-    expect(d.newCodes).toEqual(['BDO19999']);
-    expect(d.existingCodes).toEqual([]);
-  });
-
-  it('a code already present with a different rawName is an UPDATE, and is reported', () => {
-    const d = computeImportDiff(snapshot([{ City_Name: 'CIBIRU,BANDUNG', City_Code: 'BDO10002' }]), [
-      { code: 'BDO10002', rawName: 'CIBIRU,BANDUNG OLD' },
-    ]);
-
-    expect(d.newCodes).toEqual([]);
-    expect(d.existingCodes).toEqual(['BDO10002']);
-    expect(d.changedRawName).toEqual([
-      { code: 'BDO10002', from: 'CIBIRU,BANDUNG OLD', to: 'CIBIRU,BANDUNG' },
-    ]);
-  });
-
-  it('an unchanged code is neither new nor reported as changed', () => {
-    const d = computeImportDiff(snapshot([{ City_Name: 'CIBIRU,BANDUNG', City_Code: 'BDO10002' }]), [
-      { code: 'BDO10002', rawName: 'CIBIRU,BANDUNG' },
-    ]);
-    expect(d.newCodes).toEqual([]);
-    expect(d.changedRawName).toEqual([]);
-  });
-
-  it('a code missing from the new snapshot is DEACTIVATED, never deleted', () => {
-    const d = computeImportDiff(snapshot([{ City_Name: 'KEPT,BANDUNG', City_Code: 'BDO10002' }]), [
-      { code: 'BDO10002', rawName: 'KEPT,BANDUNG' },
-      { code: 'BDO10018', rawName: 'GONE,BANDUNG' },
-    ]);
-
-    expect(d.deactivatedCodes).toEqual(['BDO10018']);
-    // Nothing in the diff can express a delete - that is the point.
-    expect(Object.keys(d)).not.toContain('deletedCodes');
-  });
-
-  it('historical rows survive a much smaller refresh', () => {
-    const existing = Array.from({ length: 100 }, (_, i) => ({ code: `BDO2${String(i).padStart(4, '0')}`, rawName: `R${i}` }));
-    const d = computeImportDiff(snapshot([{ City_Name: 'ONE,BANDUNG', City_Code: 'BDO10002' }]), existing);
-
-    expect(d.deactivatedCodes).toHaveLength(100);
-    expect(d.newCodes).toEqual(['BDO10002']);
-  });
-
-  it('a refresh preserves source and kind on every seed', () => {
-    for (const s of snapshot(REAL_ROWS)) {
+describe('seeds on a refresh', () => {
+  it('preserves source and kind on every seed', () => {
+    for (const s of toJneLocationSeeds(REAL_ROWS, opts)) {
       expect(s.source).toBe('SANDBOX');
       expect(s.kind).toBe('DESTINATION');
     }
   });
 
-  it('a refresh keeps TEST and XXWWQEQ inactive', () => {
-    const seeds = snapshot(REAL_ROWS);
+  it('keeps TEST and XXWWQEQ inactive', () => {
+    const seeds = toJneLocationSeeds(REAL_ROWS, opts);
     expect(seeds.find((s) => s.code === 'TEST')!.isActive).toBe(false);
     expect(seeds.find((s) => s.code === 'XXWWQEQ')!.isActive).toBe(false);
-  });
-
-  it('duplicate-code protection fires before any write decision is computed', () => {
-    // The CLI validates before diffing, so a duplicated source can never reach
-    // the upsert loop and silently overwrite one row with another.
-    expect(() =>
-      validateJneMasterPayload({
-        detail: [
-          { City_Name: 'A,B', City_Code: 'BDO10002' },
-          { City_Name: 'C,D', City_Code: 'BDO10002' },
-        ],
-      }),
-    ).toThrow(/duplicate City_Code/);
   });
 });

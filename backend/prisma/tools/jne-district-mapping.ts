@@ -205,6 +205,8 @@ export interface MappingCandidate {
 }
 
 export interface ResolveOptions {
+  /** Which JneLocation.source may be a candidate. Stated by the caller, never assumed. */
+  source: 'SANDBOX' | 'PRODUCTION';
   aliases?: DistrictAlias[];
   parentAliases?: ParentAlias[];
   now?: () => string;
@@ -213,15 +215,15 @@ export interface ResolveOptions {
 /**
  * Resolve one district.
  *
- * Eligibility is checked before any lookup: only an active, SANDBOX,
- * DESTINATION row under the expected parent can be a candidate. A candidate
+ * Eligibility is checked before any lookup: only an active DESTINATION row of the
+ * stated source, under the expected parent, can be a candidate. A candidate
  * count of exactly one yields REVIEW_REQUIRED; more than one yields AMBIGUOUS
  * and is NEVER resolved by taking the first; zero yields NOT_FOUND.
  */
 export function resolveDistrictCandidate(
   district: InternalDistrict,
   rows: JneCandidateRow[],
-  options: ResolveOptions = {},
+  options: ResolveOptions,
 ): MappingCandidate {
   const aliases = options.aliases ?? KOTA_BANDUNG_DISTRICT_ALIASES;
   const parentAliases = options.parentAliases ?? KOTA_BANDUNG_PARENT_ALIASES;
@@ -302,7 +304,7 @@ export function resolveDistrictCandidate(
     (r) =>
       r.isActive &&
       r.kind === 'DESTINATION' &&
-      r.source === 'SANDBOX' &&
+      r.source === options.source &&
       normalizeJneName(r.parsedChild) === wantedChild &&
       r.parsedParent !== null &&
       acceptedParents.includes(normalizeJneName(r.parsedParent)),
@@ -388,7 +390,7 @@ export interface ResolveSummary {
 export function resolveDistrictCandidates(
   districts: InternalDistrict[],
   rows: JneCandidateRow[],
-  options: ResolveOptions = {},
+  options: ResolveOptions,
 ): ResolveSummary {
   const candidates = districts.map((d) => resolveDistrictCandidate(d, rows, options));
   const count = (s: JneMappingStatus) => candidates.filter((c) => c.status === s).length;

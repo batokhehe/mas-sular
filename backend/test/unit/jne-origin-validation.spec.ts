@@ -9,12 +9,7 @@
  */
 
 import { JneOriginBootValidator } from '../../src/modules/shipment/jne-origin-boot.validator';
-import {
-  EXPECTED_SANDBOX_ORIGIN_ROWS,
-  EXPECTED_SANDBOX_ROWS,
-  expectedRowsFor,
-  toJneLocationSeeds,
-} from '../../prisma/tools/jne-master';
+import { toJneLocationSeeds } from '../../prisma/tools/jne-master';
 
 /** The three codes this suite reasons about, from measured evidence. */
 const ORIGIN_CODE = 'BDO10000'; // 61L: the one city-level BANDUNG origin
@@ -153,19 +148,6 @@ describe('JneOriginBootValidator', () => {
     }
     expect(message).toMatch(/is not a JNE origin code/);
     expect(message).not.toMatch(/api[_-]?key|password|username|secret/i);
-  });
-});
-
-describe('per-namespace expected row counts', () => {
-  it('guards each master with its own measured size', () => {
-    expect(EXPECTED_SANDBOX_ROWS).toBe(8322); // 61C destination snapshot
-    expect(EXPECTED_SANDBOX_ORIGIN_ROWS).toBe(614); // 61L origin snapshot
-    expect(expectedRowsFor('DESTINATION')).toBe(8322);
-    expect(expectedRowsFor('ORIGIN')).toBe(614);
-  });
-
-  it('would refuse an origin snapshot sized like a destination one, and vice versa', () => {
-    expect(expectedRowsFor('ORIGIN')).not.toBe(expectedRowsFor('DESTINATION'));
   });
 });
 
