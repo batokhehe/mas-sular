@@ -82,14 +82,13 @@ async function captureLogs(fn: () => Promise<unknown>): Promise<Array<Record<str
 }
 
 describe('quote URLs are built from the configured endpoint, prefix included', () => {
-  it('city services go to <base>/rates/city and INSTANT to <base>/rates/instant', async () => {
+  it('offered services go to <base>/rates/city; hidden INSTANT is never requested', async () => {
     const { provider, calls } = build(config(), async () => res(404, 'Not Found'));
     await provider.getRates(request);
     expect(calls.map((c) => c.url).sort()).toEqual([
       `${SANDBOX}/rates/city`,
       `${SANDBOX}/rates/city`,
       `${SANDBOX}/rates/city`,
-      `${SANDBOX}/rates/instant`,
     ]);
   });
 
@@ -108,7 +107,7 @@ describe('a 404 is diagnosable from the logs alone', () => {
     const { provider } = build(config(), async () => res(404, 'Not Found'));
     const logs = await captureLogs(() => provider.getRates(request));
     const failed = logs.filter((l) => l.provider === 'paxel' && l.status === 404);
-    expect(failed).toHaveLength(4);
+    expect(failed).toHaveLength(3);
     for (const line of failed) {
       expect(line).toMatchObject({ errorClass: 'permanent_4xx', origin: 'Kota Bandung', destination: 'Kota Jakarta Utara' });
       expect(['stage-commerce-api.paxel.co/v1/rates/city', 'stage-commerce-api.paxel.co/v1/rates/instant']).toContain(
@@ -116,14 +115,14 @@ describe('a 404 is diagnosable from the logs alone', () => {
       );
     }
     expect(new Set(failed.map((l) => l.service))).toEqual(
-      new Set(['PAXEL_INSTANT', 'PAXEL_SAMEDAY', 'PAXEL_NEXTDAY', 'PAXEL_REGULAR']),
+      new Set(['PAXEL_SAMEDAY', 'PAXEL_NEXTDAY', 'PAXEL_REGULAR']),
     );
   });
 
   it('a 404 is permanent: one attempt per service, no retry', async () => {
     const { provider, calls } = build(config({ maxRetry: 2 }), async () => res(404));
     await expect(provider.getRates(request)).resolves.toEqual([]);
-    expect(calls).toHaveLength(4);
+    expect(calls).toHaveLength(3);
   });
 
   it('a timeout/network error is transient: retried, then that service contributes nothing', async () => {
@@ -131,13 +130,13 @@ describe('a 404 is diagnosable from the logs alone', () => {
       throw new Error('ETIMEDOUT');
     });
     await expect(provider.getRates(request)).resolves.toEqual([]);
-    expect(calls).toHaveLength(8); // 4 services x (1 + 1 retry)
+    expect(calls).toHaveLength(6); // 3 offered services x (1 + 1 retry)
   });
 
   it('a 5xx is transient and retried', async () => {
     const { provider, calls } = build(config({ maxRetry: 1 }), async () => res(503));
     await provider.getRates(request);
-    expect(calls).toHaveLength(8);
+    expect(calls).toHaveLength(6);
   });
 
   it('nothing logged carries the API key, the secret, the street address or a query string', async () => {

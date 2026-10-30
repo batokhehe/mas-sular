@@ -28,6 +28,13 @@ export interface PaxelServiceSpec {
    * hard failure, never a silently clamped request.
    */
   maxWeightGram: number;
+  /**
+   * Whether checkout quotes this service. Off = never priced, so never offered,
+   * selectable or ordered (order creation selects only from the quotes). The
+   * code stays in PAXEL_SERVICES, so an order already on it is still recognised,
+   * booked and tracked. Turning a service back on is a reviewed code change.
+   */
+  offeredAtCheckout: boolean;
 }
 
 const CITY_PATH = '/rates/city';
@@ -37,11 +44,15 @@ const INSTANT_PATH = '/rates/instant';
 export const PAXEL_MIN_WEIGHT_GRAM = 1;
 
 const SPECS: Record<PaxelServiceCode, PaxelServiceSpec> = {
-  PAXEL_INSTANT: { path: INSTANT_PATH, serviceType: 'INSTANT GOSEND', label: 'Paxel Instant', maxWeightGram: 25_000 },
-  PAXEL_SAMEDAY: { path: CITY_PATH, serviceType: 'SAMEDAY', label: 'Paxel Same Day', maxWeightGram: 5_000 },
-  PAXEL_NEXTDAY: { path: CITY_PATH, serviceType: 'NEXTDAY', label: 'Paxel Next Day', maxWeightGram: 5_000 },
-  PAXEL_REGULAR: { path: CITY_PATH, serviceType: 'REGULAR', label: 'Paxel Regular', maxWeightGram: 5_000 },
+  // Hidden from checkout (2026-10-30): INSTANT GOSEND is not offered to customers.
+  PAXEL_INSTANT: { path: INSTANT_PATH, serviceType: 'INSTANT GOSEND', label: 'Paxel Instant', maxWeightGram: 25_000, offeredAtCheckout: false },
+  PAXEL_SAMEDAY: { path: CITY_PATH, serviceType: 'SAMEDAY', label: 'Paxel Same Day', maxWeightGram: 5_000, offeredAtCheckout: true },
+  PAXEL_NEXTDAY: { path: CITY_PATH, serviceType: 'NEXTDAY', label: 'Paxel Next Day', maxWeightGram: 5_000, offeredAtCheckout: true },
+  PAXEL_REGULAR: { path: CITY_PATH, serviceType: 'REGULAR', label: 'Paxel Regular', maxWeightGram: 5_000, offeredAtCheckout: true },
 };
+
+/** The services checkout quotes, in PAXEL_SERVICES order. */
+export const PAXEL_CHECKOUT_SERVICES: readonly PaxelServiceCode[] = PAXEL_SERVICES.filter((service) => SPECS[service].offeredAtCheckout);
 
 export function paxelServiceSpec(service: PaxelServiceCode): PaxelServiceSpec {
   return SPECS[service];
