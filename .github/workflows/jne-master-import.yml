@@ -1,0 +1,58 @@
+name: JNE master import
+
+# Checks ci.yml does not run: the build, the importer against a real PostgreSQL, and
+# mutation checks of its protections. Scoped to the importer's own files.
+on:
+  pull_request:
+    paths:
+      - 'backend/prisma/tools/*jne*'
+      - 'backend/prisma/schema.prisma'
+      - 'backend/test/unit/jne-*'
+      - 'backend/test/integration/jne-*'
+      - 'backend/test/mutation/**'
+      - '.github/workflows/jne-master-import.yml'
+
+jobs:
+  typescript:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4   # version comes from packageManager in package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter backend prisma:generate
+      - run: pnpm exec tsc --noEmit -p tsconfig.json
+        working-directory: backend
+      - run: pnpm --filter backend build
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter backend prisma:generate
+      # Testcontainers PostgreSQL, thrown away with the job.
+      - run: pnpm exec jest --config test/integration/jest.integration.config.js test/integration/jne-master-import test/integration/jne-one-active-matched
+        working-directory: backend
+
+  mutation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter backend prisma:generate
+      - run: node test/mutation/jne-master-import.mjs
+        working-directory: backend

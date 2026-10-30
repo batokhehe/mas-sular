@@ -2,7 +2,10 @@
  * PAXELBOX-61F: show the JNE mapping candidates the name resolver finds for one city.
  * READ-ONLY.
  *
- *   npx tsx prisma/tools/generate-jne-mapping-candidates.ts --city "Kota Bandung"
+ *   npx tsx prisma/tools/generate-jne-mapping-candidates.ts --city "Kota Bandung" --source PRODUCTION
+ *
+ * --source (REQUIRED, no default) names the JneLocation.source to search: the master
+ * may hold rows of both, and which one a candidate may come from is the operator's call.
  *
  * ---------------------------------------------------------------------------
  * THIS TOOL NO LONGER WRITES
@@ -25,6 +28,7 @@ import { resolveDistrictCandidates, type InternalDistrict, type JneCandidateRow,
 
 export interface CliOptions {
   city: string;
+  source: 'SANDBOX' | 'PRODUCTION';
 }
 
 /** Flags of the retired write paths. Any of them refuses the run. */
@@ -38,7 +42,12 @@ export function parseArgs(argv: string[]): CliOptions | { refused: string } {
   const retired = argv.filter((a) => (RETIRED_FLAGS as readonly string[]).includes(a));
   if (retired.length > 0) return { refused: `${retired.join(', ')}: ${RETIRED_MESSAGE}` };
   const i = argv.indexOf('--city');
-  return { city: i >= 0 ? (argv[i + 1] ?? '') : 'Kota Bandung' };
+  const s = argv.indexOf('--source');
+  const source = s >= 0 ? argv[s + 1] : undefined;
+  if (source !== 'SANDBOX' && source !== 'PRODUCTION') {
+    return { refused: '--source SANDBOX|PRODUCTION is required: name the JNE master to search (there is no default)' };
+  }
+  return { city: i >= 0 ? (argv[i + 1] ?? '') : 'Kota Bandung', source };
 }
 
 export function formatCandidates(candidates: MappingCandidate[]): string {
@@ -68,7 +77,7 @@ export async function main(argv: string[], store: () => CandidateReadStore, log:
     return 2;
   }
   if (!opts.city) {
-    log('usage: --city "<city name>"');
+    log('usage: --city "<city name>" --source SANDBOX|PRODUCTION');
     return 2;
   }
   const db = store();
@@ -101,12 +110,12 @@ export async function main(argv: string[], store: () => CandidateReadStore, log:
   }));
 
   const rows = (await db.jneLocation.findMany({
-    where: { kind: 'DESTINATION', source: 'SANDBOX', isActive: true },
+    where: { kind: 'DESTINATION', source: opts.source, isActive: true },
     select: { id: true, code: true, rawName: true, parsedChild: true, parsedParent: true, kind: true, source: true, isActive: true },
   })) as JneCandidateRow[];
-  const summary = resolveDistrictCandidates(internal, rows);
+  const summary = resolveDistrictCandidates(internal, rows, { source: opts.source });
 
-  log(`city: ${opts.city}`);
+  log(`city: ${opts.city}   source: ${opts.source}`);
   log(`internal districts: ${summary.districts}   JNE candidate pool: ${rows.length}`);
   log(`REVIEW_REQUIRED=${summary.reviewRequired} AMBIGUOUS=${summary.ambiguous} NOT_FOUND=${summary.notFound} MATCHED=${summary.matched}`);
   log(`EXACT_NAME=${summary.exactName} REVIEWED_ALIAS=${summary.reviewedAlias}\n`);

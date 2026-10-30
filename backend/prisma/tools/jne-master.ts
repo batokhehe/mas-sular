@@ -43,8 +43,8 @@ export interface JneLocationSeed {
 }
 
 /**
- * Codes that are not real destinations. Observed verbatim in the sandbox
- * payload; kept rather than dropped so a later refresh can show they are gone.
+ * Codes that are not real destinations. Observed verbatim in both JNE payloads
+ * (production still lists TEST). An import reports them and writes neither.
  */
 export const SANDBOX_TEST_CODES = ['TEST', 'XXWWQEQ'] as const;
 
@@ -98,54 +98,114 @@ export class JneMasterValidationError extends Error {
   }
 }
 
+export type JneMasterInvalidReason =
+  | 'NOT_AN_OBJECT'
+  | 'NO_CITY_NAME'
+  | 'NO_CITY_CODE'
+  | 'BLANK_CITY_NAME'
+  | 'BLANK_CITY_CODE'
+  | 'MALFORMED_CODE';
+
+export interface JneMasterInvalidRow {
+  row: number;
+  code: string | null;
+  name: string | null;
+  reason: JneMasterInvalidReason;
+}
+
 /**
- * Validate the payload envelope and rows. FAILS CLOSED — a malformed source is
- * never silently repaired, because a quietly-dropped row is indistinguishable
- * from a destination JNE genuinely does not serve.
+ * What a snapshot contains. `records` and `uniqueCodes` are separate counts on
+ * purpose: equal numbers are a finding about the snapshot, not an assumption.
  */
-export function validateJneMasterPayload(body: unknown): JneMasterRaw[] {
+export interface JneMasterInspection {
+  records: number;
+  uniqueCodes: number;
+  /** Importable rows. Excludes invalid rows, known test codes and every row of a repeated code. */
+  rows: JneMasterRaw[];
+  duplicates: Array<{ code: string; rows: number[] }>;
+  invalid: JneMasterInvalidRow[];
+  /** Known non-destinations (TEST, XXWWQEQ): reported, never written. */
+  testCodes: string[];
+}
+
+/**
+ * Report every problem in a payload instead of stopping at the first, so a dry run
+ * can show them all. A malformed ENVELOPE still throws, because there is nothing to
+ * report on. Nothing here is repaired: a quietly-dropped row is indistinguishable
+ * from a destination JNE genuinely does not serve, so an import refuses any snapshot
+ * with an invalid or duplicate record.
+ */
+export function inspectJneMasterPayload(body: unknown): JneMasterInspection {
   if (!body || typeof body !== 'object') throw new JneMasterValidationError('payload is not an object');
   const detail = (body as { detail?: unknown }).detail;
   if (!Array.isArray(detail)) throw new JneMasterValidationError('`detail` is missing or not an array');
   if (detail.length === 0) throw new JneMasterValidationError('`detail` is empty');
 
-  const seen = new Map<string, number>();
+  const positions = new Map<string, number[]>();
+  const invalid: JneMasterInvalidRow[] = [];
+  const testCodes: string[] = [];
   const rows: JneMasterRaw[] = [];
-  detail.forEach((entry, i) => {
-    if (!entry || typeof entry !== 'object') throw new JneMasterValidationError(`row ${i} is not an object`);
-    const r = entry as Record<string, unknown>;
-    if (typeof r.City_Name !== 'string') throw new JneMasterValidationError(`row ${i} has no string City_Name`);
-    if (typeof r.City_Code !== 'string') throw new JneMasterValidationError(`row ${i} has no string City_Code`);
-    if (!r.City_Name.trim()) throw new JneMasterValidationError(`row ${i} has a blank City_Name`);
-    if (!r.City_Code.trim()) throw new JneMasterValidationError(`row ${i} has a blank City_Code`);
-    // A duplicate code would make the natural key ambiguous; the observed
-    // dataset has none, so one appearing means the source changed shape.
-    const prev = seen.get(r.City_Code);
-    if (prev !== undefined) {
-      throw new JneMasterValidationError(`duplicate City_Code "${r.City_Code}" at rows ${prev} and ${i}`);
+
+  detail.forEach((entry, row) => {
+    if (!entry || typeof entry !== 'object') {
+      invalid.push({ row, code: null, name: null, reason: 'NOT_AN_OBJECT' });
+      return;
     }
-    seen.set(r.City_Code, i);
-    rows.push({ City_Name: r.City_Name, City_Code: r.City_Code });
+    const r = entry as Record<string, unknown>;
+    const code = typeof r.City_Code === 'string' ? r.City_Code : null;
+    const name = typeof r.City_Name === 'string' ? r.City_Name : null;
+    if (code !== null && code.trim()) positions.set(code, [...(positions.get(code) ?? []), row]);
+
+    const reason: JneMasterInvalidReason | null =
+      name === null ? 'NO_CITY_NAME'
+      : code === null ? 'NO_CITY_CODE'
+      : !name.trim() ? 'BLANK_CITY_NAME'
+      : !code.trim() ? 'BLANK_CITY_CODE'
+      : null;
+    if (reason) {
+      invalid.push({ row, code, name, reason });
+      return;
+    }
+    const c = code as string;
+    if (isTestCode(c)) {
+      if (!testCodes.includes(c)) testCodes.push(c);
+      return;
+    }
+    if (!JNE_CODE_PATTERN.test(c)) {
+      invalid.push({ row, code: c, name, reason: 'MALFORMED_CODE' });
+      return;
+    }
+    rows.push({ City_Name: name as string, City_Code: c });
   });
-  return rows;
+
+  return {
+    records: detail.length,
+    uniqueCodes: positions.size,
+    // No occurrence of a repeated code survives: which one is right is not knowable here.
+    rows: rows.filter((r) => (positions.get(r.City_Code) as number[]).length === 1),
+    duplicates: [...positions].filter(([, at]) => at.length > 1).map(([code, at]) => ({ code, rows: at })),
+    invalid,
+    testCodes,
+  };
 }
 
 export interface TransformOptions {
   kind?: JneLocationKind;
-  source?: JneDataSource;
+  /** Required: a row's environment is stated, never assumed. */
+  source: JneDataSource;
   sourceFetchedAt: string;
 }
 
 /**
  * Raw rows -> persistable seeds. Pure and total.
  *
- * A row is INACTIVE when its code is a known sandbox test code or does not look
- * like a JNE code at all. Inactive rather than excluded: dropping it would make
- * the import unreproducible and hide the sandbox/production difference.
+ * A row is INACTIVE when its code is a known test code or does not look like a JNE
+ * code at all. `inspectJneMasterPayload` keeps such rows from an import; this flag
+ * means a seed built any other way can still never be active.
  */
 export function toJneLocationSeeds(rows: JneMasterRaw[], options: TransformOptions): JneLocationSeed[] {
   const kind = options.kind ?? 'DESTINATION';
-  const source = options.source ?? 'SANDBOX';
+  const { source } = options;
   return rows.map((r) => {
     const normalizedName = normalizeJneName(r.City_Name);
     const { child, parent, partCount } = parseJneName(normalizedName);
@@ -163,79 +223,4 @@ export function toJneLocationSeeds(rows: JneMasterRaw[], options: TransformOptio
       isActive: !isTestCode(code) && JNE_CODE_PATTERN.test(code),
     };
   });
-}
-
-export interface ImportDiff {
-  sourceRows: number;
-  uniqueCodes: number;
-  newCodes: string[];
-  existingCodes: string[];
-  changedRawName: Array<{ code: string; from: string; to: string }>;
-  deactivatedCodes: string[];
-  invalidOrTestCodes: string[];
-}
-
-/**
- * What an import WOULD do, computed before anything is written.
- *
- * `deactivatedCodes` are codes present in the database but absent from the new
- * snapshot: they are deactivated, never deleted, so a reviewed mapping can
- * never dangle.
- */
-export function computeImportDiff(
-  seeds: JneLocationSeed[],
-  existing: Array<{ code: string; rawName: string }>,
-): ImportDiff {
-  const existingByCode = new Map(existing.map((e) => [e.code, e.rawName]));
-  const incoming = new Set(seeds.map((s) => s.code));
-
-  const newCodes: string[] = [];
-  const existingCodes: string[] = [];
-  const changedRawName: ImportDiff['changedRawName'] = [];
-
-  for (const s of seeds) {
-    const prev = existingByCode.get(s.code);
-    if (prev === undefined) {
-      newCodes.push(s.code);
-      continue;
-    }
-    existingCodes.push(s.code);
-    if (prev !== s.rawName) changedRawName.push({ code: s.code, from: prev, to: s.rawName });
-  }
-
-  return {
-    sourceRows: seeds.length,
-    uniqueCodes: incoming.size,
-    newCodes,
-    existingCodes,
-    changedRawName,
-    deactivatedCodes: existing.map((e) => e.code).filter((c) => !incoming.has(c)),
-    invalidOrTestCodes: seeds.filter((s) => !s.isActive).map((s) => s.code),
-  };
-}
-
-/** The row count the PAXELBOX-61C DESTINATION snapshot contained. */
-export const EXPECTED_SANDBOX_ROWS = 8322;
-
-/** The row count the PAXELBOX-61L ORIGIN snapshot contained. */
-export const EXPECTED_SANDBOX_ORIGIN_ROWS = 614;
-
-/**
- * The expected size of a snapshot of `kind`. The two masters are different sizes
- * by an order of magnitude, so a single constant would either wave the origin
- * master through or refuse it outright.
- */
-export function expectedRowsFor(kind: JneLocationKind): number {
-  return kind === 'ORIGIN' ? EXPECTED_SANDBOX_ORIGIN_ROWS : EXPECTED_SANDBOX_ROWS;
-}
-
-/**
- * Refuse an unexpected snapshot size unless an operator overrides it. A source
- * that silently halved would otherwise deactivate thousands of destinations.
- */
-export function assertExpectedRowCount(actual: number, expected = EXPECTED_SANDBOX_ROWS, override = false): void {
-  if (actual === expected || override) return;
-  throw new JneMasterValidationError(
-    `snapshot has ${actual} rows but ${expected} were expected; pass the explicit override if this change is intended`,
-  );
 }

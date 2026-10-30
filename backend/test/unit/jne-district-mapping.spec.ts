@@ -3,10 +3,11 @@ import {
   KOTA_BANDUNG_DISTRICT_ALIASES,
   KOTA_BANDUNG_PARENT_ALIASES,
   jneParentForCity,
-  resolveDistrictCandidate,
-  resolveDistrictCandidates,
+  resolveDistrictCandidate as resolveOne,
+  resolveDistrictCandidates as resolveAll,
   type InternalDistrict,
   type JneCandidateRow,
+  type ResolveOptions,
 } from '../../prisma/tools/jne-district-mapping';
 import { parseArgs, formatCandidates, main, RETIRED_FLAGS } from '../../prisma/tools/generate-jne-mapping-candidates';
 
@@ -21,6 +22,11 @@ import { parseArgs, formatCandidates, main, RETIRED_FLAGS } from '../../prisma/t
  * Bandung, Sukabumi and Nganjuk, so a child-name-only lookup would bind the
  * wrong one.
  */
+
+// These suites reason about the sandbox-sourced dataset; the source is always the caller's to state.
+const sandbox = (options: Partial<ResolveOptions> = {}): ResolveOptions => ({ source: 'SANDBOX', ...options });
+const resolveDistrictCandidate = (d: InternalDistrict, rows: JneCandidateRow[], options?: Partial<ResolveOptions>) => resolveOne(d, rows, sandbox(options));
+const resolveDistrictCandidates = (ds: InternalDistrict[], rows: JneCandidateRow[], options?: Partial<ResolveOptions>) => resolveAll(ds, rows, sandbox(options));
 
 const CITY = { cityId: 'c1', cityName: 'Kota Bandung', cityType: 'CITY' as const, provinceId: 'p1', provinceName: 'Jawa Barat' };
 const district = (name: string, over: Partial<InternalDistrict> = {}): InternalDistrict => ({
@@ -218,6 +224,13 @@ describe('ambiguity and eligibility', () => {
     expect(resolveDistrictCandidate(district('Andir'), pool).status).toBe('NOT_FOUND');
   });
 
+  it('reads the stated source: a PRODUCTION run sees PRODUCTION rows and ignores SANDBOX ones', () => {
+    const pool = [row('ANDIR', 'BANDUNG', 'BDO10041', { source: 'PRODUCTION' }), row('ANDIR', 'BANDUNG', 'BDO99999')];
+    const c = resolveOne(district('Andir'), pool, { source: 'PRODUCTION' });
+    expect(c.status).toBe('REVIEW_REQUIRED');
+    expect(c.evidence.jneCode).toBe('BDO10041');
+  });
+
   it('never matches a city-tier row with a null parent', () => {
     const c = resolveDistrictCandidate(district('Bandung'), POOL);
     expect(c.status).toBe('NOT_FOUND');
@@ -271,8 +284,13 @@ describe('determinism and the CLI', () => {
     expect(parseArgs(['--city', 'Kota Bandung', '--approve', 'Andir,Cicendo', '--reviewer', 'ops'])).toEqual({
       refused: expect.stringContaining('--approve, --reviewer'),
     });
-    expect(parseArgs(['--city', 'Kota Cimahi'])).toEqual({ city: 'Kota Cimahi' });
-    expect(parseArgs([])).toEqual({ city: 'Kota Bandung' });
+    expect(parseArgs(['--city', 'Kota Cimahi', '--source', 'PRODUCTION'])).toEqual({ city: 'Kota Cimahi', source: 'PRODUCTION' });
+    expect(parseArgs(['--source', 'SANDBOX'])).toEqual({ city: 'Kota Bandung', source: 'SANDBOX' });
+  });
+
+  it('has no default source: omitting or misspelling --source is refused', () => {
+    expect(parseArgs(['--city', 'Kota Cimahi'])).toEqual({ refused: expect.stringContaining('--source SANDBOX|PRODUCTION is required') });
+    expect(parseArgs(['--source', 'sandbox'])).toEqual({ refused: expect.stringContaining('there is no default') });
   });
 
   it('confidence fits the VarChar(32) column', () => {
@@ -522,7 +540,7 @@ describe('generate-jne-mapping-candidates is read-only', () => {
   it('lists candidates using two reads and nothing else', async () => {
     const s = store();
     const lines: string[] = [];
-    await expect(main(['--city', 'Kota Bandung'], s.open, (l) => lines.push(l))).resolves.toBe(0);
+    await expect(main(['--city', 'Kota Bandung', '--source', 'SANDBOX'], s.open, (l) => lines.push(l))).resolves.toBe(0);
     expect(s.touched).toEqual([]);
     const out = lines.join('\n');
     expect(out).toContain('BDO10041');
@@ -533,7 +551,7 @@ describe('generate-jne-mapping-candidates is read-only', () => {
   it.each(RETIRED_FLAGS.map((f) => [f]))('%s exits 2 before the database is even opened', async (flag) => {
     const s = store();
     const lines: string[] = [];
-    await expect(main(['--city', 'Kota Bandung', flag, 'Andir,Cicendo'], s.open, (l) => lines.push(l))).resolves.toBe(2);
+    await expect(main(['--city', 'Kota Bandung', '--source', 'SANDBOX', flag, 'Andir,Cicendo'], s.open, (l) => lines.push(l))).resolves.toBe(2);
     expect(s.opened()).toBe(0);
     expect(s.touched).toEqual([]);
     expect(lines.join('\n')).toMatch(/import-jne-mapping-manifest\.ts.*approve-jne-mappings\.ts/);
