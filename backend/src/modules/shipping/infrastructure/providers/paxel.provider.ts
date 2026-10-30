@@ -12,7 +12,7 @@ import {
 } from '../http/shipping-http-client';
 import {
   PAXEL_MIN_WEIGHT_GRAM,
-  PAXEL_SERVICES,
+  PAXEL_CHECKOUT_SERVICES,
   PaxelServiceCode,
   paxelServiceSpec,
 } from './paxel-rate.map';
@@ -109,8 +109,10 @@ export class PaxelProvider implements ShippingProvider {
     // Thrown, so ShippingService isolates it like any other Paxel failure.
     assertPaxelEnvironment(this.cfg);
 
+    // Only the services offered at checkout are priced; a hidden one (INSTANT)
+    // is never requested from Paxel, so it can never reach the storefront.
     const quotes = await Promise.all(
-      PAXEL_SERVICES.map(async (service) => {
+      PAXEL_CHECKOUT_SERVICES.map(async (service) => {
         try {
           return await this.rateFor(service, request);
         } catch (error) {

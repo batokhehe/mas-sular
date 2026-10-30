@@ -1,7 +1,7 @@
 /**
  * Paxel quotes in the integration log (Log Integrasi).
  *
- * Every checkout asks Paxel for four quotes, and until now none of them reached
+ * Every checkout asks Paxel for three quotes (INSTANT is hidden), and until now none of them reached
  * IntegrationApiLog - so a quote that worked and a quote that failed looked the same
  * in the admin (nothing), and a PAXEL_REGULAR 400 left no body anywhere to diagnose.
  *
@@ -87,7 +87,7 @@ function build(http: (url: string, init: ShippingHttpRequest) => Promise<Shippin
   return { provider, rec, calls };
 }
 
-/** SAMEDAY/NEXTDAY/INSTANT answer 200, REGULAR is refused with a 400 - as observed in production. */
+/** SAMEDAY/NEXTDAY answer 200, REGULAR is refused with a 400 - as observed in production. */
 const productionLike = async (_url: string, init: ShippingHttpRequest) =>
   JSON.parse(init.body as string).service_type === 'REGULAR' ? res(400, REFUSAL_BODY) : res(200, OK_BODY);
 
@@ -108,8 +108,8 @@ describe('Paxel quotes are recorded as RATE', () => {
     const { provider, rec } = build(productionLike);
     const quotes = await provider.getRates(request);
 
-    expect(quotes.map((q) => q.service).sort()).toEqual(['PAXEL_INSTANT', 'PAXEL_NEXTDAY', 'PAXEL_SAMEDAY']);
-    expect(rec.entries).toHaveLength(4);
+    expect(quotes.map((q) => q.service).sort()).toEqual(['PAXEL_NEXTDAY', 'PAXEL_SAMEDAY']);
+    expect(rec.entries).toHaveLength(3);
     for (const entry of rec.entries) {
       // 'RATE' is the operation admin/lib/system/integration-log-view.ts lists for PAXEL.
       expect(entry).toMatchObject({ provider: IntegrationProvider.PAXEL, operation: 'RATE', direction: IntegrationDirection.OUTBOUND, method: 'POST' });
@@ -117,7 +117,7 @@ describe('Paxel quotes are recorded as RATE', () => {
     const byService = Object.fromEntries(
       rec.entries.map((e) => [(e.requestPayload as { service_type: string }).service_type, e]),
     );
-    for (const service of ['SAMEDAY', 'NEXTDAY', 'INSTANT GOSEND']) {
+    for (const service of ['SAMEDAY', 'NEXTDAY']) {
       expect(byService[service]).toMatchObject({ applicationOutcome: IntegrationOutcome.OK, httpStatus: 200 });
     }
     expect(byService.REGULAR).toMatchObject({
@@ -152,7 +152,7 @@ describe('Paxel quotes are recorded as RATE', () => {
     await provider.getRates(request);
     const rows = await persisted(rec.entries);
 
-    expect(rows).toHaveLength(4);
+    expect(rows).toHaveLength(3);
     for (const row of rows) {
       expect(row.rawRequestBody).toBeNull();
       expect(row.rawResponseBody).toBeNull();
@@ -195,7 +195,7 @@ describe('Paxel quotes are recorded as RATE', () => {
     });
     await provider.getRates(request);
 
-    expect(rec.entries).toHaveLength(4);
+    expect(rec.entries).toHaveLength(3);
     for (const entry of rec.entries) {
       expect(entry).toMatchObject({ operation: 'RATE', applicationOutcome: IntegrationOutcome.NETWORK_ERROR });
       expect(entry.requestBody).toBeUndefined();
@@ -383,7 +383,7 @@ describe('PAXEL_REGULAR request and refusal, as verified so far', () => {
 
     expect(calls.filter((c) => JSON.parse(c.init.body as string).service_type === 'REGULAR')).toHaveLength(1);
     expect(quotes.some((q) => q.service === 'PAXEL_REGULAR')).toBe(false);
-    expect(quotes).toHaveLength(3);
+    expect(quotes).toHaveLength(2);
     // The refusal is no longer lost: its sanitized body is in the RATE record.
     expect(rec.entries.find((e) => e.httpStatus === 400)?.responsePayload).toMatchObject({ code: 400 });
   });

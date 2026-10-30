@@ -1,5 +1,5 @@
 import { PaxelProvider } from '../../src/modules/shipping/infrastructure/providers/paxel.provider';
-import { paxelServiceSpec, PAXEL_SERVICES } from '../../src/modules/shipping/infrastructure/providers/paxel-rate.map';
+import { paxelServiceSpec, PAXEL_CHECKOUT_SERVICES, PAXEL_SERVICES } from '../../src/modules/shipping/infrastructure/providers/paxel-rate.map';
 import { isPaxelDimension, ShippingConfig } from '../../src/modules/shipping/shipping.config';
 import { PaxelBoxSize } from '../../src/modules/shipping/domain/paxel-box';
 import { ShippingHttpRequest, ShippingHttpResponse } from '../../src/modules/shipping/infrastructure/http/shipping-http-client';
@@ -127,18 +127,54 @@ describe('Paxel service mapping', () => {
   it('supports exactly the four approved services', () => {
     expect([...PAXEL_SERVICES]).toEqual(['PAXEL_INSTANT', 'PAXEL_SAMEDAY', 'PAXEL_NEXTDAY', 'PAXEL_REGULAR']);
   });
+
+  it('offers every service at checkout except INSTANT GOSEND', () => {
+    expect([...PAXEL_CHECKOUT_SERVICES]).toEqual(['PAXEL_SAMEDAY', 'PAXEL_NEXTDAY', 'PAXEL_REGULAR']);
+    expect(paxelServiceSpec('PAXEL_INSTANT').offeredAtCheckout).toBe(false);
+  });
+});
+
+// ======================================================== hidden INSTANT ==
+
+describe('Paxel INSTANT GOSEND hidden from checkout', () => {
+  it('never requests an INSTANT rate and never returns an INSTANT quote', async () => {
+    const { provider, calls } = build();
+    const quotes = await provider.getRates(completeRequest);
+
+    expect(calls.some((c) => c.url.endsWith('/rates/instant'))).toBe(false);
+    expect(callFor(calls, 'INSTANT GOSEND')).toBeUndefined();
+    expect(quotes.map((q) => q.service)).toEqual(['PAXEL_SAMEDAY', 'PAXEL_NEXTDAY', 'PAXEL_REGULAR']);
+  });
+
+  it('SAMEDAY, NEXTDAY and REGULAR are still priced exactly as before', async () => {
+    const { provider } = build();
+    const quotes = await provider.getRates(completeRequest);
+    expect(quotes.map((q) => [q.service, q.serviceName, q.shippingCost])).toEqual([
+      ['PAXEL_SAMEDAY', 'Paxel Same Day', 20000],
+      ['PAXEL_NEXTDAY', 'Paxel Next Day', 20000],
+      ['PAXEL_REGULAR', 'Paxel Regular', 20000],
+    ]);
+  });
+
+  it('a REGULAR failure (e.g. HTTP 400) still only drops REGULAR', async () => {
+    const { provider } = build(config(), (call) => (bodyOf(call).service_type === 'REGULAR' ? res(400, '{"message":"bad request"}') : res(200, okBody())));
+    expect((await provider.getRates(completeRequest)).map((q) => q.service)).toEqual(['PAXEL_SAMEDAY', 'PAXEL_NEXTDAY']);
+  });
+
+  it('mock quotes (non-production, Paxel disabled) never include INSTANT', async () => {
+    const { provider } = build(config({ enabled: false, allowMockRates: true }));
+    expect((await provider.getRates(completeRequest)).map((q) => q.service)).not.toContain('PAXEL_INSTANT');
+  });
 });
 
 // =============================================================== the request ==
 
 describe('Paxel rate request', () => {
-  it('quotes every service, INSTANT on its own endpoint and the rest on /rates/city', async () => {
+  it('quotes every offered service on /rates/city', async () => {
     const { provider, calls } = build();
     await provider.getRates(completeRequest);
 
-    expect(calls).toHaveLength(4);
-    const instant = callFor(calls, 'INSTANT GOSEND')!;
-    expect(instant.url).toBe('https://stage-commerce-api.paxel.test/v1/rates/instant');
+    expect(calls).toHaveLength(3);
     for (const serviceType of ['SAMEDAY', 'NEXTDAY', 'REGULAR']) {
       expect(callFor(calls, serviceType)!.url).toBe('https://stage-commerce-api.paxel.test/v1/rates/city');
     }
@@ -205,13 +241,12 @@ describe('Paxel rate request', () => {
 // ================================================================ weight caps ==
 
 describe('Paxel weight limits', () => {
-  it('rejects a parcel over the city cap but still quotes INSTANT (cap 25000g)', async () => {
+  it('rejects a parcel over the city cap; hidden INSTANT is not a fallback (cap 25000g)', async () => {
     const { provider, calls } = build();
     const quotes = await provider.getRates({ ...completeRequest, weightGram: 6000 });
 
-    expect(calls).toHaveLength(1);
-    expect(bodyOf(calls[0]).service_type).toBe('INSTANT GOSEND');
-    expect(quotes.map((q) => q.service)).toEqual(['PAXEL_INSTANT']);
+    expect(calls).toHaveLength(0);
+    expect(quotes).toEqual([]);
   });
 
   it('makes no call at all when the parcel exceeds every service cap', async () => {
@@ -255,7 +290,7 @@ describe('Paxel response normalization', () => {
     const { provider } = build();
     const quotes = await provider.getRates(completeRequest);
 
-    expect(quotes).toHaveLength(4);
+    expect(quotes).toHaveLength(3);
     const sameday = quotes.find((q) => q.service === 'PAXEL_SAMEDAY')!;
     expect(sameday).toEqual({
       provider: 'paxel',
@@ -295,7 +330,7 @@ describe('Paxel error handling', () => {
       bodyOf(call).service_type === 'SAMEDAY' ? res(400, '{"message":"bad request"}') : res(200, okBody()),
     );
     const quotes = await provider.getRates(completeRequest);
-    expect(quotes.map((q) => q.service).sort()).toEqual(['PAXEL_INSTANT', 'PAXEL_NEXTDAY', 'PAXEL_REGULAR']);
+    expect(quotes.map((q) => q.service).sort()).toEqual(['PAXEL_NEXTDAY', 'PAXEL_REGULAR']);
   });
 
   it('drops an unauthorized service (401/403) without quoting it', async () => {
@@ -310,8 +345,8 @@ describe('Paxel error handling', () => {
       return res(503, 'upstream down');
     });
     expect(await provider.getRates(completeRequest)).toEqual([]);
-    // 4 services x (1 attempt + 1 retry)
-    expect(calls).toHaveLength(8);
+    // 3 offered services x (1 attempt + 1 retry)
+    expect(calls).toHaveLength(6);
   });
 
   it('treats a network/timeout failure as retryable and yields no quote', async () => {
@@ -323,7 +358,7 @@ describe('Paxel error handling', () => {
       throw new Error('AbortError');
     };
     expect(await provider.getRates(completeRequest)).toEqual([]);
-    expect(attempts).toBe(8);
+    expect(attempts).toBe(6);
   });
 });
 
