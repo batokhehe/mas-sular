@@ -1,15 +1,23 @@
 // Mutation checks for the JNE master import. Each mutant removes one protection from the
 // source, and the tests must notice. A surviving mutant means a guard nothing is testing.
 //
+// A mutant is KILLED when a test assertion fails in at least one of its suites, and SURVIVED
+// only when every one of them passes. Each suite runs only the specs of the mutated file, so
+// an unrelated failure cannot count. A pure planner mutant may rightly pass integration.
+// ERROR means Jest could not judge it: a suite failed to load, no test ran, or the
+// environment failed. That is never a kill, and it fails the run.
+//
 // Runs on a CI runner (.github/workflows/jne-master-import.yml), never on the production
 // host: every mutant is a Jest run, and the atomicity mutants start a PostgreSQL container.
 //
 //   node test/mutation/jne-master-import.mjs           run every mutant
 //   node test/mutation/jne-master-import.mjs --check   only confirm every mutant still applies
+//   node test/mutation/jne-master-import.mjs --only <text>   run the mutants whose name contains it
 //
 // Tests run transpile-only: a mutant must fail on behaviour, not on a type error.
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -344,48 +352,104 @@ const MUTANTS = [
   },
 ];
 
-function run(suite) {
+// The specs that can speak for each mutated file. Baselines run all of them.
+const SPECS = {
+  [PLAN]: { [UNIT]: 'test/unit/jne-master-import', [INTEGRATION]: 'test/integration/jne-(master-import|reactivate-mappings)' },
+  [IMPORT]: { [UNIT]: 'test/unit/jne-master-import', [INTEGRATION]: 'test/integration/jne-(master-import|reactivate-mappings)' },
+  [REACTIVATE]: { [UNIT]: 'test/unit/jne-reactivate-mappings', [INTEGRATION]: 'test/integration/jne-reactivate-mappings' },
+  [MANIFEST]: { [UNIT]: 'test/unit/jne-mapping-manifest' },
+};
+const ALL_SPECS = {
+  [UNIT]: 'test/unit/jne-(master-import|reactivate-mappings|mapping-manifest)',
+  [INTEGRATION]: 'test/integration/jne-(master-import|reactivate-mappings)',
+};
+// A failed test with one of these is the environment talking, not an assertion.
+const ENVIRONMENT_FAILURE = /Could not find a working container runtime|Cannot find module|ECONNREFUSED|Can't reach database server|P1001/;
+
+/** PASSED, FAILED (an assertion) or ERROR (Jest could not judge), from Jest's own report. */
+function run(suite, pattern) {
   const config = suite === UNIT ? unitConfig : integrationConfig;
-  const pattern = suite === UNIT ? 'test/unit/jne-(master-import|reactivate-mappings|mapping-manifest)' : 'test/integration/jne-(master-import|reactivate-mappings)';
-  const result = spawnSync('node_modules/.bin/jest', ['--config', config, '--runInBand', '--silent', pattern], { cwd: BACKEND, encoding: 'utf8' });
-  return result.status === 0;
+  const dir = mkdtempSync(join(tmpdir(), 'jne-mutation-'));
+  const out = join(dir, 'result.json');
+  try {
+    const result = spawnSync('node_modules/.bin/jest', ['--config', config, '--runInBand', '--silent', '--json', `--outputFile=${out}`, pattern], { cwd: BACKEND, encoding: 'utf8' });
+    let report;
+    try {
+      report = JSON.parse(readFileSync(out, 'utf8'));
+    } catch {
+      return { outcome: 'ERROR', detail: `no Jest report (exit ${result.status})` };
+    }
+    if (report.numTotalTests === 0) return { outcome: 'ERROR', detail: 'no test ran' };
+    if (report.numRuntimeErrorTestSuites > 0) return { outcome: 'ERROR', detail: `${report.numRuntimeErrorTestSuites} suite(s) failed to run` };
+    const failed = report.testResults.flatMap((file) => file.assertionResults.filter((a) => a.status === 'failed'));
+    if (failed.length === 0) return result.status === 0 ? { outcome: 'PASSED' } : { outcome: 'ERROR', detail: `exit ${result.status} with no failed test` };
+    const environment = failed.find((a) => a.failureMessages.some((m) => ENVIRONMENT_FAILURE.test(m)));
+    if (environment) return { outcome: 'ERROR', detail: `environment failure in "${environment.fullName}"` };
+    return { outcome: 'FAILED', count: failed.length, first: failed[0].fullName };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
-const checkOnly = process.argv.includes('--check');
+const argv = process.argv.slice(2);
+const checkOnly = argv.includes('--check');
+const only = argv.includes('--only') ? argv[argv.indexOf('--only') + 1] : null;
 const notApplicable = MUTANTS.filter((m) => {
   const source = readFileSync(join(BACKEND, m.file), 'utf8');
-  return source.split(m.from).length !== 2;
+  return source.split(m.from).length !== 2 || m.from === m.to || !SPECS[m.file] || m.suites.some((s) => !SPECS[m.file][s]);
 });
-for (const m of notApplicable) console.error(`DOES NOT APPLY (must match exactly once): ${m.name}`);
+for (const m of notApplicable) console.error(`DOES NOT APPLY (must match exactly once, with a spec for each suite): ${m.name}`);
 if (notApplicable.length > 0) process.exit(2);
 console.log(`${MUTANTS.length} mutants apply`);
 if (checkOnly) process.exit(0);
 
 for (const suite of [UNIT, INTEGRATION]) {
-  if (!run(suite)) {
-    console.error(`baseline ${suite} tests fail: mutation results would mean nothing`);
+  const baseline = run(suite, ALL_SPECS[suite]);
+  if (baseline.outcome !== 'PASSED') {
+    console.error(`baseline ${suite} tests fail (${baseline.detail ?? baseline.first}): mutation results would mean nothing`);
     process.exit(2);
   }
 }
 console.log('baseline passes');
 
+const originals = new Map(MUTANTS.map((m) => [m.file, readFileSync(join(BACKEND, m.file), 'utf8')]));
+const selected = MUTANTS.filter((m) => only === null || m.name.includes(only));
+if (selected.length === 0) {
+  console.error(`no mutant matches "${only}"`);
+  process.exit(2);
+}
 const survived = [];
-for (const m of MUTANTS) {
+const errored = [];
+for (const m of selected) {
   const path = join(BACKEND, m.file);
-  const original = readFileSync(path, 'utf8');
+  const original = originals.get(m.file);
   writeFileSync(path, original.replace(m.from, () => m.to));
   try {
-    const alive = m.suites.filter((s) => run(s));
-    if (alive.length > 0) {
-      survived.push(m.name);
-      console.log(`SURVIVED  ${m.name} (${alive.join(', ')})`);
+    const results = m.suites.map((suite) => ({ suite, ...run(suite, SPECS[m.file][suite]) }));
+    const failures = results.filter((r) => r.outcome === 'FAILED');
+    const errors = results.filter((r) => r.outcome === 'ERROR');
+    const passed = results.filter((r) => r.outcome === 'PASSED').map((r) => r.suite);
+    if (errors.length > 0) {
+      errored.push(m.name);
+      console.log(`ERROR     ${m.name} (${errors.map((r) => `${r.suite}: ${r.detail}`).join('; ')})`);
+    } else if (failures.length > 0) {
+      const by = failures.map((r) => `${r.suite}: ${r.count} failed, first "${r.first}"`).join('; ');
+      console.log(`killed    ${m.name} (${by}${passed.length ? `; ${passed.join(', ')} passed` : ''})`);
     } else {
-      console.log(`killed    ${m.name}`);
+      survived.push(m.name);
+      console.log(`SURVIVED  ${m.name} (${m.suites.join(', ')})`);
     }
   } finally {
     writeFileSync(path, original);
   }
 }
 
-console.log(`${MUTANTS.length - survived.length}/${MUTANTS.length} killed`);
-process.exit(survived.length > 0 ? 1 : 0);
+for (const [file, original] of originals) {
+  if (readFileSync(join(BACKEND, file), 'utf8') !== original) {
+    console.error(`SOURCE NOT RESTORED: ${file}`);
+    process.exit(2);
+  }
+}
+
+console.log(`${selected.length - survived.length - errored.length}/${selected.length} killed, ${survived.length} survived, ${errored.length} errored`);
+process.exit(survived.length + errored.length > 0 ? 1 : 0);

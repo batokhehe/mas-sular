@@ -227,6 +227,11 @@ it('a missing code under an active MATCHED mapping blocks, and an exact acknowle
   expect(accepted.blockers).toEqual([]);
   expect(accepted.planSha256).not.toBe(blocked.planSha256);
 
+  const reviewedWithout = await runImport(master(), builder([ack], true, blocked.planSha256), quiet);
+  expect(reviewedWithout.code).toBe(4);
+  expect(reviewedWithout.plan.blockers.map((b) => b.code)).toEqual(['PLAN_MISMATCH']);
+  expect(await prisma.jneLocation.findFirst({ where: { code: 'BDO10054', kind: 'DESTINATION' } })).toMatchObject({ source: 'SANDBOX' });
+
   const result = await runImport(master(), builder([ack], true, accepted.planSha256), quiet);
   expect(result.code).toBe(0);
   expect(await prisma.jneDistrictMapping.findUniqueOrThrow({ where: { id: m.id } })).toEqual(mappingBefore);
