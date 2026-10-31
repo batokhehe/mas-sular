@@ -6,6 +6,7 @@ on:
   pull_request:
     paths:
       - 'backend/prisma/tools/*jne*'
+      - 'backend/prisma/tools/csv.ts'
       - 'backend/prisma/schema.prisma'
       - 'backend/test/unit/jne-*'
       - 'backend/test/integration/jne-*'
@@ -40,7 +41,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter backend prisma:generate
       # Testcontainers PostgreSQL, thrown away with the job.
-      - run: pnpm exec jest --config test/integration/jest.integration.config.js test/integration/jne-master-import test/integration/jne-one-active-matched
+      - run: pnpm exec jest --config test/integration/jest.integration.config.js test/integration/jne-master-import test/integration/jne-reactivate-mappings test/integration/jne-one-active-matched
         working-directory: backend
 
   mutation:

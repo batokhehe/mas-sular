@@ -1,21 +1,31 @@
 // Mutation checks for the JNE master import. Each mutant removes one protection from the
 // source, and the tests must notice. A surviving mutant means a guard nothing is testing.
 //
+// A mutant is KILLED when a test assertion fails in at least one of its suites, and SURVIVED
+// only when every one of them passes. Each suite runs only the specs of the mutated file, so
+// an unrelated failure cannot count. A pure planner mutant may rightly pass integration.
+// ERROR means Jest could not judge it: a suite failed to load, no test ran, or the
+// environment failed. That is never a kill, and it fails the run.
+//
 // Runs on a CI runner (.github/workflows/jne-master-import.yml), never on the production
 // host: every mutant is a Jest run, and the atomicity mutants start a PostgreSQL container.
 //
 //   node test/mutation/jne-master-import.mjs           run every mutant
 //   node test/mutation/jne-master-import.mjs --check   only confirm every mutant still applies
+//   node test/mutation/jne-master-import.mjs --only <text>   run the mutants whose name contains it
 //
 // Tests run transpile-only: a mutant must fail on behaviour, not on a type error.
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const BACKEND = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PLAN = 'prisma/tools/jne-master-plan.ts';
 const IMPORT = 'prisma/tools/import-jne-master.ts';
+const REACTIVATE = 'prisma/tools/reactivate-jne-mappings.ts';
+const MANIFEST = 'prisma/tools/jne-mapping-manifest.ts';
 
 const transform = { '^.+\\.(t|j)s$': ['ts-jest', { isolatedModules: true, diagnostics: false }] };
 const unitConfig = JSON.stringify({
@@ -190,6 +200,149 @@ const MUTANTS = [
     to: '',
     suites: [UNIT, INTEGRATION],
   },
+  // ---- reactivation
+  {
+    name: 'reactivate: reviewer not required',
+    file: REACTIVATE,
+    from: "if (!row.reviewer) return 'reviewer is required';",
+    to: '',
+    suites: [UNIT],
+  },
+  {
+    name: 'reactivate: reason not required',
+    file: REACTIVATE,
+    from: 'if (row.reason.length < REASON_MIN) return `reason is required (at least ${REASON_MIN} characters)`;',
+    to: '',
+    suites: [UNIT],
+  },
+  {
+    name: 'reactivate: district identity not compared',
+    file: REACTIVATE,
+    from: 'if (m.districtCode !== row.districtCode) return `mapping belongs to district ${m.districtCode}, not ${row.districtCode}`;',
+    to: '',
+    suites: [UNIT],
+  },
+  {
+    name: 'reactivate: code not compared',
+    file: REACTIVATE,
+    from: 'if (m.jneCode !== row.jneCode) return `mapping points at ${m.jneCode}, not ${row.jneCode}`;',
+    to: '',
+    suites: [UNIT],
+  },
+  {
+    name: 'reactivate: row version not compared',
+    file: REACTIVATE,
+    from: 'if (Number.isNaN(reviewed) || reviewed !== m.updatedAt.getTime()) return `row was last changed at ${m.updatedAt.toISOString()}, the review says ${row.expectedUpdatedAt}`;',
+    to: '',
+    suites: [UNIT],
+  },
+  {
+    name: 'reactivate: inactive destination allowed',
+    file: REACTIVATE,
+    from: 'if (!m.locationActive) return `JNE location ${m.jneCode} is inactive`;',
+    to: '',
+    suites: [UNIT],
+  },
+  {
+    name: 'reactivate: active MATCHED conflict not checked',
+    file: REACTIVATE,
+    from: 'if (conflict) return `district already has an active ${conflict.status} mapping for ${conflict.jneCode}`;',
+    to: '',
+    suites: [UNIT],
+  },
+  {
+    name: 'reactivate: outside any transaction',
+    file: REACTIVATE,
+    from: 'const reactivated = await store.$transaction(\n    async (tx) => {',
+    to: 'const reactivated = await (async (fn: (tx: ReactivationStore) => Promise<number>, _o: unknown) => fn(store))(\n    async (tx) => {',
+    suites: [UNIT, INTEGRATION],
+  },
+  {
+    name: 'reactivate: not decided again inside the transaction',
+    file: REACTIVATE,
+    from: "if (problem?.outcome === 'REFUSE') {",
+    to: 'if (false) {',
+    suites: [UNIT],
+  },
+  {
+    name: 'reactivate: plan hash not required',
+    file: REACTIVATE,
+    from: 'if (opts.expectPlan !== planSha256) {',
+    to: 'if (false) {',
+    suites: [UNIT],
+  },
+  // ---- missing destinations
+  {
+    name: 'missing: active MATCHED on a missing code ignored',
+    file: PLAN,
+    from: "for (const m of rows.filter((r) => r.isActive && r.status === 'MATCHED')) {",
+    to: 'for (const m of rows.filter(() => false)) {',
+    suites: [UNIT, INTEGRATION],
+  },
+  {
+    name: 'missing: any acknowledgment accepted',
+    file: PLAN,
+    from: 'const problem = ack ? ackProblem(ack, entry, input.sha256) : null;',
+    to: 'const problem = null;',
+    suites: [UNIT],
+  },
+  {
+    name: 'missing: snapshot not compared',
+    file: PLAN,
+    from: 'if (ack.snapshotSha256 !== sha256) return `written for snapshot ${ack.snapshotSha256}, this snapshot is ${sha256}`;',
+    to: '',
+    suites: [UNIT],
+  },
+  {
+    name: 'missing: name not compared',
+    file: PLAN,
+    from: 'if (ack.expectedRawName !== target.rawName) return `name is "${target.rawName}", the acknowledgment says "${ack.expectedRawName}"`;',
+    to: '',
+    suites: [UNIT],
+  },
+  {
+    name: 'missing: reviewer not required',
+    file: PLAN,
+    from: "if (!ack.reviewer.trim()) return 'reviewer is required';",
+    to: '',
+    suites: [UNIT],
+  },
+  {
+    name: 'missing: acknowledgments removed from the plan hash',
+    file: PLAN,
+    from: '.map((a) => [a.mappingId, a.districtCode, a.jneCode, a.expectedRawName, a.expectedStatus, a.snapshotSha256, a.reviewer, a.reason, a.reviewedAt]),',
+    to: '.map(() => []),',
+    suites: [UNIT, INTEGRATION],
+  },
+  {
+    name: 'missing: stale acknowledgments tolerated',
+    file: PLAN,
+    from: "block('MISSING_ACK_NOT_PENDING',",
+    to: "void ('MISSING_ACK_NOT_PENDING',",
+    suites: [UNIT],
+  },
+  {
+    name: 'plan hash no longer bound to the capture',
+    file: PLAN,
+    from: 'capture: provenance ? [provenance.environment, provenance.method, provenance.url, provenance.httpStatus, provenance.bodySha256, provenance.requestStartedUtc] : null,',
+    to: '',
+    suites: [UNIT],
+  },
+  // ---- nothing but the reviewed tool reactivates
+  {
+    name: 'import reactivates retired mappings',
+    file: IMPORT,
+    from: 'const { kind } = plan;\n',
+    to: "const { kind } = plan;\n  await (tx as never as { jneDistrictMapping: { updateMany(a: unknown): Promise<unknown> } }).jneDistrictMapping.updateMany({ where: { isActive: false }, data: { isActive: true } });\n",
+    suites: [UNIT, INTEGRATION],
+  },
+  {
+    name: 'candidate manifest revives a retired pair',
+    file: MANIFEST,
+    from: "if (samePair) return reject(e, 'EXISTING_ROW_NOT_REUSABLE',",
+    to: "if (false) return reject(e, 'EXISTING_ROW_NOT_REUSABLE',",
+    suites: [UNIT],
+  },
   {
     name: 'atomic: plan hash no longer bound to the target',
     file: PLAN,
@@ -199,48 +352,104 @@ const MUTANTS = [
   },
 ];
 
-function run(suite) {
+// The specs that can speak for each mutated file. Baselines run all of them.
+const SPECS = {
+  [PLAN]: { [UNIT]: 'test/unit/jne-master-import', [INTEGRATION]: 'test/integration/jne-(master-import|reactivate-mappings)' },
+  [IMPORT]: { [UNIT]: 'test/unit/jne-master-import', [INTEGRATION]: 'test/integration/jne-(master-import|reactivate-mappings)' },
+  [REACTIVATE]: { [UNIT]: 'test/unit/jne-reactivate-mappings', [INTEGRATION]: 'test/integration/jne-reactivate-mappings' },
+  [MANIFEST]: { [UNIT]: 'test/unit/jne-mapping-manifest' },
+};
+const ALL_SPECS = {
+  [UNIT]: 'test/unit/jne-(master-import|reactivate-mappings|mapping-manifest)',
+  [INTEGRATION]: 'test/integration/jne-(master-import|reactivate-mappings)',
+};
+// A failed test with one of these is the environment talking, not an assertion.
+const ENVIRONMENT_FAILURE = /Could not find a working container runtime|Cannot find module|ECONNREFUSED|Can't reach database server|P1001/;
+
+/** PASSED, FAILED (an assertion) or ERROR (Jest could not judge), from Jest's own report. */
+function run(suite, pattern) {
   const config = suite === UNIT ? unitConfig : integrationConfig;
-  const pattern = suite === UNIT ? 'test/unit/jne-master-import' : 'test/integration/jne-master-import';
-  const result = spawnSync('node_modules/.bin/jest', ['--config', config, '--runInBand', '--silent', pattern], { cwd: BACKEND, encoding: 'utf8' });
-  return result.status === 0;
+  const dir = mkdtempSync(join(tmpdir(), 'jne-mutation-'));
+  const out = join(dir, 'result.json');
+  try {
+    const result = spawnSync('node_modules/.bin/jest', ['--config', config, '--runInBand', '--silent', '--json', `--outputFile=${out}`, pattern], { cwd: BACKEND, encoding: 'utf8' });
+    let report;
+    try {
+      report = JSON.parse(readFileSync(out, 'utf8'));
+    } catch {
+      return { outcome: 'ERROR', detail: `no Jest report (exit ${result.status})` };
+    }
+    if (report.numTotalTests === 0) return { outcome: 'ERROR', detail: 'no test ran' };
+    if (report.numRuntimeErrorTestSuites > 0) return { outcome: 'ERROR', detail: `${report.numRuntimeErrorTestSuites} suite(s) failed to run` };
+    const failed = report.testResults.flatMap((file) => file.assertionResults.filter((a) => a.status === 'failed'));
+    if (failed.length === 0) return result.status === 0 ? { outcome: 'PASSED' } : { outcome: 'ERROR', detail: `exit ${result.status} with no failed test` };
+    const environment = failed.find((a) => a.failureMessages.some((m) => ENVIRONMENT_FAILURE.test(m)));
+    if (environment) return { outcome: 'ERROR', detail: `environment failure in "${environment.fullName}"` };
+    return { outcome: 'FAILED', count: failed.length, first: failed[0].fullName };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
-const checkOnly = process.argv.includes('--check');
+const argv = process.argv.slice(2);
+const checkOnly = argv.includes('--check');
+const only = argv.includes('--only') ? argv[argv.indexOf('--only') + 1] : null;
 const notApplicable = MUTANTS.filter((m) => {
   const source = readFileSync(join(BACKEND, m.file), 'utf8');
-  return source.split(m.from).length !== 2;
+  return source.split(m.from).length !== 2 || m.from === m.to || !SPECS[m.file] || m.suites.some((s) => !SPECS[m.file][s]);
 });
-for (const m of notApplicable) console.error(`DOES NOT APPLY (must match exactly once): ${m.name}`);
+for (const m of notApplicable) console.error(`DOES NOT APPLY (must match exactly once, with a spec for each suite): ${m.name}`);
 if (notApplicable.length > 0) process.exit(2);
 console.log(`${MUTANTS.length} mutants apply`);
 if (checkOnly) process.exit(0);
 
 for (const suite of [UNIT, INTEGRATION]) {
-  if (!run(suite)) {
-    console.error(`baseline ${suite} tests fail: mutation results would mean nothing`);
+  const baseline = run(suite, ALL_SPECS[suite]);
+  if (baseline.outcome !== 'PASSED') {
+    console.error(`baseline ${suite} tests fail (${baseline.detail ?? baseline.first}): mutation results would mean nothing`);
     process.exit(2);
   }
 }
 console.log('baseline passes');
 
+const originals = new Map(MUTANTS.map((m) => [m.file, readFileSync(join(BACKEND, m.file), 'utf8')]));
+const selected = MUTANTS.filter((m) => only === null || m.name.includes(only));
+if (selected.length === 0) {
+  console.error(`no mutant matches "${only}"`);
+  process.exit(2);
+}
 const survived = [];
-for (const m of MUTANTS) {
+const errored = [];
+for (const m of selected) {
   const path = join(BACKEND, m.file);
-  const original = readFileSync(path, 'utf8');
+  const original = originals.get(m.file);
   writeFileSync(path, original.replace(m.from, () => m.to));
   try {
-    const alive = m.suites.filter((s) => run(s));
-    if (alive.length > 0) {
-      survived.push(m.name);
-      console.log(`SURVIVED  ${m.name} (${alive.join(', ')})`);
+    const results = m.suites.map((suite) => ({ suite, ...run(suite, SPECS[m.file][suite]) }));
+    const failures = results.filter((r) => r.outcome === 'FAILED');
+    const errors = results.filter((r) => r.outcome === 'ERROR');
+    const passed = results.filter((r) => r.outcome === 'PASSED').map((r) => r.suite);
+    if (errors.length > 0) {
+      errored.push(m.name);
+      console.log(`ERROR     ${m.name} (${errors.map((r) => `${r.suite}: ${r.detail}`).join('; ')})`);
+    } else if (failures.length > 0) {
+      const by = failures.map((r) => `${r.suite}: ${r.count} failed, first "${r.first}"`).join('; ');
+      console.log(`killed    ${m.name} (${by}${passed.length ? `; ${passed.join(', ')} passed` : ''})`);
     } else {
-      console.log(`killed    ${m.name}`);
+      survived.push(m.name);
+      console.log(`SURVIVED  ${m.name} (${m.suites.join(', ')})`);
     }
   } finally {
     writeFileSync(path, original);
   }
 }
 
-console.log(`${MUTANTS.length - survived.length}/${MUTANTS.length} killed`);
-process.exit(survived.length > 0 ? 1 : 0);
+for (const [file, original] of originals) {
+  if (readFileSync(join(BACKEND, file), 'utf8') !== original) {
+    console.error(`SOURCE NOT RESTORED: ${file}`);
+    process.exit(2);
+  }
+}
+
+console.log(`${selected.length - survived.length - errored.length}/${selected.length} killed, ${survived.length} survived, ${errored.length} errored`);
+process.exit(survived.length + errored.length > 0 ? 1 : 0);

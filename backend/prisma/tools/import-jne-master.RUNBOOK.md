@@ -1,7 +1,10 @@
 # JNE master import runbook
 
 `import-jne-master.ts` is the only way a JNE master enters `JneLocation`. It reads a captured snapshot and never calls
-JNE. It writes `JneLocation` only: mappings are never created, changed or retired by this tool.
+JNE. It writes `JneLocation` only: mappings are never created, changed, retired or reactivated by this tool.
+
+**What a tool allows is not an authorization.** Every write below needs owner approval for that exact operation. A test or
+rehearsal approval, including any synthetic reviewer name, authorizes nothing in production.
 
 **Business decision: production refreshes DESTINATION only.** The existing ORIGIN master is correct and stays as it is,
 labelled SANDBOX. Do not fetch `getorigin` and do not import ORIGIN for this refresh. `--kind ORIGIN` remains in the tool
@@ -46,6 +49,9 @@ because the sandbox master uses it; it is not part of this procedure.
 | `SANDBOX_INTO_PRODUCTION_MASTER` | SANDBOX aimed at a master holding PRODUCTION rows | not allowed |
 | `RENAME_NEEDS_REVIEW` | a name changes under an active MATCHED mapping | review, then list it exactly |
 | `REVIEWED_RENAME_NOT_PENDING` | the review does not match the plan | redo the review |
+| `MISSING_MATCHED_NEEDS_ACK` | a code absent from the snapshot still has an active MATCHED mapping | decide; see Missing destinations |
+| `MISSING_ACK_INVALID` | an acknowledgment differs from the database or snapshot | rebuild it from `missing-matched.csv` |
+| `MISSING_ACK_NOT_PENDING` | an acknowledgment matches nothing that is blocking | remove it: it is stale |
 | `ORIGIN_CODE_UNKNOWN` | `JNE_ORIGIN_CODE` is not set | set it; the backend needs it too |
 | `ORIGIN_CODE_NOT_ACTIVE` | the origin code is absent or inactive in the ORIGIN master | stop: the backend would not start |
 | `ORIGIN_CODE_NOT_IN_SNAPSHOT` | only for `--kind ORIGIN`: the snapshot lacks the origin code | not part of the refresh |
@@ -93,6 +99,37 @@ node dist/prisma/tools/import-jne-master.js --kind DESTINATION --source PRODUCTI
 A repeat run of an imported snapshot writes nothing and exits 0. PostgreSQL may abort the serializable transaction if a
 concurrent write conflicts. Nothing is written in that case: re-run the dry run, then the import.
 
+## Missing destinations with mappings
+
+A code absent from the snapshot stays active, so an active MATCHED mapping on it keeps resolving: the district keeps
+sending JNE a code JNE no longer lists. That now blocks the dry run and the import.
+
+The dry run prints total missing codes, those with active MATCHED, those with REVIEW_REQUIRED, those with no active mapping,
+acknowledgments accepted, and what is unresolved. `missing-matched.csv` lists each affected mapping.
+
+Choose one for each row:
+
+1. **Fix it:** map the district to the right code, or retire the mapping with `deactivate-jne-mappings.ts`. The blocker clears
+   because no active MATCHED mapping remains.
+2. **Accept it:** the owner accepts that the district keeps resolving this code for now, and records why.
+
+To accept, copy the row from `missing-matched.csv` into a new CSV and fill `reviewer`, `reason` (at least 10 characters) and
+`reviewed_at`. The columns are `mapping_id`, `district_code`, `jne_code`, `expected_raw_name`, `expected_status`,
+`snapshot_sha256`, `reviewer`, `reason`, `reviewed_at`. Extra columns are ignored. Keep `expected_raw_name` exactly as written:
+JNE names carry edge whitespace.
+
+Run the dry run again with `--missing-acks <file.csv>`. Acknowledgments are part of the plan hash, so use the hash from that
+dry run with `--expect-plan`, and pass the same file to the import.
+
+An acknowledgment applies to one mapping, one name and one snapshot. It is refused if any field differs, and it goes stale when
+the mapping is retired, the code returns, or the snapshot changes. It writes nothing: no mapping is retired or moved, no
+location changes, and no rename is approved. There is no global bypass flag.
+
+A REVIEW_REQUIRED mapping on a missing code is reported as a warning, because it does not resolve. Do not approve it as it stands.
+
+Missing codes are never substituted automatically. A row with the same name under another code may be unrelated, so moving a
+district to it is a reviewed remap: retire, manifest, approve.
+
 ## Missing codes
 
 An import never deactivates anything. Between import and deactivation, missing codes stay active and labelled SANDBOX.
@@ -112,6 +149,62 @@ node dist/prisma/tools/import-jne-master.js --kind DESTINATION --source PRODUCTI
 
 Add `--confirm` to a new `--report-dir` to write. All listed codes or none. It refuses a code that is in the snapshot,
 already inactive, or carrying any active mapping: retire those with `deactivate-jne-mappings.ts` first. Rows are kept.
+
+## Retired mappings
+
+Retiring sets `isActive=false` and keeps the status, the JNE location and the review. A retired mapping stops resolving and does
+not come back through an import, a snapshot, a manifest, the candidate generator, a matching code or a similar name. Only
+`reactivate-jne-mappings.ts` restores it.
+
+It changes `isActive` on the same row, and appends who, why and the state change to `notes`. The id, district, location, status,
+method, evidence and original `reviewedBy`/`reviewedAt` stay.
+
+1. Write the pairs to restore, with columns `district_code,jne_code`, and prepare a review file. This only reads.
+
+```bash
+node dist/prisma/tools/reactivate-jne-mappings.js --prepare <pairs.csv> --out <new-review.csv>
+```
+
+2. A reviewer checks every value and fills `reviewer`, `reason` (at least 10 characters) and `review_reference`.
+3. Dry run. This prints each decision and the plan hash, and writes nothing.
+
+```bash
+node dist/prisma/tools/reactivate-jne-mappings.js --review-file <review.csv> --operator "<who>"
+```
+
+4. With owner approval for those exact rows, confirm:
+
+```bash
+node dist/prisma/tools/reactivate-jne-mappings.js --review-file <review.csv> --operator "<who>" --expect-count <n> --expect-plan <hex> --confirm
+```
+
+The whole file is refused if any row has a wrong id, district, code or status, a row version other than `expected_updated_at`,
+a blank reviewer, reason or reference, or if the mapping is active, its location or district is inactive, or the district has
+another active MATCHED or REVIEW_REQUIRED mapping. Each row is checked again inside one serializable transaction, and the partial
+unique index refuses a second active MATCHED row. A repeat is refused, not skipped: the mapping is already active.
+
+A reactivation does not check the latest snapshot. If the code is missing there, the next dry run blocks on it.
+
+Reactivating changes mapping state, so a master import plan reviewed before it fails with `PLAN_MISMATCH`.
+
+## `sourceFetchedAt`
+
+It is the fetch time of the snapshot the row was last seen in. It is not the time the row's attributes last changed.
+
+- A row in a newer snapshot gets the new time, changed or not, so one corrected name still updates every row in that snapshot.
+- A row absent from the snapshot keeps its old time. That is how an old row can be told apart from a current one.
+- `STALE_SNAPSHOT` compares this value to refuse an older capture.
+
+The schema defines it as "when the snapshot this row came from was fetched". Only the importer reads it, and only the importer
+writes it. No checkout, resolver or report treats it as a change date. To see when attributes changed, compare `changed.csv`
+reports. This behaviour is covered by tests and must not change without a separate decision.
+
+## Rollback and forward fix
+
+- A table rollback is refused while any mapping, retired or not, points at a row added after the backup. Reactivating or
+  retiring a mapping does not reopen it.
+- A forward fix keeps ids and mappings, so retired mappings stay retired and acknowledged mappings stay as they are.
+- An acknowledgment names one snapshot, so a restore or forward fix does not carry it over. Any later import needs a new dry run.
 
 ## Source and the other tools
 
