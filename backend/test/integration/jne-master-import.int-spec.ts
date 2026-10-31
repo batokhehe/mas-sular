@@ -91,6 +91,7 @@ function builder(reviewedRenames = REVIEW, requireExpectations = true, planSha25
       seeds: s.seeds,
       provenance: s.provenance,
       reviewedRenames,
+      missingAcks: [],
       target: TARGET,
       expected: { records: SNAPSHOT.length, uniqueCodes: SNAPSHOT.length, sha256, planSha256 },
       requireExpectations,

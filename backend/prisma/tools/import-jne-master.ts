@@ -29,7 +29,12 @@
  * publishes no total count and HTTP 200 does not show the response was complete.
  *
  *   ... --expect-records N --expect-unique-codes N --expect-sha256 <hex> --expect-plan <hex>
- *       [--reviewed-renames <file.csv> --reviewed-by "<who>"] --report-dir <new dir> --confirm
+ *       [--reviewed-renames <file.csv> --reviewed-by "<who>"] [--missing-acks <file.csv>]
+ *       --report-dir <new dir> --confirm
+ *
+ * A code missing from the snapshot with an active MATCHED mapping blocks every run until
+ * --missing-acks lists that exact mapping, name and snapshot. The acknowledgments are part
+ * of the plan hash, so run the dry run with the same file. They change no row.
  *
  * Deactivation: never a side effect of an import. Explicit codes, each absent from
  * the reviewed snapshot, active, with no active mapping. Dry run unless --confirm.
@@ -59,6 +64,7 @@ import {
   type ExistingLocation,
   type ExistingMapping,
   type MasterImportPlan,
+  type MissingAcknowledgment,
   type MissingLocation,
   type PlanInput,
   type ReviewedRename,
@@ -90,6 +96,7 @@ export interface ImportOptions {
   reportDir: string;
   reviewedRenamesPath: string;
   reviewedBy: string;
+  missingAcksPath: string;
   deactivateMissingPath: string;
   reason: string;
   operator: string;
@@ -134,6 +141,7 @@ export function parseArgs(argv: string[]): ImportOptions {
     reportDir: get('--report-dir') ?? '',
     reviewedRenamesPath: get('--reviewed-renames') ?? '',
     reviewedBy: get('--reviewed-by') ?? '',
+    missingAcksPath: get('--missing-acks') ?? '',
     deactivateMissingPath: get('--deactivate-missing') ?? '',
     reason: get('--reason') ?? '',
     operator: get('--operator') ?? '',
@@ -198,6 +206,28 @@ export function parseReviewedRenames(text: string): ReviewedRename[] {
     if (seen.has(values.code)) throw new Error(`reviewed renames list ${values.code} twice`);
     seen.add(values.code);
     return { code: values.code, from: values.from_raw_name, to: values.to_raw_name };
+  });
+}
+
+export const MISSING_ACK_COLUMNS = ['mapping_id', 'district_code', 'jne_code', 'expected_raw_name', 'expected_status', 'snapshot_sha256', 'reviewer', 'reason', 'reviewed_at'] as const;
+
+export function parseMissingAcks(text: string): MissingAcknowledgment[] {
+  const { records } = parseCsvRecords(text, MISSING_ACK_COLUMNS);
+  const seen = new Set<string>();
+  return records.map(({ values: v }) => {
+    if (seen.has(v.mapping_id)) throw new Error(`missing acknowledgments list mapping ${v.mapping_id} twice`);
+    seen.add(v.mapping_id);
+    return {
+      mappingId: v.mapping_id,
+      districtCode: v.district_code,
+      jneCode: v.jne_code,
+      expectedRawName: v.expected_raw_name, // verbatim: names carry edge whitespace
+      expectedStatus: v.expected_status,
+      snapshotSha256: v.snapshot_sha256,
+      reviewer: v.reviewer,
+      reason: v.reason,
+      reviewedAt: v.reviewed_at,
+    };
   });
 }
 
@@ -562,6 +592,11 @@ export function planSummary(plan: MasterImportPlan, provenance: SnapshotProvenan
     renamed: plan.updated.filter((u) => u.changes.includes('rawName')).length,
     missing: plan.missing.length,
     missingActive: plan.missing.filter((m) => m.isActive).length,
+    missingWithActiveMatched: plan.missing.filter((m) => m.activeMatched > 0).length,
+    missingWithReviewRequired: plan.missing.filter((m) => m.activeReview > 0).length,
+    missingWithoutActiveMapping: plan.missing.filter((m) => m.activeMatched + m.activeReview === 0).length,
+    missingMatched: plan.missingMatched,
+    missingAcknowledgments: plan.missingAcks,
     warnings: plan.warnings,
     blockers: plan.blockers,
   };
@@ -610,6 +645,27 @@ export function writeReports(dir: string, plan: MasterImportPlan, provenance: Sn
         state: m.state,
         from_raw_name: m.fromRawName ?? '',
         to_raw_name: m.toRawName ?? '',
+      })),
+    ),
+  );
+  // The acknowledgment columns come first and in order: a reviewer copies a row, fills the
+  // last three, and has a valid file. `district` and `acknowledged` are for reading only.
+  put(
+    'missing-matched.csv',
+    toCsv(
+      [...MISSING_ACK_COLUMNS, 'district', 'acknowledged'],
+      plan.missingMatched.map((m) => ({
+        mapping_id: m.mappingId,
+        district_code: m.districtCode,
+        jne_code: m.jneCode,
+        expected_raw_name: m.rawName,
+        expected_status: m.status,
+        snapshot_sha256: m.snapshotSha256,
+        reviewer: '',
+        reason: '',
+        reviewed_at: '',
+        district: m.districtName,
+        acknowledged: m.acknowledged,
       })),
     ),
   );
@@ -680,6 +736,7 @@ export async function main(
   }
 
   const reviewedRenames = opts.reviewedRenamesPath ? parseReviewedRenames(readFileSync(opts.reviewedRenamesPath, 'utf8')) : [];
+  const missingAcks = opts.missingAcksPath ? parseMissingAcks(readFileSync(opts.missingAcksPath, 'utf8')) : [];
   const planInput: Omit<PlanInput, 'existing' | 'mappings'> = {
     kind: opts.kind,
     source: opts.source,
@@ -688,6 +745,7 @@ export async function main(
     inspection,
     seeds,
     reviewedRenames,
+    missingAcks,
     provenance,
     target: targetFromEnv(env),
     expected: opts.expected,

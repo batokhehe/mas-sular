@@ -16,6 +16,8 @@ import { fileURLToPath } from 'node:url';
 const BACKEND = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PLAN = 'prisma/tools/jne-master-plan.ts';
 const IMPORT = 'prisma/tools/import-jne-master.ts';
+const REACTIVATE = 'prisma/tools/reactivate-jne-mappings.ts';
+const MANIFEST = 'prisma/tools/jne-mapping-manifest.ts';
 
 const transform = { '^.+\\.(t|j)s$': ['ts-jest', { isolatedModules: true, diagnostics: false }] };
 const unitConfig = JSON.stringify({
@@ -190,6 +192,149 @@ const MUTANTS = [
     to: '',
     suites: [UNIT, INTEGRATION],
   },
+  // ---- reactivation
+  {
+    name: 'reactivate: reviewer not required',
+    file: REACTIVATE,
+    from: "if (!row.reviewer) return 'reviewer is required';",
+    to: '',
+    suites: [UNIT],
+  },
+  {
+    name: 'reactivate: reason not required',
+    file: REACTIVATE,
+    from: 'if (row.reason.length < REASON_MIN) return `reason is required (at least ${REASON_MIN} characters)`;',
+    to: '',
+    suites: [UNIT],
+  },
+  {
+    name: 'reactivate: district identity not compared',
+    file: REACTIVATE,
+    from: 'if (m.districtCode !== row.districtCode) return `mapping belongs to district ${m.districtCode}, not ${row.districtCode}`;',
+    to: '',
+    suites: [UNIT],
+  },
+  {
+    name: 'reactivate: code not compared',
+    file: REACTIVATE,
+    from: 'if (m.jneCode !== row.jneCode) return `mapping points at ${m.jneCode}, not ${row.jneCode}`;',
+    to: '',
+    suites: [UNIT],
+  },
+  {
+    name: 'reactivate: row version not compared',
+    file: REACTIVATE,
+    from: 'if (Number.isNaN(reviewed) || reviewed !== m.updatedAt.getTime()) return `row was last changed at ${m.updatedAt.toISOString()}, the review says ${row.expectedUpdatedAt}`;',
+    to: '',
+    suites: [UNIT],
+  },
+  {
+    name: 'reactivate: inactive destination allowed',
+    file: REACTIVATE,
+    from: 'if (!m.locationActive) return `JNE location ${m.jneCode} is inactive`;',
+    to: '',
+    suites: [UNIT],
+  },
+  {
+    name: 'reactivate: active MATCHED conflict not checked',
+    file: REACTIVATE,
+    from: 'if (conflict) return `district already has an active ${conflict.status} mapping for ${conflict.jneCode}`;',
+    to: '',
+    suites: [UNIT],
+  },
+  {
+    name: 'reactivate: outside any transaction',
+    file: REACTIVATE,
+    from: 'const reactivated = await store.$transaction(\n    async (tx) => {',
+    to: 'const reactivated = await (async (fn: (tx: ReactivationStore) => Promise<number>, _o: unknown) => fn(store))(\n    async (tx) => {',
+    suites: [UNIT, INTEGRATION],
+  },
+  {
+    name: 'reactivate: not decided again inside the transaction',
+    file: REACTIVATE,
+    from: "if (problem?.outcome === 'REFUSE') {",
+    to: 'if (false) {',
+    suites: [UNIT],
+  },
+  {
+    name: 'reactivate: plan hash not required',
+    file: REACTIVATE,
+    from: 'if (opts.expectPlan !== planSha256) {',
+    to: 'if (false) {',
+    suites: [UNIT],
+  },
+  // ---- missing destinations
+  {
+    name: 'missing: active MATCHED on a missing code ignored',
+    file: PLAN,
+    from: "for (const m of rows.filter((r) => r.isActive && r.status === 'MATCHED')) {",
+    to: 'for (const m of rows.filter(() => false)) {',
+    suites: [UNIT, INTEGRATION],
+  },
+  {
+    name: 'missing: any acknowledgment accepted',
+    file: PLAN,
+    from: 'const problem = ack ? ackProblem(ack, entry, input.sha256) : null;',
+    to: 'const problem = null;',
+    suites: [UNIT],
+  },
+  {
+    name: 'missing: snapshot not compared',
+    file: PLAN,
+    from: 'if (ack.snapshotSha256 !== sha256) return `written for snapshot ${ack.snapshotSha256}, this snapshot is ${sha256}`;',
+    to: '',
+    suites: [UNIT],
+  },
+  {
+    name: 'missing: name not compared',
+    file: PLAN,
+    from: 'if (ack.expectedRawName !== target.rawName) return `name is "${target.rawName}", the acknowledgment says "${ack.expectedRawName}"`;',
+    to: '',
+    suites: [UNIT],
+  },
+  {
+    name: 'missing: reviewer not required',
+    file: PLAN,
+    from: "if (!ack.reviewer.trim()) return 'reviewer is required';",
+    to: '',
+    suites: [UNIT],
+  },
+  {
+    name: 'missing: acknowledgments removed from the plan hash',
+    file: PLAN,
+    from: '.map((a) => [a.mappingId, a.districtCode, a.jneCode, a.expectedRawName, a.expectedStatus, a.snapshotSha256, a.reviewer, a.reason, a.reviewedAt]),',
+    to: '.map(() => []),',
+    suites: [UNIT, INTEGRATION],
+  },
+  {
+    name: 'missing: stale acknowledgments tolerated',
+    file: PLAN,
+    from: "block('MISSING_ACK_NOT_PENDING',",
+    to: "void ('MISSING_ACK_NOT_PENDING',",
+    suites: [UNIT],
+  },
+  {
+    name: 'plan hash no longer bound to the capture',
+    file: PLAN,
+    from: 'capture: provenance ? [provenance.environment, provenance.method, provenance.url, provenance.httpStatus, provenance.bodySha256, provenance.requestStartedUtc] : null,',
+    to: '',
+    suites: [UNIT],
+  },
+  // ---- nothing but the reviewed tool reactivates
+  {
+    name: 'import reactivates retired mappings',
+    file: IMPORT,
+    from: 'const { kind } = plan;\n',
+    to: "const { kind } = plan;\n  await (tx as never as { jneDistrictMapping: { updateMany(a: unknown): Promise<unknown> } }).jneDistrictMapping.updateMany({ where: { isActive: false }, data: { isActive: true } });\n",
+    suites: [UNIT, INTEGRATION],
+  },
+  {
+    name: 'candidate manifest revives a retired pair',
+    file: MANIFEST,
+    from: "if (samePair) return reject(e, 'EXISTING_ROW_NOT_REUSABLE',",
+    to: "if (false) return reject(e, 'EXISTING_ROW_NOT_REUSABLE',",
+    suites: [UNIT],
+  },
   {
     name: 'atomic: plan hash no longer bound to the target',
     file: PLAN,
@@ -201,7 +346,7 @@ const MUTANTS = [
 
 function run(suite) {
   const config = suite === UNIT ? unitConfig : integrationConfig;
-  const pattern = suite === UNIT ? 'test/unit/jne-master-import' : 'test/integration/jne-master-import';
+  const pattern = suite === UNIT ? 'test/unit/jne-(master-import|reactivate-mappings|mapping-manifest)' : 'test/integration/jne-(master-import|reactivate-mappings)';
   const result = spawnSync('node_modules/.bin/jest', ['--config', config, '--runInBand', '--silent', pattern], { cwd: BACKEND, encoding: 'utf8' });
   return result.status === 0;
 }

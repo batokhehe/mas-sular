@@ -10,7 +10,10 @@
  *   updates a row in place, keeping the `id` every mapping references. The plan never
  *   proposes a mapping change, and never picks a replacement code by name.
  * - A code absent from the snapshot is REPORTED, never deactivated. Deactivation is a
- *   separate action, on an explicit list.
+ *   separate action, on an explicit list. If an active MATCHED mapping sits on such a code,
+ *   the district keeps resolving a code JNE no longer lists, so the import is blocked until
+ *   a reviewer acknowledges that exact mapping, name and snapshot. An acknowledgment writes
+ *   nothing: the mapping and the location stay exactly as they are.
  * - A rename under an active MATCHED mapping blocks the import until a reviewer lists
  *   that exact code, old name and new name.
  * - `--source` alone proves nothing. A PRODUCTION import needs the capture's metadata
@@ -69,6 +72,33 @@ export interface ReviewedRename {
   to: string;
 }
 
+/** A reviewer's acceptance of one exact missing destination, for one exact snapshot. */
+export interface MissingAcknowledgment {
+  mappingId: string;
+  districtCode: string;
+  jneCode: string;
+  expectedRawName: string;
+  expectedStatus: string;
+  snapshotSha256: string;
+  reviewer: string;
+  reason: string;
+  reviewedAt: string;
+}
+
+export const ACK_REASON_MIN = 10;
+
+/** An active MATCHED mapping on a code the snapshot no longer lists. */
+export interface MissingMatchedMapping {
+  mappingId: string;
+  districtCode: string;
+  districtName: string;
+  jneCode: string;
+  rawName: string;
+  status: string;
+  snapshotSha256: string;
+  acknowledged: boolean;
+}
+
 /** The non-secret record of how a snapshot was captured (fetch-metadata.json). */
 export interface SnapshotProvenance {
   environment: string;
@@ -109,6 +139,9 @@ export type BlockerCode =
   | 'SANDBOX_INTO_PRODUCTION_MASTER'
   | 'RENAME_NEEDS_REVIEW'
   | 'REVIEWED_RENAME_NOT_PENDING'
+  | 'MISSING_MATCHED_NEEDS_ACK'
+  | 'MISSING_ACK_INVALID'
+  | 'MISSING_ACK_NOT_PENDING'
   | 'ORIGIN_CODE_UNKNOWN'
   | 'ORIGIN_CODE_NOT_IN_SNAPSHOT'
   | 'ORIGIN_CODE_NOT_ACTIVE';
@@ -177,13 +210,18 @@ export interface MasterImportPlan {
   created: JneLocationSeed[];
   updated: LocationUpdate[];
   missing: MissingLocation[];
+  /** Every active MATCHED mapping on a missing code, acknowledged or not. */
+  missingMatched: MissingMatchedMapping[];
+  /** The acknowledgments supplied, valid or not. Part of the plan hash. */
+  missingAcks: MissingAcknowledgment[];
   mappingImpact: MappingImpact[];
   warnings: string[];
   blockers: Blocker[];
   /**
-   * Identity of what would be written, from which snapshot, to which kind, in which
-   * environment. Excludes blockers and reviews, so a dry run's value stays valid once
-   * they are dealt with.
+   * Identity of what would be written, from which snapshot and capture, to which kind, in
+   * which environment, with which missing-destination acknowledgments. Excludes blockers and
+   * rename reviews, so a dry run's value stays valid once those are dealt with. Adding or
+   * changing an acknowledgment changes it, so a review needs its own dry run.
    */
   planSha256: string;
 }
@@ -198,6 +236,7 @@ export interface PlanInput {
   existing: ExistingLocation[];
   mappings: ExistingMapping[];
   reviewedRenames: ReviewedRename[];
+  missingAcks: MissingAcknowledgment[];
   provenance: SnapshotProvenance | null;
   target: TargetEnvironment;
   expected: SnapshotExpectations;
@@ -252,22 +291,40 @@ export function locationFingerprint(rows: ExistingLocation[]): string {
   return createHash('sha256').update(JSON.stringify(identity)).digest('hex');
 }
 
+/** What is wrong with an acknowledgment of `target`, compared byte for byte. */
+function ackProblem(ack: MissingAcknowledgment, target: MissingMatchedMapping, sha256: string): string | null {
+  if (ack.districtCode !== target.districtCode) return `district is ${target.districtCode}, the acknowledgment says ${ack.districtCode}`;
+  if (ack.jneCode !== target.jneCode) return `code is ${target.jneCode}, the acknowledgment says ${ack.jneCode}`;
+  if (ack.expectedRawName !== target.rawName) return `name is "${target.rawName}", the acknowledgment says "${ack.expectedRawName}"`;
+  if (ack.expectedStatus !== target.status) return `status is ${target.status}, the acknowledgment says ${ack.expectedStatus}`;
+  if (ack.snapshotSha256 !== sha256) return `written for snapshot ${ack.snapshotSha256}, this snapshot is ${sha256}`;
+  if (!ack.reviewer.trim()) return 'reviewer is required';
+  if (ack.reason.trim().length < ACK_REASON_MIN) return `reason is required (at least ${ACK_REASON_MIN} characters)`;
+  if (Number.isNaN(new Date(ack.reviewedAt).getTime())) return 'reviewed_at is required';
+  return null;
+}
+
 function planHash(
-  plan: Pick<MasterImportPlan, 'kind' | 'source' | 'snapshotSha256' | 'sourceFetchedAt' | 'created' | 'updated' | 'missing' | 'mappingImpact' | 'protectedFingerprint'>,
+  plan: Pick<MasterImportPlan, 'kind' | 'source' | 'snapshotSha256' | 'sourceFetchedAt' | 'created' | 'updated' | 'missing' | 'missingAcks' | 'mappingImpact' | 'protectedFingerprint'>,
   target: TargetEnvironment,
+  provenance: SnapshotProvenance | null,
 ): string {
   const identity = {
     // Staging and production hold rows with the same ids, so without the target a plan
     // reviewed on one would be accepted on the other. None of these values is a secret.
     target: [target.jneEnvironment ?? 'sandbox', target.jneBaseUrl ?? null, target.jneOriginCode?.trim() ?? null],
+    capture: provenance ? [provenance.environment, provenance.method, provenance.url, provenance.httpStatus, provenance.bodySha256, provenance.requestStartedUtc] : null,
     kind: plan.kind,
     source: plan.source,
     snapshot: plan.snapshotSha256,
     fetchedAt: plan.sourceFetchedAt,
     created: plan.created.map((s) => [s.code, s.rawName]),
     updated: plan.updated.map((u) => [u.id, u.code, u.changes, u.fromRawName, u.seed.rawName, u.fromSource, u.wasActive]),
-    missing: plan.missing.map((m) => [m.id, m.code, m.isActive, m.activeMatched, m.activeReview]),
-    mappings: plan.mappingImpact.map((m) => [m.mappingId, m.status, m.isActive, m.jneCode, m.state]),
+    missing: plan.missing.map((m) => [m.id, m.code, m.source, m.rawName, m.isActive, m.activeMatched, m.activeReview]),
+    mappings: plan.mappingImpact.map((m) => [m.mappingId, m.districtCode, m.status, m.isActive, m.jneCode, m.state]),
+    missingAcks: [...plan.missingAcks]
+      .sort((a, b) => a.mappingId.localeCompare(b.mappingId))
+      .map((a) => [a.mappingId, a.districtCode, a.jneCode, a.expectedRawName, a.expectedStatus, a.snapshotSha256, a.reviewer, a.reason, a.reviewedAt]),
     protectedFingerprint: plan.protectedFingerprint,
   };
   return createHash('sha256').update(JSON.stringify(identity)).digest('hex');
@@ -370,8 +427,41 @@ export function planMasterImport(input: PlanInput): MasterImportPlan {
       block('REVIEWED_RENAME_NOT_PENDING', `${r.code}: the reviewed rename does not match the plan, so the review was of something else`);
     }
   }
-  for (const m of missing) {
-    if (m.activeMatched > 0) warnings.push(`${m.code} has ${m.activeMatched} active MATCHED mapping(s) but is absent from this snapshot`);
+  const missingByCode = new Map(missing.map((m) => [m.code, m]));
+  const pendingAcks = new Map(input.missingAcks.map((a) => [a.mappingId, a]));
+  const missingMatched: MissingMatchedMapping[] = [];
+  for (const [code, rows] of mappingsOf) {
+    const location = missingByCode.get(code);
+    if (!location) continue;
+    for (const m of rows.filter((r) => r.isActive && r.status === 'MATCHED')) {
+      const entry: MissingMatchedMapping = {
+        mappingId: m.id,
+        districtCode: m.districtCode,
+        districtName: m.districtName,
+        jneCode: code,
+        rawName: location.rawName,
+        status: m.status,
+        snapshotSha256: input.sha256,
+        acknowledged: false,
+      };
+      const ack = pendingAcks.get(m.id);
+      pendingAcks.delete(m.id);
+      const problem = ack ? ackProblem(ack, entry, input.sha256) : null;
+      entry.acknowledged = ack !== undefined && problem === null;
+      missingMatched.push(entry);
+      if (problem) block('MISSING_ACK_INVALID', `mapping ${m.id}: ${problem}`);
+      if (entry.acknowledged) {
+        warnings.push(`${code} acknowledged by ${(ack as MissingAcknowledgment).reviewer}: ${m.districtCode} keeps resolving a code this snapshot does not list`);
+      } else {
+        block('MISSING_MATCHED_NEEDS_ACK', `${code} "${location.rawName}" is absent from snapshot ${input.sha256}, but mapping ${m.id} (district ${m.districtCode} ${m.districtName}, ${m.status}) still resolves it`);
+      }
+    }
+  }
+  for (const ack of pendingAcks.values()) {
+    block('MISSING_ACK_NOT_PENDING', `mapping ${ack.mappingId}: no active MATCHED mapping on a missing code matches this acknowledgment`);
+  }
+  for (const m of missing.filter((x) => x.activeReview > 0)) {
+    warnings.push(`${m.code} has ${m.activeReview} REVIEW_REQUIRED mapping(s) but is absent from this snapshot: its review should not be approved as it stands`);
   }
 
   // ---- snapshot contents and completeness
@@ -438,10 +528,11 @@ export function planMasterImport(input: PlanInput): MasterImportPlan {
     created,
     updated,
     missing,
+    missingAcks: input.missingAcks,
     mappingImpact,
     protectedFingerprint: locationFingerprint(protectedRows),
   };
-  const planSha256 = planHash(planFields, target);
+  const planSha256 = planHash(planFields, target, input.provenance);
   const writes = created.length + updated.length;
   if (input.requireExpectations && writes > 0) {
     if (!expected.planSha256) block('EXPECTED_VALUE_REQUIRED', `a write needs --expect-plan with the dry run's plan hash (${planSha256})`);
@@ -458,6 +549,7 @@ export function planMasterImport(input: PlanInput): MasterImportPlan {
     testCodes: inspection.testCodes,
     existingBySource: sameKind.reduce<Record<string, number>>((acc, e) => ({ ...acc, [e.source]: (acc[e.source] ?? 0) + 1 }), {}),
     alsoInOtherKind: seeds.filter((s) => otherKind.has(s.code)).length,
+    missingMatched,
     protectedKind: kind === 'ORIGIN' ? 'DESTINATION' : 'ORIGIN',
     protectedRows,
     unchanged,
@@ -488,6 +580,8 @@ export function formatPlan(plan: MasterImportPlan): string {
     `  new                 : ${plan.created.length}`,
     `  changed             : ${plan.updated.length} (rawName ${renamed}, source ${relabelled}, reactivated ${reactivated})`,
     `  missing             : ${plan.missing.length} (${activeMissing} active; reported, not deactivated)`,
+    `  missing, by mapping : active MATCHED ${plan.missing.filter((m) => m.activeMatched > 0).length}, REVIEW_REQUIRED ${plan.missing.filter((m) => m.activeReview > 0).length}, no active mapping ${plan.missing.filter((m) => m.activeMatched + m.activeReview === 0).length}`,
+    `  acknowledgments     : ${plan.missingMatched.filter((m) => m.acknowledged).length} accepted of ${plan.missingAcks.length} supplied, ${plan.missingMatched.filter((m) => !m.acknowledged).length} unresolved`,
     `  MATCHED mappings    : unchanged ${count('UNCHANGED', 'MATCHED')}, relabelled ${count('RELABELLED', 'MATCHED')}, renamed ${count('RENAMED', 'MATCHED')}, missing ${count('MISSING', 'MATCHED')}`,
     `  REVIEW_REQUIRED     : unchanged ${count('UNCHANGED', 'REVIEW_REQUIRED')}, relabelled ${count('RELABELLED', 'REVIEW_REQUIRED')}, renamed ${count('RENAMED', 'REVIEW_REQUIRED')}, missing ${count('MISSING', 'REVIEW_REQUIRED')}`,
     `  plan sha256         : ${plan.planSha256}`,

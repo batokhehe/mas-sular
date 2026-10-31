@@ -10,6 +10,7 @@ import {
   main,
   parseArgs,
   parseCodeList,
+  parseMissingAcks,
   parseProvenance,
   parseReviewedRenames,
   runDeactivateMissing,
@@ -20,7 +21,14 @@ import {
   type MasterState,
   type MasterStore,
 } from '../../prisma/tools/import-jne-master';
-import { locationFingerprint, planMasterImport, type PlanInput, type SnapshotExpectations, type TargetEnvironment } from '../../prisma/tools/jne-master-plan';
+import {
+  locationFingerprint,
+  planMasterImport,
+  type MissingAcknowledgment,
+  type PlanInput,
+  type SnapshotExpectations,
+  type TargetEnvironment,
+} from '../../prisma/tools/jne-master-plan';
 import type { JneDataSource, JneLocationKind, JneMasterRaw } from '../../prisma/tools/jne-master';
 import { JneOriginBootValidator } from '../../src/modules/shipment/jne-origin-boot.validator';
 
@@ -179,6 +187,7 @@ interface Fixture {
   metadata?: Record<string, unknown> | null;
   target?: TargetEnvironment;
   reviewedRenames?: PlanInput['reviewedRenames'];
+  missingAcks?: MissingAcknowledgment[];
   require?: boolean;
   expected?: SnapshotExpectations;
 }
@@ -207,6 +216,7 @@ function builder(f: Fixture) {
     inspection: snapshot.inspection,
     seeds: snapshot.seeds,
     reviewedRenames: f.reviewedRenames ?? [],
+    missingAcks: f.missingAcks ?? [],
     provenance: snapshot.provenance,
     target: f.target ?? (source === 'PRODUCTION' ? PRODUCTION_TARGET : SANDBOX_TARGET),
     expected: { ...expected, ...(planSha256 ? { planSha256 } : {}) },
@@ -352,14 +362,14 @@ describe('missing destinations', () => {
     expect(plan.testCodes).toEqual(['TEST']);
   });
 
-  it('warns about a MATCHED mapping on a missing code', () => {
+  it('blocks on a MATCHED mapping on a missing code', () => {
     const plan = builder({ rows: [raw('BDO10001', 'A,BANDUNG')] }).build({
       existing: [row('BDO10001', 'A,BANDUNG'), row('BDO10003', 'GONE,BANDUNG')],
       mappings: [{ id: 'm1', status: 'MATCHED', isActive: true, districtCode: 'd', districtName: 'D', jneCode: 'BDO10003', kind: 'DESTINATION' }],
     });
     expect(plan.missing[0].activeMatched).toBe(1);
     expect(plan.mappingImpact[0].state).toBe('MISSING');
-    expect(plan.warnings.join()).toContain('BDO10003 has 1 active MATCHED');
+    expect(codesOf(plan.blockers)).toContain('MISSING_MATCHED_NEEDS_ACK');
   });
 });
 
@@ -1115,6 +1125,316 @@ describe('destination-only refresh', () => {
     const plan = builder({ rows: [raw('CGK10000', 'JAKARTA')], kind: 'ORIGIN' }).build({ existing: [], mappings: [] });
     expect(codesOf(plan.blockers)).toContain('ORIGIN_CODE_NOT_IN_SNAPSHOT');
     expect(plan).toMatchObject({ protectedKind: 'DESTINATION' });
+  });
+});
+
+describe('missing destinations under an active MATCHED mapping', () => {
+  const master = () => [originRow(), row('BDO10001', 'KEPT,BANDUNG'), row('BDO10003', ' GONE ,BANDUNG '), row('BDO10005', 'PENDING,BANDUNG'), row('BDO10006', 'LOOSE,BANDUNG')];
+  const rows = [raw('BDO10001', 'KEPT,BANDUNG')];
+  const matched: MappingFixture = { id: 'm1', code: 'BDO10003', status: 'MATCHED' };
+  const SHA = createHash('sha256').update(Buffer.from(JSON.stringify({ detail: rows }))).digest('hex');
+  const ack = (over: Partial<MissingAcknowledgment> = {}): MissingAcknowledgment => ({
+    mappingId: 'm1',
+    districtCode: 'd-m1',
+    jneCode: 'BDO10003',
+    expectedRawName: ' GONE ,BANDUNG ',
+    expectedStatus: 'MATCHED',
+    snapshotSha256: SHA,
+    reviewer: 'Rina Reviewer',
+    reason: 'accepted until JNE confirms the code',
+    reviewedAt: '2026-10-30T09:00:00.000Z',
+    ...over,
+  });
+  const state = (mappings: MappingFixture[] = [matched]): MasterState => ({
+    existing: master(),
+    mappings: mappings.map((m) => ({ id: m.id, status: m.status, isActive: m.isActive ?? true, districtCode: `d-${m.id}`, districtName: `District ${m.id}`, jneCode: m.code, kind: m.kind ?? 'DESTINATION' })),
+  });
+  const fixed = () => master().map((r, i) => ({ ...r, id: `fixed-${i}` }));
+
+  it('blocks the dry run, naming the code, mapping, district, name, status and snapshot', async () => {
+    const m = memoryStore(master(), [matched]);
+    const lines: string[] = [];
+    const plan = await runLiveDryRun(m.store, (s) => builder({ rows }).build(s), (l) => lines.push(l));
+    expect(codesOf(plan.blockers)).toEqual(['MISSING_MATCHED_NEEDS_ACK']);
+    const detail = plan.blockers[0].detail;
+    for (const part of ['BDO10003', ' GONE ,BANDUNG ', SHA, 'm1', 'd-m1', 'District m1', 'MATCHED']) expect(detail).toContain(part);
+    expect(plan.missingMatched).toEqual([{ mappingId: 'm1', districtCode: 'd-m1', districtName: 'District m1', jneCode: 'BDO10003', rawName: ' GONE ,BANDUNG ', status: 'MATCHED', snapshotSha256: SHA, acknowledged: false }]);
+    expect(lines.join('\n')).toMatch(/missing, by mapping : active MATCHED 1, REVIEW_REQUIRED 0, no active mapping 2/);
+    expect(lines.join('\n')).toMatch(/acknowledgments\s+: 0 accepted of 0 supplied, 1 unresolved/);
+  });
+
+  it('blocks the import and writes nothing', async () => {
+    const m = memoryStore(master(), [matched]);
+    const result = await imported(m, { rows });
+    expect(result.code).toBe(4);
+    expect(codesOf(result.plan.blockers)).toEqual(['MISSING_MATCHED_NEEDS_ACK']);
+    expect(m.calls.writes).toBe(0);
+  });
+
+  it('reports each blocked mapping, one per district, when a code has several', () => {
+    const plan = builder({ rows }).build(state([matched, { id: 'm2', code: 'BDO10003', status: 'MATCHED' }]));
+    expect(plan.missingMatched.map((x) => x.mappingId)).toEqual(['m1', 'm2']);
+    expect(codesOf(plan.blockers)).toEqual(['MISSING_MATCHED_NEEDS_ACK', 'MISSING_MATCHED_NEEDS_ACK']);
+  });
+
+  it('a REVIEW_REQUIRED mapping is reported, without blocking', () => {
+    const plan = builder({ rows }).build(state([{ id: 'r1', code: 'BDO10005', status: 'REVIEW_REQUIRED' }]));
+    expect(plan.blockers).toEqual([]);
+    expect(plan.missing.find((x) => x.code === 'BDO10005')).toMatchObject({ activeReview: 1, activeMatched: 0 });
+    expect(plan.warnings.join()).toMatch(/BDO10005 has 1 REVIEW_REQUIRED mapping/);
+  });
+
+  it('a missing code with no active mapping is reported and left active', async () => {
+    const m = memoryStore(master(), []);
+    const result = await imported(m, { rows });
+    expect(result.code).toBe(0);
+    expect(result.plan.missing.map((x) => x.code)).toEqual(['BDO10003', 'BDO10005', 'BDO10006']);
+    expect(m.state.rows.filter((r) => ['BDO10003', 'BDO10005', 'BDO10006'].includes(r.code)).every((r) => r.isActive)).toBe(true);
+  });
+
+  it('a retired mapping on a missing code does not block', () => {
+    expect(builder({ rows }).build(state([{ ...matched, isActive: false }])).blockers).toEqual([]);
+  });
+
+  it('an exact acknowledgment lets the import proceed, and writes no mapping or missing row', async () => {
+    const mappings = [{ ...matched }];
+    const m = memoryStore(master(), mappings);
+    const gone = JSON.stringify(m.state.rows.find((r) => r.code === 'BDO10003'));
+    const result = await imported(m, { rows, missingAcks: [ack()] });
+    expect(result.code).toBe(0);
+    expect(result.plan.missingMatched[0].acknowledged).toBe(true);
+    expect(mappings).toEqual([matched]);
+    expect(JSON.stringify(m.state.rows.find((r) => r.code === 'BDO10003'))).toBe(gone);
+    expect(result.plan.warnings.join()).toMatch(/BDO10003 acknowledged by Rina Reviewer: d-m1 keeps resolving/);
+  });
+
+  it('an acknowledgment clears only its own blocker', () => {
+    const plan = builder({ rows, missingAcks: [ack()] }).build(state([matched, { id: 'm2', code: 'BDO10005', status: 'MATCHED' }]));
+    expect(codesOf(plan.blockers)).toEqual(['MISSING_MATCHED_NEEDS_ACK']);
+    expect(plan.blockers[0].detail).toContain('BDO10005');
+  });
+
+  it.each([
+    ['a wrong district', { districtCode: 'd-other' }, /district is d-m1/],
+    ['a wrong code', { jneCode: 'BDO10005' }, /code is BDO10003/],
+    ['a wrong name', { expectedRawName: 'GONE,BANDUNG' }, /name is " GONE ,BANDUNG "/],
+    ['a wrong status', { expectedStatus: 'REVIEW_REQUIRED' }, /status is MATCHED/],
+    ['another snapshot', { snapshotSha256: 'a'.repeat(64) }, /written for snapshot/],
+    ['no reviewer', { reviewer: '  ' }, /reviewer is required/],
+    ['no reason', { reason: '' }, /reason is required/],
+    ['a token reason', { reason: 'ok' }, /reason is required/],
+    ['no review time', { reviewedAt: 'later' }, /reviewed_at is required/],
+  ])('%s blocks', async (_label, over, message) => {
+    const m = memoryStore(master(), [matched]);
+    const result = await imported(m, { rows, missingAcks: [ack(over)] });
+    expect(result.code).toBe(4);
+    expect(codesOf(result.plan.blockers)).toEqual(expect.arrayContaining(['MISSING_ACK_INVALID', 'MISSING_MATCHED_NEEDS_ACK']));
+    expect(result.plan.blockers.find((b) => b.code === 'MISSING_ACK_INVALID')!.detail).toMatch(message);
+    expect(m.calls.writes).toBe(0);
+  });
+
+  it('a wrong mapping id blocks: it acknowledges nothing', () => {
+    const plan = builder({ rows, missingAcks: [ack({ mappingId: 'nope' })] }).build(state());
+    expect(codesOf(plan.blockers).sort()).toEqual(['MISSING_ACK_NOT_PENDING', 'MISSING_MATCHED_NEEDS_ACK']);
+  });
+
+  it('a stale acknowledgment blocks when its mapping has been retired', () => {
+    const plan = builder({ rows, missingAcks: [ack()] }).build(state([{ ...matched, isActive: false }]));
+    expect(codesOf(plan.blockers)).toEqual(['MISSING_ACK_NOT_PENDING']);
+  });
+
+  it('a stale acknowledgment blocks when the code is back in the snapshot', () => {
+    const plan = builder({ rows: [...rows, raw('BDO10003', ' GONE ,BANDUNG ')], missingAcks: [ack()] }).build(state());
+    expect(codesOf(plan.blockers)).toEqual(['MISSING_ACK_NOT_PENDING']);
+  });
+
+  it('never applies to another snapshot', () => {
+    const later = [raw('BDO10001', 'KEPT,BANDUNG'), raw('BDO10009', 'NEW,BANDUNG')];
+    const plan = builder({ rows: later, missingAcks: [ack()] }).build(state());
+    expect(plan.blockers.find((b) => b.code === 'MISSING_ACK_INVALID')!.detail).toMatch(/written for snapshot/);
+  });
+
+  it.each([
+    ['mapping id', { mappingId: 'm9' }],
+    ['district', { districtCode: 'x' }],
+    ['code', { jneCode: 'BDO19999' }],
+    ['name', { expectedRawName: 'x' }],
+    ['status', { expectedStatus: 'x' }],
+    ['snapshot', { snapshotSha256: 'x' }],
+    ['reviewer', { reviewer: 'someone else' }],
+    ['reason', { reason: 'a different reason' }],
+    ['review time', { reviewedAt: '2026-10-30T10:00:00.000Z' }],
+  ])('changing the acknowledged %s changes the plan hash', (_label, over) => {
+    const s = (): MasterState => ({ ...state(), existing: fixed() });
+    expect(builder({ rows, missingAcks: [ack(over)] }).build(s()).planSha256).not.toBe(builder({ rows, missingAcks: [ack()] }).build(s()).planSha256);
+  });
+
+  it('acknowledging changes the plan hash, so a hash reviewed without it is refused', async () => {
+    const m = memoryStore(master(), [matched]);
+    const without = (await runLiveDryRun(m.store, (s) => builder({ rows }).build(s), () => {})).planSha256;
+    const result = await runImport(m.store, (s) => builder({ rows, missingAcks: [ack()], require: true }).build(s, without), () => {});
+    expect(codesOf(result.plan.blockers)).toEqual(['PLAN_MISMATCH']);
+  });
+
+  it('a change to an acknowledged mapping after review invalidates the plan', () => {
+    const s = (status: string): MasterState => ({ existing: fixed(), mappings: [{ id: 'm1', status, isActive: true, districtCode: 'd-m1', districtName: 'District m1', jneCode: 'BDO10003', kind: 'DESTINATION' }] });
+    const b = builder({ rows, missingAcks: [ack()] });
+    expect(b.build(s('MATCHED')).planSha256).not.toBe(b.build(s('REVIEW_REQUIRED')).planSha256);
+  });
+
+  it('a change to the missing row itself invalidates the plan', () => {
+    const b = builder({ rows });
+    const a = b.build({ existing: fixed(), mappings: [] }).planSha256;
+    expect(b.build({ existing: fixed().map((r) => (r.code === 'BDO10003' ? { ...r, rawName: 'CHANGED' } : r)), mappings: [] }).planSha256).not.toBe(a);
+  });
+
+  it('never substitutes a same-name row under another code', async () => {
+    const mappings = [{ ...matched }];
+    const m = memoryStore(master(), mappings);
+    const incoming = [raw('BDO10001', 'KEPT,BANDUNG'), raw('BDO19990', ' GONE ,BANDUNG ')];
+    const blocked = await imported(m, { rows: incoming });
+    expect(codesOf(blocked.plan.blockers)).toEqual(['MISSING_MATCHED_NEEDS_ACK']);
+    const sha = createHash('sha256').update(Buffer.from(JSON.stringify({ detail: incoming }))).digest('hex');
+    const result = await imported(m, { rows: incoming, missingAcks: [ack({ snapshotSha256: sha })] });
+    expect(result.code).toBe(0);
+    expect(mappings).toEqual([matched]);
+    expect(m.state.rows.find((r) => r.code === 'BDO19990')!.id).not.toBe(m.state.rows.find((r) => r.code === 'BDO10003')!.id);
+  });
+
+  it('does not stand in for a rename review', () => {
+    const plan = builder({ rows: [raw('BDO10001', 'RENAMED,BANDUNG')], missingAcks: [] }).build({
+      existing: master(),
+      mappings: [{ id: 'k', status: 'MATCHED', isActive: true, districtCode: 'd', districtName: 'D', jneCode: 'BDO10001', kind: 'DESTINATION' }],
+    });
+    expect(codesOf(plan.blockers)).toEqual(['RENAME_NEEDS_REVIEW']);
+    const both = builder({ rows: [raw('BDO10001', 'RENAMED,BANDUNG')] });
+    const sha = both.input({ existing: master(), mappings: [] }).sha256;
+    const acked = planMasterImport({
+      ...both.input({ ...state(), existing: master() }),
+      mappings: [
+        { id: 'k', status: 'MATCHED', isActive: true, districtCode: 'd', districtName: 'D', jneCode: 'BDO10001', kind: 'DESTINATION' },
+        { id: 'm1', status: 'MATCHED', isActive: true, districtCode: 'd-m1', districtName: 'District m1', jneCode: 'BDO10003', kind: 'DESTINATION' },
+      ],
+      missingAcks: [ack({ snapshotSha256: sha })],
+    });
+    expect(codesOf(acked.blockers)).toEqual(['RENAME_NEEDS_REVIEW']);
+  });
+
+  it('leaves ORIGIN alone', async () => {
+    const m = memoryStore([...master(), row('CGK10000', 'JAKARTA', { kind: 'ORIGIN' })], [matched]);
+    const before = JSON.stringify(m.state.rows.filter((r) => r.kind === 'ORIGIN'));
+    await imported(m, { rows, missingAcks: [ack()] });
+    expect(JSON.stringify(m.state.rows.filter((r) => r.kind === 'ORIGIN'))).toBe(before);
+  });
+
+  it('repeating an acknowledged import writes nothing', async () => {
+    const m = memoryStore(master(), [matched]);
+    await imported(m, { rows, missingAcks: [ack()] });
+    const after = JSON.stringify(m.state.rows);
+    expect(await imported(m, { rows, missingAcks: [ack()] })).toMatchObject({ code: 0, written: 0 });
+    expect(JSON.stringify(m.state.rows)).toBe(after);
+  });
+
+  it('keeps the separate deactivation refusal: an acknowledged code still cannot be deactivated', async () => {
+    const m = memoryStore(master(), [matched]);
+    const f: Fixture = { rows, missingAcks: [ack()], require: true };
+    await imported(m, f);
+    const r = await runDeactivateMissing(m.store, (s) => builder(f).build(s), { codes: ['BDO10003'], expectCount: 1, reason: 'absent from production master', operator: 'ops', confirm: true }, () => {});
+    expect(r.refused.join()).toMatch(/retire them first/);
+  });
+
+  it('has no global bypass flag', () => {
+    const src = readFileSync(join(__dirname, '../../prisma/tools/import-jne-master.ts'), 'utf8');
+    expect(src).not.toMatch(/--ignore-missing|--force|--skip-validation/);
+  });
+
+  it('reports the rows to acknowledge in the same columns the file needs', () => {
+    const plan = builder({ rows }).build(state());
+    const out = join(mkdtempSync(join(tmpdir(), 'jne-master-')), 'r');
+    writeReports(out, plan, null);
+    const text = readFileSync(join(out, 'missing-matched.csv'), 'utf8');
+    const filled = text.replace(`,${SHA},,,,`, `,${SHA},Rina Reviewer,accepted until JNE confirms,2026-10-30T09:00:00.000Z,`);
+    expect(parseMissingAcks(filled)).toEqual([expect.objectContaining({ mappingId: 'm1', expectedRawName: ' GONE ,BANDUNG ', snapshotSha256: SHA })]);
+    const summary = JSON.parse(readFileSync(join(out, 'plan.json'), 'utf8'));
+    expect(summary).toMatchObject({ missingWithActiveMatched: 1, missingWithReviewRequired: 0, missingWithoutActiveMapping: 2 });
+    rmSync(join(out, '..'), { recursive: true, force: true });
+  });
+
+  it('refuses an acknowledgment file listing one mapping twice', () => {
+    const head = 'mapping_id,district_code,jne_code,expected_raw_name,expected_status,snapshot_sha256,reviewer,reason,reviewed_at\n';
+    expect(() => parseMissingAcks(`${head}m1,d,c,n,s,h,r,why,t\nm1,d,c,n,s,h,r,why,t\n`)).toThrow(/twice/);
+  });
+});
+
+describe('retired mappings stay retired through an import', () => {
+  it('a retired mapping is not reactivated, even when its code is in the snapshot', async () => {
+    const mappings: MappingFixture[] = [{ id: 'm1', code: 'BDO10001', status: 'MATCHED', isActive: false }];
+    const m = memoryStore([row('BDO10001', 'A,BANDUNG'), originRow()], mappings);
+    const result = await imported(m, { rows: [raw('BDO10001', 'A,BANDUNG')] });
+    expect(result.code).toBe(0);
+    expect(mappings[0].isActive).toBe(false);
+  });
+
+  it('a retired mapping is not reactivated when its inactive code returns', async () => {
+    const mappings: MappingFixture[] = [{ id: 'm1', code: 'BDO10001', status: 'MATCHED', isActive: false }];
+    const m = memoryStore([row('BDO10001', 'A,BANDUNG', { isActive: false }), originRow()], mappings);
+    await imported(m, { rows: [raw('BDO10001', 'A,BANDUNG')] });
+    expect(m.state.rows.find((r) => r.code === 'BDO10001')!.isActive).toBe(true);
+    expect(mappings[0].isActive).toBe(false);
+  });
+});
+
+describe('sourceFetchedAt: the fetch time of the snapshot the row was last seen in', () => {
+  const OLDER = originRow;
+  const later = '2026-10-31T00:00:00.000Z';
+  const master = () => [OLDER(), row('BDO10001', 'SAME,BANDUNG', { source: 'PRODUCTION', sourceFetchedAt: new Date(NEW_FETCH) }), row('BDO10002', 'RENAMED,BANDUNG', { source: 'PRODUCTION', sourceFetchedAt: new Date(NEW_FETCH) }), row('BDO10003', 'GONE,BANDUNG', { source: 'PRODUCTION', sourceFetchedAt: new Date(NEW_FETCH) })];
+  const rows = [raw('BDO10001', 'SAME,BANDUNG'), raw('BDO10002', 'NEW NAME,BANDUNG')];
+
+  it('moves for every row in a newer snapshot, changed or not', async () => {
+    const m = memoryStore(master());
+    const result = await imported(m, { rows, metadata: { requestStartedUtc: later } });
+    expect(result.plan.updated.map((u) => [u.code, u.changes])).toEqual([
+      ['BDO10001', ['sourceFetchedAt']],
+      ['BDO10002', ['rawName', 'sourceFetchedAt']],
+    ]);
+    for (const code of ['BDO10001', 'BDO10002']) expect(m.state.rows.find((r) => r.code === code)!.sourceFetchedAt.toISOString()).toBe(later);
+  });
+
+  it('stays for a row the snapshot does not list: it was not seen', async () => {
+    const m = memoryStore(master());
+    await imported(m, { rows, metadata: { requestStartedUtc: later } });
+    expect(m.state.rows.find((r) => r.code === 'BDO10003')!.sourceFetchedAt.toISOString()).toBe(NEW_FETCH);
+  });
+
+  it('does not move on a repeat of the same snapshot', async () => {
+    const m = memoryStore(master());
+    await imported(m, { rows, metadata: { requestStartedUtc: later } });
+    const stamps = JSON.stringify(m.state.rows.map((r) => r.updatedAt));
+    const again = await imported(m, { rows, metadata: { requestStartedUtc: later } });
+    expect(again.written).toBe(0);
+    expect(JSON.stringify(m.state.rows.map((r) => r.updatedAt))).toBe(stamps);
+  });
+
+  it('never touches ORIGIN', async () => {
+    const m = memoryStore(master());
+    await imported(m, { rows, metadata: { requestStartedUtc: later } });
+    expect(m.state.rows.find((r) => r.kind === 'ORIGIN')!.sourceFetchedAt).toEqual(OLD_FETCH);
+  });
+
+  it('is what the stale-snapshot guard reads: an unchanged row still dates the master', () => {
+    const plan = builder({ rows: [raw('BDO10001', 'SAME,BANDUNG')], metadata: { requestStartedUtc: '2026-10-01T00:00:00.000Z' } }).build({ existing: master(), mappings: [] });
+    expect(codesOf(plan.blockers)).toContain('STALE_SNAPSHOT');
+  });
+});
+
+describe('the plan hash binds the capture', () => {
+  it.each([
+    ['the capture time', { requestStartedUtc: '2026-10-30T07:50:44.000Z' }],
+    ['the endpoint path', { request: { method: 'POST', url: `${BASE_URL}/insert/getdestination?x=1` } }],
+  ])('changing %s changes it', (_label, metadata) => {
+    const state = (): MasterState => ({ existing: [{ ...originRow(), id: 'fixed' }], mappings: [] });
+    const rows = [raw('BDO10001', 'A')];
+    expect(builder({ rows, metadata }).build(state()).planSha256).not.toBe(builder({ rows }).build(state()).planSha256);
   });
 });
 
