@@ -37,6 +37,39 @@ interface JnePricedevResponse {
   status?: boolean;
 }
 
+/** A JNE tariff price as a plain decimal string: digits, optionally a fractional part. */
+const JNE_PRICE_TEXT = /^\d+(\.\d+)?$/;
+
+/**
+ * JNE `price` → whole IDR, or null when it is not a usable price.
+ *
+ * A quote a customer can select must carry a real, positive price, so zero, a
+ * negative, an empty or blank string, null, a non-numeric string (including
+ * "NaN", "Infinity", hex and exponent forms), a non-finite number and anything
+ * that rounds to Rp0 are all rejected. Nothing is ever coerced to zero: `Number("")`
+ * is 0, which is exactly how an empty price used to become a free option.
+ */
+export function parseJnePrice(raw: unknown): number | null {
+  let value: number;
+  if (typeof raw === 'number') {
+    value = raw;
+  } else if (typeof raw === 'string') {
+    const text = raw.trim();
+    if (!JNE_PRICE_TEXT.test(text)) return null;
+    value = Number(text);
+  } else {
+    return null;
+  }
+  if (!Number.isFinite(value) || value <= 0) return null;
+  const idr = Math.round(value);
+  return idr > 0 ? idr : null;
+}
+
+/** The value when it is a string, otherwise null: JNE sends text, and a row of another shape must not throw. */
+function textOf(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
+}
+
 /**
  * Real JNE courier integration. Authenticates with username + api_key (JNE's
  * form-encoded tariff API), requests a quotation over HTTP with timeout + retry,
@@ -202,12 +235,28 @@ export class JneProvider implements ShippingProvider {
       return [];
     }
 
-    return rows
+    // Each row is one independent service, so a bad row is dropped on its own and
+    // the valid rows survive. Dropped rows are counted by reason and logged once,
+    // with service codes only: never the payload, never a price we did not trust.
+    const dropped: Record<string, number> = {};
+    const droppedServices: string[] = [];
+    const drop = (reason: string, service?: string): null => {
+      dropped[reason] = (dropped[reason] ?? 0) + 1;
+      if (service) droppedServices.push(service);
+      return null;
+    };
+
+    const quotes = rows
       .map((row): ShippingQuote | null => {
-        const service = row.service_code?.trim();
-        if (!service) return null;
-        const cost = typeof row.price === 'string' ? Number(row.price) : row.price;
-        if (typeof cost !== 'number' || !Number.isFinite(cost) || cost < 0) return null;
+        if (row === null || typeof row !== 'object' || Array.isArray(row)) return drop('row_not_object');
+        const service = textOf(row.service_code)?.trim();
+        if (!service) return drop('missing_service_code');
+        const cost = parseJnePrice(row.price);
+        if (cost === null) return drop('invalid_price', service);
+        // Validated only when JNE supplies it; an absent currency is not invented.
+        if (row.currency !== undefined && row.currency !== null && textOf(row.currency)?.trim().toUpperCase() !== 'IDR') {
+          return drop('non_idr_currency', service);
+        }
 
         return {
           provider: this.name,
@@ -216,9 +265,9 @@ export class JneProvider implements ShippingProvider {
           // `service_display` is JNE's own label. It is NOT unique across rows
           // (PAXELBOX-61N saw two "REG" rows on one route), so the code is what
           // identifies a service and the display is what a human reads.
-          serviceName: row.service_display?.trim() || service,
-          estimatedDays: this.formatEtd(row.etd_from, row.etd_thru),
-          shippingCost: Math.round(cost),
+          serviceName: textOf(row.service_display)?.trim() || service,
+          estimatedDays: this.formatEtd(textOf(row.etd_from), textOf(row.etd_thru)),
+          shippingCost: cost,
           providerMeta: {
             service_code: row.service_code ?? null,
             service_display: row.service_display ?? null,
@@ -233,6 +282,20 @@ export class JneProvider implements ShippingProvider {
         };
       })
       .filter((q): q is ShippingQuote => q !== null);
+
+    if (Object.keys(dropped).length > 0) {
+      this.logger.warn({
+        provider: this.name,
+        outcome: quotes.length > 0 ? 'partial' : 'unavailable',
+        reason: quotes.length > 0 ? 'jne_rows_dropped' : 'jne_no_valid_price_rows',
+        dropped,
+        droppedServices,
+        kept: quotes.length,
+        origin: from,
+        destination: thru,
+      });
+    }
+    return quotes;
   }
 
   /**
