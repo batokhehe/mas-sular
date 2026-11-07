@@ -65,6 +65,24 @@ export function parseJnePrice(raw: unknown): number | null {
   return idr > 0 ? idr : null;
 }
 
+/**
+ * JNE Trucking (JTR) service codes. Mas Sular does not offer trucking to customers.
+ *
+ * Identified by `service_code`, never by `service_display`. The live RATE responses
+ * for every active mapping (Rounds 49-54) return trucking as `JTR23`, `JTR<130`,
+ * `JTR>130` and `JTR>200`, plus the city-courier variant `CTCJTR23`, whose
+ * `service_display` is "JTR". `CTC23`, `CTCYES23` and `CTCSPS23` are NOT trucking.
+ * The pattern is anchored at the start of the code, so a later suffix or weight band
+ * (`JTR25`, `JTR>300`) is hidden too, and no other code that merely contains the
+ * letters is affected.
+ */
+const JNE_TRUCKING_SERVICE_CODE = /^(?:CTC)?JTR/i;
+
+/** True when a JNE service code is JNE Trucking (any variant), which checkout never offers. */
+export function isJneTruckingService(serviceCode: string): boolean {
+  return JNE_TRUCKING_SERVICE_CODE.test(serviceCode.trim());
+}
+
 /** The value when it is a string, otherwise null: JNE sends text, and a row of another shape must not throw. */
 function textOf(value: unknown): string | null {
   return typeof value === 'string' ? value : null;
@@ -199,7 +217,9 @@ export class JneProvider implements ShippingProvider {
    * Anything that cannot be mapped truthfully is DROPPED rather than defaulted.
    * Nothing about JNE's service vocabulary is reinterpreted: `REG15` and `REG19`
    * stay distinct services because they are distinct to JNE, whatever the suffix
-   * turns out to mean, and `JTR<130` passes through unchanged.
+   * turns out to mean. JNE Trucking (`isJneTruckingService`) is the one service
+   * family the checkout does not offer: those rows are left out of the quotes, so
+   * they can be neither listed nor selected. The raw response is not modified.
    */
   private mapPricedevResponse(text: string, from: string, thru: string): ShippingQuote[] {
     let parsed: JnePricedevResponse;
@@ -240,6 +260,9 @@ export class JneProvider implements ShippingProvider {
     // with service codes only: never the payload, never a price we did not trust.
     const dropped: Record<string, number> = {};
     const droppedServices: string[] = [];
+    // Not offered to customers by policy, so not "dropped": counted apart, and only
+    // logged when hiding them is what left the destination with no JNE option.
+    const hiddenServices: string[] = [];
     const drop = (reason: string, service?: string): null => {
       dropped[reason] = (dropped[reason] ?? 0) + 1;
       if (service) droppedServices.push(service);
@@ -251,6 +274,10 @@ export class JneProvider implements ShippingProvider {
         if (row === null || typeof row !== 'object' || Array.isArray(row)) return drop('row_not_object');
         const service = textOf(row.service_code)?.trim();
         if (!service) return drop('missing_service_code');
+        if (isJneTruckingService(service)) {
+          hiddenServices.push(service);
+          return null;
+        }
         const cost = parseJnePrice(row.price);
         if (cost === null) return drop('invalid_price', service);
         // Validated only when JNE supplies it; an absent currency is not invented.
@@ -283,13 +310,15 @@ export class JneProvider implements ShippingProvider {
       })
       .filter((q): q is ShippingQuote => q !== null);
 
-    if (Object.keys(dropped).length > 0) {
+    const anyDropped = Object.keys(dropped).length > 0;
+    if (anyDropped || (quotes.length === 0 && hiddenServices.length > 0)) {
       this.logger.warn({
         provider: this.name,
         outcome: quotes.length > 0 ? 'partial' : 'unavailable',
-        reason: quotes.length > 0 ? 'jne_rows_dropped' : 'jne_no_valid_price_rows',
+        reason: quotes.length > 0 ? 'jne_rows_dropped' : anyDropped ? 'jne_no_valid_price_rows' : 'jne_only_hidden_services',
         dropped,
         droppedServices,
+        ...(hiddenServices.length > 0 ? { hiddenServices } : {}),
         kept: quotes.length,
         origin: from,
         destination: thru,

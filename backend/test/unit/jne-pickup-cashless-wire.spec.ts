@@ -253,7 +253,9 @@ describe('JNE /pickupcashless FINAL wire body (diagnostic)', () => {
 
 describe('quotation -> booking: the booking sends REG whatever the quote said', () => {
   // Real quotation provider (JNE pricedev) and real booking provider, both with a mocked
-  // transport - no network. The quotation answers JTR<130; the customer "buys" it.
+  // transport - no network. The quotation answers JTR<130 and YES19; JNE Trucking is not
+  // offered at checkout, so the customer "buys" YES19. An order that already carries a
+  // JTR service (placed before trucking was hidden) still books: see the it.each below.
   const PRICEDEV_BODY = JSON.stringify({
     price: [
       { origin_name: 'BANDUNG', destination_name: 'BANDUNG', service_display: 'JTR<130', service_code: 'JTR<130', goods_type: 'Paket', currency: 'IDR', price: '50000', etd_from: '3', etd_thru: '4', times: 'D' },
@@ -305,18 +307,18 @@ describe('quotation -> booking: the booking sends REG whatever the quote said', 
     return { result, calls };
   }
 
-  it('the quotation is unchanged (JTR<130 returned verbatim) and makes no booking request', async () => {
+  it('the quotation offers YES19 verbatim, hides JNE Trucking and makes no booking request', async () => {
     const { quotes, calls } = await quote();
-    expect(quotes.map((q) => q.service)).toEqual(['JTR<130', 'YES19']);
-    expect(quotes.find((q) => q.service === 'JTR<130')?.shippingCost).toBe(50_000);
+    expect(quotes.map((q) => q.service)).toEqual(['YES19']);
+    expect(quotes.find((q) => q.service === 'YES19')?.shippingCost).toBe(15_000);
     expect(calls).toHaveLength(1);
     expect(calls[0]).toBe('https://jne.invalid:10202/tracing/api/pricedev');
     expect(calls.some((url) => url.includes('/pickupcashless'))).toBe(false);
   });
 
-  it('booking the quoted JTR<130 sends PICKUP_SERVICE=REG, SERVICE_CODE=REG, SHIPPER_COUNTRY / RECEIVER_COUNTRY=INDONESIA in the one /pickupcashless request', async () => {
+  it('booking the quoted YES19 sends PICKUP_SERVICE=REG, SERVICE_CODE=REG, SHIPPER_COUNTRY / RECEIVER_COUNTRY=INDONESIA in the one /pickupcashless request', async () => {
     const { quotes } = await quote();
-    const quoted = quotes.find((q) => q.service === 'JTR<130')!;
+    const quoted = quotes.find((q) => q.service === 'YES19')!;
     const { result, calls } = await book(quoted.service);
 
     expect(result.trackingNumber).toBe('0109401600067399');
@@ -330,7 +332,7 @@ describe('quotation -> booking: the booking sends REG whatever the quote said', 
     expect(wire.get('RECEIVER_COUNTRY')).toBe('INDONESIA');
     expect(String(calls[0].init.body)).not.toContain('JTR');
     // The quote object itself was not modified by booking.
-    expect(quoted.service).toBe('JTR<130');
+    expect(quoted.service).toBe('YES19');
   });
 
   it.each(['JTR<130', 'JTR250', 'YES19', 'REG19', 'REG15', 'SOMETHING_NEW'])('booking a quoted %s sends PICKUP_SERVICE=REG, SERVICE_CODE=REG and both countries', async (service) => {

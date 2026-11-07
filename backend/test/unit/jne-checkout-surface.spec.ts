@@ -22,13 +22,15 @@ const ANDIR = 'BDO10041';
 /**
  * The exact shape PAXELBOX-61N measured on Bandung -> Jakarta Barat: two rows
  * whose `service_display` is the SAME ("REG") at a 10x price difference, retail
- * ETD null, plus a trucking row that does carry an ETD.
+ * ETD null, plus a trucking row that does carry an ETD (JNE Trucking is not offered
+ * at checkout, so that row never reaches the response) and an SPS row with an ETD.
  */
 const REAL_BODY = JSON.stringify({
   price: [
     { origin_name: 'BANDUNG', destination_name: 'JAKARTA BARAT', service_display: 'REG', service_code: 'REG19', goods_type: 'Document/Paket', currency: 'IDR', price: '11000', etd_from: null, etd_thru: null, times: 'D' },
     { origin_name: 'BANDUNG', destination_name: 'JAKARTA BARAT', service_display: 'REG', service_code: 'REG15', goods_type: 'Document/Paket', currency: 'IDR', price: '1050', etd_from: null, etd_thru: null, times: null },
     { origin_name: 'BANDUNG', destination_name: 'JAKARTA BARAT', service_display: 'JTR<130', service_code: 'JTR<130', goods_type: 'Paket', currency: 'IDR', price: '500000', etd_from: '3', etd_thru: '4', times: 'D' },
+    { origin_name: 'BANDUNG', destination_name: 'JAKARTA BARAT', service_display: 'SPS', service_code: 'SPS19', goods_type: 'Paket', currency: 'IDR', price: '45000', etd_from: '1', etd_thru: '2', times: 'D' },
   ],
 });
 
@@ -83,9 +85,10 @@ describe('a JNE quote reaches the checkout response', () => {
       expect.arrayContaining([
         expect.objectContaining({ provider: 'jne', service: 'REG19', serviceName: 'REG', shippingCost: 11000 }),
         expect.objectContaining({ provider: 'jne', service: 'REG15', serviceName: 'REG', shippingCost: 1050 }),
-        expect.objectContaining({ provider: 'jne', service: 'JTR<130', serviceName: 'JTR<130', shippingCost: 500000 }),
+        expect.objectContaining({ provider: 'jne', service: 'SPS19', serviceName: 'SPS', shippingCost: 45000 }),
       ]),
     );
+    expect(body.some((q) => String(q.service).startsWith('JTR'))).toBe(false);
   });
 });
 
@@ -128,7 +131,7 @@ describe('ETD reaches the response without invention', () => {
     const { service, http } = checkout();
     http.mockResolvedValue(res(200, REAL_BODY));
     const body = asJson(await service.getQuotes(request()));
-    expect(body.find((q) => q.service === 'JTR<130')?.estimatedDays).toBe('3-4');
+    expect(body.find((q) => q.service === 'SPS19')?.estimatedDays).toBe('1-2');
   });
 
   it('never turns a null ETD into a number, a zero, or an empty string', async () => {
@@ -158,13 +161,13 @@ describe('providerMeta on the response body', () => {
     const { service, http } = checkout();
     http.mockResolvedValue(res(200, REAL_BODY));
     const body = asJson(await service.getQuotes(request()));
-    expect(body.find((q) => q.service === 'JTR<130')?.providerMeta).toEqual({
-      service_code: 'JTR<130',
-      service_display: 'JTR<130',
+    expect(body.find((q) => q.service === 'SPS19')?.providerMeta).toEqual({
+      service_code: 'SPS19',
+      service_display: 'SPS',
       goods_type: 'Paket',
       currency: 'IDR',
-      etd_from: '3',
-      etd_thru: '4',
+      etd_from: '1',
+      etd_thru: '2',
       times: 'D',
       origin_name: 'BANDUNG',
       destination_name: 'JAKARTA BARAT',

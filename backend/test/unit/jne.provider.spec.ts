@@ -18,13 +18,14 @@ const SANDBOX_URL = 'https://apiv2.jne.co.id:10202';
 const ORIGIN = 'BDO10000';
 const ANDIR = 'BDO10041';
 
-/** A real 61N-shaped response: retail services with NULL ETD, plus trucking. */
+/** A real 61N-shaped response: retail services with NULL ETD, plus trucking (hidden at checkout) and an SPS row with an ETD. */
 const OK_BODY = JSON.stringify({
   price: [
     { origin_name: 'BANDUNG', destination_name: 'JAKARTA BARAT', service_display: 'YES', service_code: 'YES19', goods_type: 'Document/Paket', currency: 'IDR', price: '15000', etd_from: null, etd_thru: null, times: 'D' },
     { origin_name: 'BANDUNG', destination_name: 'JAKARTA BARAT', service_display: 'REG', service_code: 'REG19', goods_type: 'Document/Paket', currency: 'IDR', price: '11000', etd_from: null, etd_thru: null, times: 'D' },
     { origin_name: 'BANDUNG', destination_name: 'JAKARTA BARAT', service_display: 'REG', service_code: 'REG15', goods_type: 'Document/Paket', currency: 'IDR', price: '1050', etd_from: null, etd_thru: null, times: null },
     { origin_name: 'BANDUNG', destination_name: 'JAKARTA BARAT', service_display: 'JTR<130', service_code: 'JTR<130', goods_type: 'Paket', currency: 'IDR', price: '500000', etd_from: '3', etd_thru: '4', times: 'D' },
+    { origin_name: 'BANDUNG', destination_name: 'JAKARTA BARAT', service_display: 'SPS', service_code: 'SPS19', goods_type: 'Paket', currency: 'IDR', price: '45000', etd_from: '1', etd_thru: '2', times: 'D' },
   ],
 });
 
@@ -184,12 +185,12 @@ describe('destination resolution gates the call', () => {
 });
 
 describe('response mapping', () => {
-  it('returns one quote per JNE service', async () => {
+  it('returns one quote per customer-facing JNE service; JNE Trucking is not offered', async () => {
     const { provider, http } = build();
     http.mockResolvedValue(res(200, OK_BODY));
     const quotes = await provider.getRates(request());
     expect(quotes).toHaveLength(4);
-    expect(quotes.map((q) => q.service)).toEqual(['YES19', 'REG19', 'REG15', 'JTR<130']);
+    expect(quotes.map((q) => q.service)).toEqual(['YES19', 'REG19', 'REG15', 'SPS19']);
   });
 
   it('preserves service_code verbatim — REG15 and REG19 stay distinct', async () => {
@@ -204,9 +205,9 @@ describe('response mapping', () => {
 
   it('does not rewrite an unusual service code', async () => {
     const { provider, http } = build();
-    http.mockResolvedValue(res(200, OK_BODY));
+    http.mockResolvedValue(res(200, JSON.stringify({ price: [{ service_code: 'REG<5', service_display: 'REG', price: '9000' }] })));
     const quotes = await provider.getRates(request());
-    expect(quotes.find((q) => q.service === 'JTR<130')).toBeDefined();
+    expect(quotes.map((q) => q.service)).toEqual(['REG<5']);
   });
 
   it('maps service_display to serviceName even when it repeats across rows', async () => {
@@ -221,7 +222,7 @@ describe('response mapping', () => {
     http.mockResolvedValue(res(200, OK_BODY));
     const quotes = await provider.getRates(request());
     expect(quotes.find((q) => q.service === 'REG19')?.shippingCost).toBe(11000);
-    expect(quotes.find((q) => q.service === 'JTR<130')?.shippingCost).toBe(500000);
+    expect(quotes.find((q) => q.service === 'SPS19')?.shippingCost).toBe(45000);
   });
 
   it('does NOT fabricate an ETD when JNE sends null', async () => {
@@ -237,10 +238,10 @@ describe('response mapping', () => {
   it('preserves an ETD when JNE provides one', async () => {
     const { provider, http } = build();
     http.mockResolvedValue(res(200, OK_BODY));
-    const q = (await provider.getRates(request())).find((x) => x.service === 'JTR<130')!;
-    expect(q.estimatedDays).toBe('3-4');
-    expect(q.providerMeta?.etd_from).toBe('3');
-    expect(q.providerMeta?.etd_thru).toBe('4');
+    const q = (await provider.getRates(request())).find((x) => x.service === 'SPS19')!;
+    expect(q.estimatedDays).toBe('1-2');
+    expect(q.providerMeta?.etd_from).toBe('1');
+    expect(q.providerMeta?.etd_thru).toBe('2');
   });
 
   it('collapses an identical ETD pair rather than printing "2-2"', async () => {
@@ -252,14 +253,14 @@ describe('response mapping', () => {
   it('carries the fields ShippingQuote cannot otherwise hold', async () => {
     const { provider, http } = build();
     http.mockResolvedValue(res(200, OK_BODY));
-    const q = (await provider.getRates(request())).find((x) => x.service === 'JTR<130')!;
+    const q = (await provider.getRates(request())).find((x) => x.service === 'SPS19')!;
     expect(q.providerMeta).toEqual({
-      service_code: 'JTR<130',
-      service_display: 'JTR<130',
+      service_code: 'SPS19',
+      service_display: 'SPS',
       goods_type: 'Paket',
       currency: 'IDR',
-      etd_from: '3',
-      etd_thru: '4',
+      etd_from: '1',
+      etd_thru: '2',
       times: 'D',
       origin_name: 'BANDUNG',
       destination_name: 'JAKARTA BARAT',
