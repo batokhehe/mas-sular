@@ -137,12 +137,12 @@ describe('F2: a malformed row is dropped on its own; valid rows survive', () => 
   it('logs one safe diagnostic: reasons, counts and service codes only (no payload price, no credential)', async () => {
     const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     try {
-      await rates(`{"price":[null,{"service_code":"YES23","price":"0"},{"service_code":"JTR23","currency":"USD","price":"777"},${valid}]}`);
+      await rates(`{"price":[null,{"service_code":"YES23","price":"0"},{"service_code":"SPS23","currency":"USD","price":"777"},${valid}]}`);
       const calls = warn.mock.calls.filter(([m]) => (m as { reason?: string }).reason === 'jne_rows_dropped');
       expect(calls).toHaveLength(1);
       expect(calls[0][0]).toEqual({
         provider: 'jne', outcome: 'partial', reason: 'jne_rows_dropped',
-        dropped: { row_not_object: 1, invalid_price: 1, non_idr_currency: 1 }, droppedServices: ['YES23', 'JTR23'], kept: 1,
+        dropped: { row_not_object: 1, invalid_price: 1, non_idr_currency: 1 }, droppedServices: ['YES23', 'SPS23'], kept: 1,
         origin: 'BDO10000', destination: 'CGK10209',
       });
       expect(JSON.stringify(warn.mock.calls)).not.toContain(FAKE_KEY);

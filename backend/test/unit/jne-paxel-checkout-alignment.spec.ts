@@ -149,12 +149,12 @@ describe('Round 39 price rule as used by the checkout JNE provider', () => {
   });
 
   it('mixed services: each invalid row is dropped on its own, every valid one is kept', async () => {
-    const body = `{"price":[${row('OKE23', '"0"')},${row('REG23', '"18000"')},null,${row('YES23', '"9000"', '"currency":"USD"')},${row('JTR23', '"60000"')},${row('SPS23', '""')}]}`;
+    const body = `{"price":[${row('OKE23', '"0"')},${row('REG23', '"18000"')},null,${row('YES23', '"9000"', '"currency":"USD"')},${row('CTC23', '"60000"')},${row('SPS23', '""')}]}`;
     const { shipping } = world(body);
     expect(show(await shipping.getQuotes(request('dist-gambir')))).toEqual([
       ...PAXEL_EXPECTED,
       'jne:REG23:18000',
-      'jne:JTR23:60000',
+      'jne:CTC23:60000',
     ]);
   });
 
