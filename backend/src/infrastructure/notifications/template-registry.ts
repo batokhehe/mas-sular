@@ -13,6 +13,18 @@ export interface QontakBodyParam {
 }
 
 /**
+ * Optional Qontak IMAGE header. Emitted only when the `when` condition matches,
+ * so a template shared by several payment methods can attach an image to just
+ * one of them. The URL itself is transport config (`QONTAK_QRIS_IMAGE_URL`).
+ */
+export interface QontakImageHeader {
+  /** Filename Qontak reports for the image. */
+  filename: string;
+  /** Emit the header only when this variable equals `equals`. */
+  when?: { source: string; equals: string };
+}
+
+/**
  * Descriptor-based template mapping. Resolving (channel, logicalTemplate) yields
  * the provider template id + (for WhatsApp) the parameter/button layout, so the
  * provider stays generic: adding a template is a registry change, not a code change.
@@ -30,6 +42,8 @@ export interface ProviderTemplateDescriptor {
    * before this field appeared keeps its exact behaviour.
    */
   buttonSource?: string;
+  /** Optional IMAGE header (Qontak `parameters.header`). */
+  imageHeader?: QontakImageHeader;
 }
 
 @Injectable()
@@ -62,6 +76,13 @@ export class TemplateRegistry {
         { key: '6', valueName: 'account_number', source: 'accountNumber' },
       ],
       button: true,
+      // BANK_TRANSFER only: the approved invoice template carries a QRIS image
+      // header. QRIS (legacy) shares this logical template, so the condition
+      // keeps the image off that method instead of attaching it to both.
+      imageHeader: {
+        filename: 'qris-mas-sular.jpeg',
+        when: { source: 'paymentMethod', equals: 'BANK_TRANSFER' },
+      },
     });
     this.register(NotificationChannel.WHATSAPP, 'order.cod', {
       providerTemplateId: qontak.codTemplateId ?? '',

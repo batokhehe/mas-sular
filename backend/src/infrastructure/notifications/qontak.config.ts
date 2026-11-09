@@ -27,6 +27,12 @@ export interface QontakConfig {
   adminRecipient?: string;
   /** Approved free-text template ({{1}} = message) for admin manual sends. Optional — without it, manual WhatsApp sends are rejected at the API. */
   manualTemplateId?: string;
+  /**
+   * Public HTTPS URL of the QRIS image used as the IMAGE header of the
+   * BANK_TRANSFER invoice. Optional: when unset, BANK_TRANSFER sends fail
+   * closed (permanent) while every other notification is unaffected.
+   */
+  qrisImageUrl?: string;
   /** Per-request timeout (ms). */
   timeoutMs: number;
   /** In-call immediate retries for transient network/5xx (complements the durable outbox retry). */
@@ -46,6 +52,7 @@ export function loadQontakConfig(env: NodeJS.ProcessEnv = process.env): QontakCo
     shipmentTemplateId: env.QONTAK_SHIPMENT_TEMPLATE_ID,
     adminRecipient: env.QONTAK_ADMIN,
     manualTemplateId: env.QONTAK_MANUAL_TEMPLATE_ID,
+    qrisImageUrl: env.QONTAK_QRIS_IMAGE_URL,
     timeoutMs: positiveInt(env.QONTAK_TIMEOUT_MS, 10_000),
     maxRetry: positiveInt(env.QONTAK_MAX_RETRY, 1),
   };

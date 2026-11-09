@@ -51,6 +51,13 @@ export type NotificationVariables =
       // totalPrice is the final transfer amount (unique code already folded in).
       totalPrice: number;
       uploadToken: string;
+      /**
+       * Payment method from the outbox payload, e.g. "BANK_TRANSFER" / "QRIS".
+       * `order.transfer` is shared by both; the provider uses this ONLY to decide
+       * whether the QRIS image header applies. Optional so older rows/direct
+       * callers without it keep their exact behaviour (no header).
+       */
+      paymentMethod?: string;
       bankName: string;
       bankCode?: string | null;
       accountName: string;

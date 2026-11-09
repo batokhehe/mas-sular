@@ -11,13 +11,16 @@ function cfg(over: Partial<QontakConfig> = {}): QontakConfig {
     channelIntegrationId: 'ci',
     orderTemplateId: 'tpl-order',
     codTemplateId: 'tpl-cod',
+    qrisImageUrl: QRIS_IMAGE_URL,
     timeoutMs: 10_000,
     maxRetry: 1,
     ...over,
   };
 }
 
-function transferMessage(): NotificationMessage {
+const QRIS_IMAGE_URL = 'https://shop.example.com/qris-mas-sular.jpeg';
+
+function transferMessage(paymentMethod = 'BANK_TRANSFER'): NotificationMessage {
   return {
     channel: 'WHATSAPP',
     template: 'order.transfer',
@@ -28,6 +31,7 @@ function transferMessage(): NotificationMessage {
       orderNumber: 'BMS-1',
       totalPrice: 30123,
       uploadToken: 'RAWTOKEN',
+      paymentMethod,
       bankName: 'BCA',
       bankCode: '014',
       accountName: 'Bakso Mas Sular',
@@ -83,7 +87,45 @@ describe('QontakWhatsAppProvider', () => {
     expect(body.parameters.body[3].value_text).toBe('BCA');
     // Button carries ONLY the raw token — never the full URL / hash.
     expect(body.parameters.buttons).toEqual([{ index: '0', type: 'url', value: 'RAWTOKEN' }]);
-    expect(call.body).not.toContain('http');
+    expect(JSON.stringify(body.parameters.body)).not.toContain('http');
+    // BANK_TRANSFER adds the QRIS IMAGE header on the SAME template.
+    expect(body.parameters.header).toEqual({
+      format: 'IMAGE',
+      params: [
+        { key: 'url', value: QRIS_IMAGE_URL },
+        { key: 'filename', value: 'qris-mas-sular.jpeg' },
+      ],
+    });
+  });
+
+  it('omits the IMAGE header for QRIS, which shares the transfer template', async () => {
+    const provider = new QontakWhatsAppProvider(cfg(), new TemplateRegistry());
+    (provider as unknown as { http: unknown }).http = jest.fn().mockResolvedValue(okRes());
+    await provider.send(transferMessage('QRIS'));
+
+    const body = JSON.parse((provider as unknown as { http: jest.Mock }).http.mock.calls[0][1].body);
+    expect(body.message_template_id).toBe('tpl-order');
+    expect(body.parameters.header).toBeUndefined();
+    // Body and button are otherwise unchanged.
+    expect(body.parameters.body).toHaveLength(6);
+    expect(body.parameters.buttons).toEqual([{ index: '0', type: 'url', value: 'RAWTOKEN' }]);
+  });
+
+  it('BANK_TRANSFER fails closed (permanent, no HTTP call) when the image URL is unset', async () => {
+    const provider = new QontakWhatsAppProvider(cfg({ qrisImageUrl: undefined }), new TemplateRegistry());
+    const http = jest.fn().mockResolvedValue(okRes());
+    (provider as unknown as { http: unknown }).http = http;
+
+    await expect(provider.send(transferMessage())).rejects.toBeInstanceOf(PermanentSendError);
+    expect(http).not.toHaveBeenCalled();
+  });
+
+  it('QRIS still sends when the image URL is unset (unrelated path unaffected)', async () => {
+    const provider = new QontakWhatsAppProvider(cfg({ qrisImageUrl: undefined }), new TemplateRegistry());
+    (provider as unknown as { http: unknown }).http = jest.fn().mockResolvedValue(okRes());
+    await expect(provider.send(transferMessage('QRIS'))).resolves.toEqual({ providerMessageId: 'q-1' });
+    const body = JSON.parse((provider as unknown as { http: jest.Mock }).http.mock.calls[0][1].body);
+    expect(body.parameters.header).toBeUndefined();
   });
 
   it('COD template omits the button', async () => {
@@ -100,6 +142,7 @@ describe('QontakWhatsAppProvider', () => {
     const body = JSON.parse((provider as unknown as { http: jest.Mock }).http.mock.calls[0][1].body);
     expect(body.message_template_id).toBe('tpl-cod');
     expect(body.parameters.buttons).toBeUndefined();
+    expect(body.parameters.header).toBeUndefined();
   });
 
   it('4xx → PermanentSendError, 5xx → TransientSendError', async () => {

@@ -139,6 +139,14 @@ const baseSchema = z
     QONTAK_ORDER_TEMPLATE_ID: z.string().optional(),
     QONTAK_COD_TEMPLATE_ID: z.string().optional(),
     QONTAK_BASE_URL: z.string().url('QONTAK_BASE_URL must be a valid URL').optional(),
+    // Public image used as the IMAGE header of the BANK_TRANSFER invoice.
+    // Optional: an unset value only affects BANK_TRANSFER (fails closed) and
+    // never blocks boot or any other notification.
+    QONTAK_QRIS_IMAGE_URL: z
+      .string()
+      .url('QONTAK_QRIS_IMAGE_URL must be a valid URL')
+      .refine((v) => v.startsWith('https://'), 'QONTAK_QRIS_IMAGE_URL must use HTTPS')
+      .optional(),
     QONTAK_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
     QONTAK_MAX_RETRY: z.coerce.number().int().nonnegative().optional(),
 

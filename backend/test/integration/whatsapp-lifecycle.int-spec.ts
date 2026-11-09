@@ -35,13 +35,18 @@ const TPL = {
   QONTAK_SHIPPED_TEMPLATE_ID: 'SHIPPED-TPL',
   QONTAK_DELIVERED_TEMPLATE_ID: 'DELIVERED-TPL',
   QONTAK_COD_TEMPLATE_ID: 'COD-TPL',
+  QONTAK_QRIS_IMAGE_URL: 'https://ecommerce.baksomassular.com/qris-mas-sular.jpeg',
 }
 
 interface QontakBody {
   to_name: string
   to_number: string
   message_template_id: string
-  parameters: { body: { key: string; value: string; value_text: string }[]; buttons?: { value: string }[] }
+  parameters: {
+    header?: { format: string; params: { key: string; value: string }[] }
+    body: { key: string; value: string; value_text: string }[]
+    buttons?: { value: string }[]
+  }
 }
 
 describe('WA lifecycle (real DB, stubbed Qontak)', () => {
@@ -123,7 +128,7 @@ describe('WA lifecycle (real DB, stubbed Qontak)', () => {
     const message = await builder.build(row)
     let captured: QontakBody | undefined
     const provider = new QontakWhatsAppProvider(
-      { baseUrl: 'https://qontak.invalid', apiToken: 't', channelIntegrationId: 'c', timeoutMs: 1000, maxRetry: 0 } as never,
+      { baseUrl: 'https://qontak.invalid', apiToken: 't', channelIntegrationId: 'c', qrisImageUrl: TPL.QONTAK_QRIS_IMAGE_URL, timeoutMs: 1000, maxRetry: 0 } as never,
       registry as never,
     )
     ;(provider as unknown as { http: unknown }).http = async (_u: string, init: { body?: string }) => {
@@ -182,9 +187,32 @@ describe('WA lifecycle (real DB, stubbed Qontak)', () => {
       expect(p[3].value_text).toBe('BCA')             // from the DB PaymentAccount
       expect(p[4].value_text).toBe('Bakso Mas Sular')
       expect(p[5].value_text).toBe('1234567890')
+      // BANK_TRANSFER carries the QRIS image header; body params are unchanged.
+      expect(body.parameters.header).toEqual({
+        format: 'IMAGE',
+        params: [
+          { key: 'url', value: TPL.QONTAK_QRIS_IMAGE_URL },
+          { key: 'filename', value: 'qris-mas-sular.jpeg' },
+        ],
+      })
       // CTA carries the RAW upload token, never the order id, never a full URL.
       expect(body.parameters.buttons).toEqual([{ index: '0', type: 'url', value: token }])
       expect(body.parameters.buttons![0].value).not.toBe(order.id)
+    })
+
+    it('legacy QRIS shares the invoice template without the image header', async () => {
+      const { order } = await seedOrder({ method: PaymentMethod.QRIS })
+      await consumerFor().process(randomUUID(), {
+        name: 'order.created',
+        payload: { orderId: order.id, uploadUrl: `http://x/payments/upload/${'9'.repeat(64)}` },
+      })
+
+      const [row] = await rowsFor(order.id, 'order.transfer')
+      expect(row).toBeDefined()
+      const body = await sendRow(row)
+      expect(body.message_template_id).toBe(TPL.QONTAK_INVOICE_TEMPLATE_ID)
+      expect(body.parameters.header).toBeUndefined()
+      expect(body.parameters.body).toHaveLength(6)
     })
 
     it('produces the admin alert exactly per contract, addressed to QONTAK_ADMIN', async () => {

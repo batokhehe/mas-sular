@@ -105,6 +105,7 @@ export class NotificationMessageBuilder {
         orderNumber,
         totalPrice,
         uploadToken,
+        paymentMethod: String(p.paymentMethod ?? ''),
         bankName: account.bankName,
         bankCode: account.bankCode,
         accountName: account.accountName,

@@ -30,6 +30,7 @@ const ORDER_NO = 'BMS-20260904-XYZ';
 const CUSTOMER_PHONE = '628123456789';
 const ADMIN_PHONE = '628990000111';
 const UPLOAD_TOKEN = 'a'.repeat(64); // 256-bit hex, as PaymentUploadTokenService issues
+const QRIS_IMAGE_URL = 'https://ecommerce.baksomassular.com/qris-mas-sular.jpeg';
 
 const TPL = {
   invoice: '11111111-1111-4111-8111-111111111111',
@@ -101,7 +102,7 @@ async function capture(row: NotificationOutbox, reg = registry()) {
   const message = await builder.build(row);
   const sent: Record<string, unknown>[] = [];
   const provider = new QontakWhatsAppProvider(
-    { baseUrl: 'https://qontak.invalid', apiToken: 't', channelIntegrationId: 'c', timeoutMs: 1000, maxRetry: 1 } as never,
+    { baseUrl: 'https://qontak.invalid', apiToken: 't', channelIntegrationId: 'c', qrisImageUrl: QRIS_IMAGE_URL, timeoutMs: 1000, maxRetry: 1 } as never,
     reg as never,
   );
   (provider as unknown as { http: unknown }).http = async (_u: string, init: { body?: string }) => {
@@ -116,6 +117,10 @@ const params = (body: Record<string, unknown>) =>
   ((body.parameters as Record<string, unknown>).body as { key: string; value: string; value_text: string }[]);
 const buttons = (body: Record<string, unknown>) =>
   ((body.parameters as Record<string, unknown>).buttons as { value: string }[] | undefined);
+const header = (body: Record<string, unknown>) =>
+  ((body.parameters as Record<string, unknown>).header as
+    | { format: string; params: { key: string; value: string }[] }
+    | undefined);
 
 // ------------------------------------------------------- order created ------
 
@@ -176,7 +181,7 @@ describe('WA — order created', () => {
   it('WA-002 the invoice resolves QONTAK_INVOICE_TEMPLATE_ID', async () => {
     const { body } = await capture(outbox({
       template: 'order.transfer',
-      payload: { orderNumber: ORDER_NO, totalPrice: 154_378, customerName: 'Budi', customerPhone: CUSTOMER_PHONE, uploadToken: UPLOAD_TOKEN },
+      payload: { orderNumber: ORDER_NO, totalPrice: 154_378, customerName: 'Budi', customerPhone: CUSTOMER_PHONE, uploadToken: UPLOAD_TOKEN, paymentMethod: 'BANK_TRANSFER' },
     }));
     expect(body.message_template_id).toBe(TPL.invoice);
     expect(body.message_template_id).not.toBe(TPL.order); // never the admin template
@@ -185,7 +190,7 @@ describe('WA — order created', () => {
   it('WA-004 the invoice carries exactly 6 parameters in the contracted order', async () => {
     const { body } = await capture(outbox({
       template: 'order.transfer',
-      payload: { orderNumber: ORDER_NO, totalPrice: 154_378, customerName: 'Budi', customerPhone: CUSTOMER_PHONE, uploadToken: UPLOAD_TOKEN },
+      payload: { orderNumber: ORDER_NO, totalPrice: 154_378, customerName: 'Budi', customerPhone: CUSTOMER_PHONE, uploadToken: UPLOAD_TOKEN, paymentMethod: 'BANK_TRANSFER' },
     }));
     const p = params(body);
     expect(p).toHaveLength(6);
@@ -199,16 +204,36 @@ describe('WA — order created', () => {
     expect(p[3].value_text).toBe(ACCOUNT.bankName);       // from the active PaymentAccount (DB)
     expect(p[4].value_text).toBe(ACCOUNT.accountName);
     expect(p[5].value_text).toBe(ACCOUNT.accountNumber);
+    // The IMAGE header rides along without touching the six body params above.
+    expect(header(body)).toEqual({
+      format: 'IMAGE',
+      params: [
+        { key: 'url', value: QRIS_IMAGE_URL },
+        { key: 'filename', value: 'qris-mas-sular.jpeg' },
+      ],
+    });
   });
 
   it('WA-005 the invoice CTA carries the RAW upload token, not an order id', async () => {
     const { body } = await capture(outbox({
       template: 'order.transfer',
-      payload: { orderNumber: ORDER_NO, totalPrice: 1, customerName: 'Budi', customerPhone: CUSTOMER_PHONE, uploadToken: UPLOAD_TOKEN },
+      payload: { orderNumber: ORDER_NO, totalPrice: 1, customerName: 'Budi', customerPhone: CUSTOMER_PHONE, uploadToken: UPLOAD_TOKEN, paymentMethod: 'BANK_TRANSFER' },
     }));
     expect(buttons(body)).toEqual([{ index: '0', type: 'url', value: UPLOAD_TOKEN }]);
     expect(buttons(body)![0].value).not.toBe(ORDER_ID);
     expect(buttons(body)![0].value).not.toContain('http'); // template supplies the base URL
+  });
+
+  it('WA-025 legacy QRIS shares the invoice template but gets no image header', async () => {
+    const { body } = await capture(outbox({
+      template: 'order.transfer',
+      payload: { orderNumber: ORDER_NO, totalPrice: 154_378, customerName: 'Budi', customerPhone: CUSTOMER_PHONE, uploadToken: UPLOAD_TOKEN, paymentMethod: 'QRIS' },
+    }));
+    expect(body.message_template_id).toBe(TPL.invoice);
+    expect(header(body)).toBeUndefined();
+    // Body/button contract is unchanged for QRIS.
+    expect(params(body)).toHaveLength(6);
+    expect(buttons(body)).toEqual([{ index: '0', type: 'url', value: UPLOAD_TOKEN }]);
   });
 
   it('WA-006 an admin new-order row is created alongside the customer row', async () => {
@@ -306,6 +331,7 @@ describe('WA — order created', () => {
     }));
     expect(body.message_template_id).toBe(TPL.cod);
     expect(params(body)).toHaveLength(4);
+    expect(header(body)).toBeUndefined();
   });
 });
 

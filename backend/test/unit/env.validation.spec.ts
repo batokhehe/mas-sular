@@ -78,6 +78,13 @@ describe('validateEnv', () => {
       expect(() => validateEnv(valid({ PAYMENT_UPLOAD_BASE_URL: 'nope' }))).toThrow(/PAYMENT_UPLOAD_BASE_URL/);
       expect(() => validateEnv(valid({ PAYMENT_UPLOAD_BASE_URL: 'https://shop.example.com' }))).not.toThrow();
     });
+    it('validates QONTAK_QRIS_IMAGE_URL as an HTTPS URL when present', () => {
+      expect(() => validateEnv(valid({ QONTAK_QRIS_IMAGE_URL: 'nope' }))).toThrow(/QONTAK_QRIS_IMAGE_URL/);
+      expect(() => validateEnv(valid({ QONTAK_QRIS_IMAGE_URL: 'http://shop.example.com/qris.jpeg' }))).toThrow(/HTTPS/);
+      expect(() => validateEnv(valid({ QONTAK_QRIS_IMAGE_URL: 'https://shop.example.com/qris.jpeg' }))).not.toThrow();
+      // Optional: unset must not block boot or unrelated notifications.
+      expect(() => validateEnv(valid({ QONTAK_QRIS_IMAGE_URL: undefined }))).not.toThrow();
+    });
   });
 
   describe('RabbitMQ requirement', () => {

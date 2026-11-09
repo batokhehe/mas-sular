@@ -9,7 +9,7 @@ import {
   TransientSendError,
 } from './notification-provider';
 import { QONTAK_CONFIG, QontakConfig } from './qontak.config';
-import { TemplateRegistry } from './template-registry';
+import { QontakImageHeader, TemplateRegistry } from './template-registry';
 
 const BROADCAST_PATH = '/api/open/v1/broadcasts/whatsapp/direct';
 
@@ -86,13 +86,21 @@ export class QontakWhatsAppProvider implements NotificationProvider {
         ? [{ index: '0', type: 'url', value: buttonValue }]
         : undefined;
 
+    // Optional IMAGE header (BANK_TRANSFER invoice). Templates without one — and
+    // the shared QRIS path, which does not match the condition — are untouched.
+    const header = this.imageHeader(descriptor.imageHeader, vars, message.template);
+
     const payload = {
       to_name: message.recipient.name,
       to_number: phone,
       message_template_id: message.metadata.providerTemplateId,
       channel_integration_id: this.config.channelIntegrationId,
       language: { code: 'id' },
-      parameters: { body, ...(buttons ? { buttons } : {}) },
+      parameters: {
+        ...(header ? { header } : {}),
+        body,
+        ...(buttons ? { buttons } : {}),
+      },
     };
 
     const url = `${this.config.baseUrl}${BROADCAST_PATH}`;
@@ -124,6 +132,44 @@ export class QontakWhatsAppProvider implements NotificationProvider {
       lastTransient = outcome.error; // 5xx/429 → in-call retry then surface to durable retry
     }
     throw lastTransient ?? new TransientSendError('qontak send failed');
+  }
+
+  /**
+   * Qontak IMAGE header. Returns undefined when the descriptor has no image or
+   * its condition does not match (e.g. QRIS on the shared transfer template).
+   * A BANK_TRANSFER send with an unset/invalid URL fails PERMANENTLY: the
+   * approved template requires the header, and silently sending a headerless
+   * message would only be rejected upstream (and retried forever).
+   */
+  private imageHeader(
+    spec: QontakImageHeader | undefined,
+    vars: Record<string, unknown>,
+    template: string,
+  ): { format: 'IMAGE'; params: { key: string; value: string }[] } | undefined {
+    if (!spec) return undefined;
+    if (spec.when && String(vars[spec.when.source] ?? '') !== spec.when.equals) return undefined;
+
+    const configured = this.config.qrisImageUrl;
+    if (!configured) {
+      throw new PermanentSendError(`image header URL is not configured for ${template}`);
+    }
+    let url: URL;
+    try {
+      url = new URL(configured);
+    } catch {
+      throw new PermanentSendError(`image header URL is not configured for ${template}`);
+    }
+    if (url.protocol !== 'https:') {
+      throw new PermanentSendError(`image header URL must use HTTPS for ${template}`);
+    }
+
+    return {
+      format: 'IMAGE',
+      params: [
+        { key: 'url', value: configured },
+        { key: 'filename', value: spec.filename },
+      ],
+    };
   }
 
   private async classify(
