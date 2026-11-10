@@ -25,6 +25,9 @@ MIN_FREE_MB_FOR_BUILD="${MIN_FREE_MB_FOR_BUILD:-1200}"
 DC="$HERE/dc"
 IMAGES=(backend-migrate backend frontend admin)
 
+# shellcheck source=lib/secret-reuse.sh
+. "$HERE/lib/secret-reuse.sh"
+
 log()  { printf '\n==> %s\n' "$*"; }
 warn() { printf 'WARN: %s\n' "$*" >&2; }
 fail() { printf 'ABORT: %s\n' "$*" >&2; exit 1; }
@@ -74,20 +77,9 @@ preflight() {
     fail "JNE_ENABLED=true requires JNE_ENVIRONMENT=production"
   fi
 
-  # No secret may be shared with staging.
-  if [[ -r "$STAGING_ENV" ]]; then
-    for k in JWT_ACCESS_SECRET JWT_REFRESH_SECRET JWT_ADMIN_ACCESS_SECRET COOKIE_SECRET \
-             PAXEL_API_SECRET PAXEL_WEBHOOK_SECRET MIDTRANS_SERVER_KEY QONTAK_API_TOKEN RESEND_API_KEY; do
-      v="$(val "$APP_ENV" "$k")"
-      [[ -n "$v" && "$v" == "$(val "$STAGING_ENV" "$k")" ]] && fail "app.env $k is the SAME as staging - generate a new one"
-    done
-    for k in POSTGRES_PASSWORD RABBITMQ_PASSWORD; do
-      v="$(val "$COMPOSE_ENV" "$k")"
-      [[ -n "$v" && "$v" == "$(val "$STAGING_ENV" "$k")" ]] && fail "compose.env $k is the SAME as staging"
-    done
-  else
-    warn "staging env $STAGING_ENV not readable - secret-reuse check skipped"
-  fi
+  # No secret may be shared with staging. MIDTRANS_SERVER_KEY is exempt only
+  # while MIDTRANS_ENABLED=false (gateway off); any other value fails closed.
+  check_secret_reuse "$APP_ENV" "$STAGING_ENV" "$COMPOSE_ENV"
 
   "$DC" config --quiet || fail "compose configuration invalid"
 }
