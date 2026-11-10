@@ -7,7 +7,15 @@
 # MIDTRANS_SERVER_KEY is allowed to match staging ONLY while MIDTRANS_ENABLED is
 # exactly "false" (the value the app validates: z.enum(['true', 'false'])).
 # A missing, empty, differently-cased or otherwise invalid flag fails closed:
-# the key is still treated as a reused secret. Every other secret is unchanged.
+# the key is still treated as a reused secret.
+#
+# QONTAK_API_TOKEN and RESEND_API_KEY may match staging under an explicit,
+# recorded OWNER authorization (2026-11-10): production deliberately runs on
+# the SAME Qontak account (one channel integration id, shared approved
+# templates) and shares the Resend key while the two stacks coexist. This is
+# the intent, not an oversight, so unlike Midtrans it carries no feature-flag
+# condition — but it covers ONLY these two keys. Every other secret is
+# unchanged and still fails closed on a staging match.
 
 _secret_reuse_val() {
   [[ -f "$1" ]] || return 0
@@ -30,6 +38,10 @@ check_secret_reuse() {
     if [[ -n "$v" && "$v" == "$(_secret_reuse_val "$staging_env" "$k")" ]]; then
       if [[ "$k" == MIDTRANS_SERVER_KEY && "$midtrans_enabled" == false ]]; then
         warn "app.env $k is the SAME as staging - allowed because MIDTRANS_ENABLED=false"
+        continue
+      fi
+      if [[ "$k" == QONTAK_API_TOKEN || "$k" == RESEND_API_KEY ]]; then
+        warn "app.env $k is the SAME as staging - allowed: owner-authorized shared credential (2026-11-10)"
         continue
       fi
       fail "app.env $k is the SAME as staging - generate a new one"

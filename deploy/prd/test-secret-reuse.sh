@@ -85,7 +85,7 @@ expect() {
   fi
 }
 
-echo "secret-reuse: MIDTRANS_SERVER_KEY exception"
+echo "secret-reuse: MIDTRANS_SERVER_KEY exception + owner-authorized Qontak/Resend"
 
 # 1. Midtrans disabled + matching key: allowed.
 new_case midtrans_disabled_match \
@@ -117,24 +117,41 @@ new_case midtrans_flag_empty \
   'MIDTRANS_ENABLED=' 'MIDTRANS_SERVER_KEY=SB-Mid-server-STAGING'
 expect "empty MIDTRANS_ENABLED + matching MIDTRANS_SERVER_KEY -> rejected" reject
 
-# 5. Disabled Midtrans does not exempt any other shared app secret.
+# 5. Owner-authorized shared credentials: QONTAK_API_TOKEN / RESEND_API_KEY
+#    may match staging (owner authorization, 2026-11-10) regardless of the
+#    Midtrans flag. Every OTHER shared secret is still rejected.
 new_case qontak_match 'MIDTRANS_ENABLED=false' 'QONTAK_API_TOKEN=staging-qontak'
-expect "MIDTRANS_ENABLED=false + matching QONTAK_API_TOKEN -> rejected" reject
+expect "MIDTRANS_ENABLED=false + matching QONTAK_API_TOKEN -> allowed" allow
+
+new_case qontak_match_midtrans_enabled 'MIDTRANS_ENABLED=true' 'QONTAK_API_TOKEN=staging-qontak'
+expect "MIDTRANS_ENABLED=true + matching QONTAK_API_TOKEN -> allowed" allow
+
+new_case qontak_no_match 'MIDTRANS_ENABLED=false' 'QONTAK_API_TOKEN=prod-qontak'
+expect "MIDTRANS_ENABLED=false + non-matching QONTAK_API_TOKEN -> allowed" allow
 
 new_case resend_match 'MIDTRANS_ENABLED=false' 'RESEND_API_KEY=staging-resend'
-expect "MIDTRANS_ENABLED=false + matching RESEND_API_KEY -> rejected" reject
+expect "MIDTRANS_ENABLED=false + matching RESEND_API_KEY -> allowed" allow
+
+new_case resend_match_midtrans_enabled 'MIDTRANS_ENABLED=true' 'RESEND_API_KEY=staging-resend'
+expect "MIDTRANS_ENABLED=true + matching RESEND_API_KEY -> allowed" allow
 
 new_case jwt_match 'MIDTRANS_ENABLED=false' 'JWT_ACCESS_SECRET=staging-jwt-access'
 expect "MIDTRANS_ENABLED=false + matching JWT_ACCESS_SECRET -> rejected" reject
 
-# 6. Disabled Midtrans does not exempt shared infrastructure passwords.
-new_case postgres_match 'MIDTRANS_ENABLED=false' 'MIDTRANS_SERVER_KEY=prod-midtrans'
-printf 'POSTGRES_PASSWORD=staging-postgres\n' >> "$CASE/compose.env"
-expect "MIDTRANS_ENABLED=false + matching POSTGRES_PASSWORD -> rejected" reject
+# 5b. The Qontak/Resend authorization does not rescue any other secret.
+new_case qontak_match_plus_jwt_match \
+  'MIDTRANS_ENABLED=false' 'QONTAK_API_TOKEN=staging-qontak' 'JWT_REFRESH_SECRET=staging-jwt-refresh'
+expect "matching QONTAK_API_TOKEN + matching JWT_REFRESH_SECRET -> rejected" reject
 
-new_case rabbitmq_match 'MIDTRANS_ENABLED=false' 'MIDTRANS_SERVER_KEY=prod-midtrans'
+# 6. Disabled Midtrans and owner-authorized Qontak/Resend do not exempt
+#    shared infrastructure passwords.
+new_case postgres_match 'MIDTRANS_ENABLED=false' 'MIDTRANS_SERVER_KEY=prod-midtrans' 'QONTAK_API_TOKEN=staging-qontak' 'RESEND_API_KEY=staging-resend'
+printf 'POSTGRES_PASSWORD=staging-postgres\n' >> "$CASE/compose.env"
+expect "shared Qontak/Resend + matching POSTGRES_PASSWORD -> rejected" reject
+
+new_case rabbitmq_match 'MIDTRANS_ENABLED=false' 'MIDTRANS_SERVER_KEY=prod-midtrans' 'QONTAK_API_TOKEN=staging-qontak' 'RESEND_API_KEY=staging-resend'
 printf 'RABBITMQ_PASSWORD=staging-rabbitmq\n' >> "$CASE/compose.env"
-expect "MIDTRANS_ENABLED=false + matching RABBITMQ_PASSWORD -> rejected" reject
+expect "shared Qontak/Resend + matching RABBITMQ_PASSWORD -> rejected" reject
 
 # 7. Non-matching Midtrans key stays allowed regardless of the flag.
 new_case midtrans_disabled_no_match \
