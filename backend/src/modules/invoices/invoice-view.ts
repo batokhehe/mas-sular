@@ -18,6 +18,8 @@ export const INVOICE_ORDER_SELECT = {
   subtotal: true,
   voucherCode: true,
   voucherDiscountAmount: true,
+  productDiscountAmount: true,
+  shippingDiscountAmount: true,
   deliveryFee: true,
   paymentServiceFee: true,
   totalPrice: true,
@@ -81,6 +83,8 @@ export interface CustomerInvoice {
   }>;
   subtotal: number;
   discount: number;
+  productDiscountAmount?: number;
+  shippingDiscountAmount?: number;
   voucherCode: string | null;
   shippingCost: number;
   /** Customer-charged "Biaya Layanan" only — never the merchant-absorbed share. */
@@ -147,6 +151,8 @@ export function toCustomerInvoice(order: InvoiceOrderRow): CustomerInvoice {
     }),
     subtotal: order.subtotal,
     discount: order.voucherDiscountAmount,
+    productDiscountAmount: order.productDiscountAmount ?? 0,
+    shippingDiscountAmount: order.shippingDiscountAmount ?? 0,
     voucherCode: order.voucherCode ?? null,
     shippingCost: order.deliveryFee,
     paymentServiceFee: order.paymentServiceFee,

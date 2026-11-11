@@ -1,6 +1,23 @@
-import { IsBoolean, IsEnum, IsInt, IsOptional, IsString, Max, Min, ValidateIf } from 'class-validator';
+import { ArrayNotEmpty, IsArray, IsBoolean, IsEnum, IsIn, IsInt, IsOptional, IsString, Max, Min, Validate, ValidateIf, ValidationArguments, ValidatorConstraint, ValidatorConstraintInterface } from 'class-validator';
 import { IsBusinessDateTime } from '../../../../common/validation/is-business-datetime.decorator';
-import { VoucherType } from '@prisma/client';
+import { ProductDiscountType, ShippingDiscountType, VoucherType } from '@prisma/client';
+
+@ValidatorConstraint({ name: 'NoDuplicateCouriers', async: false })
+class NoDuplicateCouriersConstraint implements ValidatorConstraintInterface {
+  validate(value: any) {
+    if (!Array.isArray(value)) return true;
+    const set = new Set(value.map((c: any) => String(c).toLowerCase()));
+    return set.size === value.length;
+  }
+
+  defaultMessage(args: ValidationArguments) {
+    return 'eligibleCouriers must not contain duplicates';
+  }
+}
+
+function NoDuplicateCouriers() {
+  return Validate(NoDuplicateCouriersConstraint);
+}
 
 export class CreatePromoDto {
   @IsString()
@@ -19,13 +36,13 @@ export class CreatePromoDto {
   @IsEnum(VoucherType)
   voucherType!: VoucherType;
 
-  @ValidateIf((dto) => dto.voucherType === VoucherType.PERCENTAGE_DISCOUNT)
+  @ValidateIf((dto) => dto.voucherType === VoucherType.PERCENTAGE_DISCOUNT && !dto.productDiscountType && !dto.shippingDiscountType)
   @IsInt()
   @Min(1)
   @Max(100)
   discountPercentage?: number;
 
-  @ValidateIf((dto) => dto.voucherType === VoucherType.FIXED_DISCOUNT)
+  @ValidateIf((dto) => dto.voucherType === VoucherType.FIXED_DISCOUNT && !dto.productDiscountType && !dto.shippingDiscountType)
   @IsInt()
   @Min(1)
   discountAmount?: number;
@@ -40,6 +57,56 @@ export class CreatePromoDto {
   @IsInt()
   @Min(0)
   freeShippingMaxAmount?: number;
+
+  // Product discount component
+  @IsOptional()
+  @IsEnum(ProductDiscountType)
+  productDiscountType?: ProductDiscountType;
+
+  @ValidateIf((dto) => dto.productDiscountType === ProductDiscountType.PERCENTAGE)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  productDiscountPercentage?: number;
+
+  @ValidateIf((dto) => dto.productDiscountType === ProductDiscountType.FIXED)
+  @IsInt()
+  @Min(1)
+  productDiscountAmount?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1, { message: 'productMaxDiscountAmount must be at least 1, or omitted/null for no cap' })
+  productMaxDiscountAmount?: number;
+
+  // Shipping discount component
+  @IsOptional()
+  @IsEnum(ShippingDiscountType)
+  shippingDiscountType?: ShippingDiscountType;
+
+  @ValidateIf((dto) => dto.shippingDiscountType === ShippingDiscountType.PERCENTAGE)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  shippingDiscountPercentage?: number;
+
+  @ValidateIf((dto) => dto.shippingDiscountType === ShippingDiscountType.FIXED)
+  @IsInt()
+  @Min(1)
+  shippingDiscountAmount?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1, { message: 'shippingMaxDiscountAmount must be at least 1, or omitted/null for no cap' })
+  shippingMaxDiscountAmount?: number;
+
+  @ValidateIf((dto) => dto.shippingDiscountType === ShippingDiscountType.PERCENTAGE || dto.shippingDiscountType === ShippingDiscountType.FIXED || dto.shippingDiscountType === ShippingDiscountType.FREE_SHIPPING)
+  @ArrayNotEmpty()
+  @IsArray()
+  @IsString({ each: true })
+  @IsIn(['paxel', 'jne'], { each: true })
+  @NoDuplicateCouriers()
+  eligibleCouriers?: string[];
 
   @IsOptional()
   @IsInt()

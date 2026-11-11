@@ -84,6 +84,15 @@ export class ValidateVoucherDto {
   @IsInt()
   @Min(0)
   subtotal!: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  shipping_cost?: number;
+
+  @IsOptional()
+  @IsString()
+  shipping_provider?: string;
 }
 
 export class ShippingCostDto {

@@ -229,7 +229,7 @@ describe('toCustomerInvoice', () => {
   it('10. exposes no ids, emails, coordinates or internal fields - exactly the allowed keys', () => {
     const inv = toCustomerInvoice(order());
     expect(Object.keys(inv).sort()).toEqual(
-      ['delivery', 'discount', 'items', 'orderDate', 'orderNumber', 'orderStatus', 'payment', 'paymentServiceFee', 'paymentServiceFeeApplies', 'shipping', 'shippingCost', 'store', 'subtotal', 'total', 'voucherCode'].sort(),
+      ['delivery', 'discount', 'items', 'orderDate', 'orderNumber', 'orderStatus', 'payment', 'paymentServiceFee', 'paymentServiceFeeApplies', 'productDiscountAmount', 'shipping', 'shippingCost', 'shippingDiscountAmount', 'store', 'subtotal', 'total', 'voucherCode'].sort(),
     );
     const json = JSON.stringify(inv);
     // The merchant's absorbed/calculated fee and the fee rule are internal accounting, never customer-facing.

@@ -76,6 +76,29 @@ const ADDRESS_WITH_REGIONS = {
   },
 } as const;
 
+// Promo discount-configuration columns, grouped the way the discount engine reads
+// them (see AdminService.normalizePromoPatch).
+const PROMO_LEGACY_VALUE_FIELDS = ['discountPercentage', 'discountAmount', 'maxDiscountAmount', 'freeShippingMaxAmount'] as const;
+const PROMO_PRODUCT_COMPONENT_FIELDS = [
+  'productDiscountType',
+  'productDiscountPercentage',
+  'productDiscountAmount',
+  'productMaxDiscountAmount',
+] as const;
+const PROMO_SHIPPING_COMPONENT_FIELDS = [
+  'shippingDiscountType',
+  'shippingDiscountPercentage',
+  'shippingDiscountAmount',
+  'shippingMaxDiscountAmount',
+] as const;
+const PROMO_CONFIGURATION_FIELDS: readonly string[] = [
+  'voucherType',
+  ...PROMO_LEGACY_VALUE_FIELDS,
+  ...PROMO_PRODUCT_COMPONENT_FIELDS,
+  ...PROMO_SHIPPING_COMPONENT_FIELDS,
+  'eligibleCouriers',
+];
+
 @Injectable()
 export class AdminService {
   constructor(
@@ -365,6 +388,7 @@ export class AdminService {
    * same as absent on UPDATE — see updatePromo.
    */
   async createPromo(dto: CreatePromoDto) {
+    this.validatePromoConfiguration(dto as any);
     const data = {
       ...dto,
       startDate: dto.startDate ?? null,
@@ -396,9 +420,147 @@ export class AdminService {
    * to the driver. The dates are now already Dates by the time they get here.
    */
   async updatePromo(id: string, dto: UpdatePromoDto) {
-    await this.getPromo(id);
-    return this.prisma.promo.update({ where: { id }, data: dto });
+    const existing = await this.getPromo(id);
+    const data = this.normalizePromoPatch(existing, dto);
+    // Validate the configuration as it will be stored: the record with this
+    // PATCH (and the fields it clears) applied.
+    const merged: any = { ...existing, ...data };
+    this.validatePromoConfiguration(merged, existing);
+    return this.prisma.promo.update({ where: { id }, data });
   }
+
+  /**
+   * Builds the sparse PATCH body (Phase 4N.12).
+   *
+   * - A PATCH that touches no discount-configuration key is passed through as is,
+   *   so an unrelated edit (title, isActive, dates, …) never rewrites configuration.
+   * - An explicit `productDiscountType: null` / `shippingDiscountType: null` still
+   *   clears that whole component group, exactly as before.
+   * - When the configuration IS being changed, every column the resulting
+   *   configuration no longer reads (it is inert in calculateVoucherDiscountBreakdown)
+   *   and that currently holds a value is written as null, so switching legacy ⇄
+   *   component — or one type for another — never leaves a stale value behind.
+   *   Already-null columns are not rewritten, and non-configuration columns
+   *   (usage counters, limits, dates, flags) are never touched by this rule.
+   * - eligibleCouriers belongs to the shipping component, but it is also the live
+   *   courier restriction of a LEGACY voucher, so on a legacy result it is cleared
+   *   only when it came from a shipping component being removed and this PATCH did
+   *   not set it explicitly.
+   */
+  private normalizePromoPatch(existing: any, dto: any): any {
+    const data: any = {};
+    for (const [key, value] of Object.entries(dto ?? {})) {
+      if (value !== undefined) data[key] = value;
+    }
+
+    if (data.productDiscountType === null) {
+      for (const key of PROMO_PRODUCT_COMPONENT_FIELDS) data[key] = null;
+    }
+    if (data.shippingDiscountType === null) {
+      for (const key of PROMO_SHIPPING_COMPONENT_FIELDS) data[key] = null;
+    }
+
+    const touchesConfiguration = PROMO_CONFIGURATION_FIELDS.some((key) => key in data);
+    if (!touchesConfiguration) return data;
+
+    const next: any = { ...existing, ...data };
+    const productType = next.productDiscountType ?? null;
+    const shippingType = next.shippingDiscountType ?? null;
+    const usesComponents = productType !== null || shippingType !== null;
+    const inert: string[] = [];
+
+    if (usesComponents) {
+      inert.push(...PROMO_LEGACY_VALUE_FIELDS);
+    } else {
+      if (next.voucherType !== 'PERCENTAGE_DISCOUNT') inert.push('discountPercentage', 'maxDiscountAmount');
+      if (next.voucherType !== 'FIXED_DISCOUNT') inert.push('discountAmount');
+      if (next.voucherType !== 'FREE_SHIPPING') inert.push('freeShippingMaxAmount');
+    }
+
+    if (productType === null) inert.push(...PROMO_PRODUCT_COMPONENT_FIELDS);
+    else if (productType === 'PERCENTAGE') inert.push('productDiscountAmount');
+    else if (productType === 'FIXED') inert.push('productDiscountPercentage');
+
+    if (shippingType === null) inert.push(...PROMO_SHIPPING_COMPONENT_FIELDS);
+    else if (shippingType === 'PERCENTAGE') inert.push('shippingDiscountAmount');
+    else if (shippingType === 'FIXED') inert.push('shippingDiscountPercentage');
+    else if (shippingType === 'FREE_SHIPPING') inert.push('shippingDiscountPercentage', 'shippingDiscountAmount');
+
+    if (shippingType === null) {
+      const removingShippingComponent = existing?.shippingDiscountType !== null && existing?.shippingDiscountType !== undefined;
+      if (usesComponents || (removingShippingComponent && !('eligibleCouriers' in data))) {
+        inert.push('eligibleCouriers');
+      }
+    }
+
+    for (const key of inert) {
+      if (next[key] !== null && next[key] !== undefined) data[key] = null;
+    }
+    return data;
+  }
+
+  private validatePromoConfiguration(dto: any, existing?: any) {
+    const shippingType = dto.shippingDiscountType;
+    if (shippingType !== undefined && shippingType !== null) {
+      // Must have eligible couriers
+      const eligible = dto.eligibleCouriers;
+      if (!Array.isArray(eligible) || eligible.length === 0) {
+        throw new BadRequestException('eligibleCouriers must contain at least one courier for shipping discounts');
+      }
+      // Check duplicates
+      const set = new Set(eligible.map((c: any) => String(c).toLowerCase()));
+      if (set.size !== eligible.length) {
+        throw new BadRequestException('eligibleCouriers must not contain duplicates');
+      }
+      for (const c of eligible) {
+        const lc = String(c).toLowerCase();
+        if (lc !== 'paxel' && lc !== 'jne') {
+          throw new BadRequestException('eligibleCouriers may only contain paxel or jne');
+        }
+      }
+      if (shippingType === 'PERCENTAGE') {
+        if (dto.shippingDiscountPercentage === undefined || dto.shippingDiscountPercentage === null || dto.shippingDiscountPercentage < 1 || dto.shippingDiscountPercentage > 100) {
+          throw new BadRequestException('Invalid shipping discount percentage');
+        }
+      } else if (shippingType === 'FIXED') {
+        if (dto.shippingDiscountAmount === undefined || dto.shippingDiscountAmount === null || dto.shippingDiscountAmount < 1) {
+          throw new BadRequestException('Invalid shipping discount amount');
+        }
+      } else if (shippingType === 'FREE_SHIPPING') {
+        // free shipping does not require percentage/fixed
+      }
+      this.assertPromoComponentCap(dto.shippingMaxDiscountAmount, 'Shipping discount cap');
+    } else if (shippingType === null) {
+      // removed
+    }
+    // Product component validation
+    const productType = dto.productDiscountType;
+    if (productType !== undefined && productType !== null) {
+      if (productType === 'PERCENTAGE') {
+        if (dto.productDiscountPercentage === undefined || dto.productDiscountPercentage === null || dto.productDiscountPercentage < 1 || dto.productDiscountPercentage > 100) {
+          throw new BadRequestException('Invalid product discount percentage');
+        }
+      } else if (productType === 'FIXED') {
+        if (dto.productDiscountAmount === undefined || dto.productDiscountAmount === null || dto.productDiscountAmount < 1) {
+          throw new BadRequestException('Invalid product discount amount');
+        }
+      }
+      this.assertPromoComponentCap(dto.productMaxDiscountAmount, 'Product discount cap');
+    }
+  }
+
+  /**
+   * Cap of an ACTIVE discount component (Phase 4N.12): null/absent means no cap;
+   * a value must be a whole rupiah amount of at least 1. A cap of 0 is refused —
+   * it would make the component grant nothing while still consuming usage.
+   */
+  private assertPromoComponentCap(value: unknown, label: string) {
+    if (value === null || value === undefined) return;
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
+      throw new BadRequestException(`${label} must be at least Rp1, or left empty for no cap`);
+    }
+  }
+
 
   async deletePromo(id: string) {
     await this.getPromo(id);

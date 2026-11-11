@@ -7,6 +7,7 @@ import { AdminShell } from '@/components/layout/admin-shell';
 import { PromoForm, PromoFormValues } from '@/app/promos/components/promo-form';
 import { ROUTE_PERMISSIONS } from '@/lib/access';
 import { fetchAdminPromo, updateAdminPromo, deleteAdminPromo } from '@/lib/admin';
+import { buildPromoPayload } from '@/lib/promos/promo-payload';
 import { ADMIN_LOADING_MESSAGES, ADMIN_SUCCESS_MESSAGES, confirmDelete, runWithFeedback } from '@/lib/admin-alert';
 
 export default function PromoDetailPage() {
@@ -23,7 +24,12 @@ export default function PromoDetailPage() {
   });
 
   const updatePromo = useMutation({
-    mutationFn: ({ id, input }: { id: string; input: PromoFormValues }) => updateAdminPromo(id, input),
+    // PATCH carries the fields this form owns: the ones the configuration
+    // uses, plus an explicit null for the ones it has stopped using so a
+    // stale value cannot survive a type switch. Columns outside the form are
+    // never in the body and keep their stored values.
+    mutationFn: ({ id, input }: { id: string; input: PromoFormValues }) =>
+      updateAdminPromo(id, buildPromoPayload(input, 'update')),
     onSuccess: () => {
       if (promoId) {
         queryClient.invalidateQueries({ queryKey: ['admin-promo', promoId] });

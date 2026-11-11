@@ -147,12 +147,40 @@ function OrderCard({ order, onRefetch }: { order: Order; onRefetch: () => void }
               <span className="text-muted-foreground">Ongkos kirim</span>
               <span>{formatIDR(order.deliveryFee)}</span>
             </div>
-            {order.voucherDiscountAmount > 0 ? (
-              <div className="flex justify-between text-green-600">
-                <span>Diskon voucher{order.voucherCode ? ` (${order.voucherCode})` : ''}</span>
-                <span>-{formatIDR(order.voucherDiscountAmount)}</span>
-              </div>
-            ) : null}
+            {(() => {
+              const productDiscount = (order as any).productDiscountAmount ?? 0
+              const shippingDiscount = (order as any).shippingDiscountAmount ?? 0
+              const hasBreakdown =
+                (productDiscount > 0 || shippingDiscount > 0) &&
+                ((order as any).productDiscountAmount !== undefined || (order as any).shippingDiscountAmount !== undefined)
+              if (hasBreakdown) {
+                return (
+                  <>
+                    {productDiscount > 0 ? (
+                      <div className="flex justify-between text-green-600">
+                        <span>Diskon produk{order.voucherCode ? ` (${order.voucherCode})` : ''}</span>
+                        <span>-{formatIDR(productDiscount)}</span>
+                      </div>
+                    ) : null}
+                    {shippingDiscount > 0 ? (
+                      <div className="flex justify-between text-green-600">
+                        <span>Diskon ongkir{order.voucherCode ? ` (${order.voucherCode})` : ''}</span>
+                        <span>-{formatIDR(shippingDiscount)}</span>
+                      </div>
+                    ) : null}
+                  </>
+                )
+              }
+              if (order.voucherDiscountAmount > 0) {
+                return (
+                  <div className="flex justify-between text-green-600">
+                    <span>Diskon voucher{order.voucherCode ? ` (${order.voucherCode})` : ''}</span>
+                    <span>-{formatIDR(order.voucherDiscountAmount)}</span>
+                  </div>
+                )
+              }
+              return null
+            })()}
             {/* Gateway orders always list the fee — Rp0 when the merchant absorbs it. */}
             {order.paymentMethod === 'GATEWAY' ? (
               <div className="flex justify-between">

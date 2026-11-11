@@ -6,6 +6,7 @@ import { AdminShell } from '@/components/layout/admin-shell';
 import { PromoForm, PromoFormValues } from '@/app/promos/components/promo-form';
 import { ROUTE_PERMISSIONS } from '@/lib/access';
 import { createAdminPromo } from '@/lib/admin';
+import { buildPromoPayload } from '@/lib/promos/promo-payload';
 import { ADMIN_LOADING_MESSAGES, ADMIN_SUCCESS_MESSAGES, runWithFeedback } from '@/lib/admin-alert';
 
 export default function NewPromoPage() {
@@ -13,7 +14,8 @@ export default function NewPromoPage() {
   const queryClient = useQueryClient();
 
   const createPromo = useMutation({
-    mutationFn: (input: PromoFormValues) => createAdminPromo(input),
+    // POST writes only the fields the chosen configuration uses.
+    mutationFn: (input: PromoFormValues) => createAdminPromo(buildPromoPayload(input, 'create')),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-promos'] });
       router.push('/promos');

@@ -444,41 +444,345 @@ export class OrdersService {
       throw new BadRequestException('This voucher has already been used by your account');
     }
 
-    if (voucher.voucherType === VoucherType.FREE_SHIPPING && voucher.freeShippingMaxAmount !== null && voucher.freeShippingMaxAmount < 0) {
-      throw new BadRequestException('Voucher shipping limit is invalid');
+    // Configuration validity. A Phase 4 voucher carries its own product / shipping
+    // components and the legacy percentage / amount columns are inert for it -
+    // calculateVoucherDiscountBreakdown stops reading them as soon as either
+    // component is set - so it must not be judged by the legacy rules.
+    this.assertVoucherConfiguration(voucher);
+  }
+
+  /** True when the voucher carries a Phase 4 product discount component. */
+  private hasProductDiscountComponent(voucher: Promo): boolean {
+    const type = (voucher as any).productDiscountType;
+    return type !== undefined && type !== null;
+  }
+
+  /** True when the voucher carries a Phase 4 shipping discount component. */
+  private hasShippingDiscountComponent(voucher: Promo): boolean {
+    const type = (voucher as any).shippingDiscountType;
+    return type !== undefined && type !== null;
+  }
+
+  /**
+   * Refuses a voucher the discount engine could not honour. Fails closed: anything
+   * incomplete, out of range or unrecognised is rejected rather than silently
+   * discounted by zero.
+   *
+   * A voucher is judged as component-based OR legacy, never both, mirroring
+   * calculateVoucherDiscountBreakdown: once either component is configured the
+   * component path is used exclusively, so the legacy columns are neither read nor
+   * validated (and an inert legacy value is never reinterpreted as a discount).
+   *
+   * Only the voucher's stored courier LIST is checked here. Whether THIS order's
+   * courier is eligible stays a calculation concern: an ineligible or absent
+   * provider zeroes the shipping component and leaves the product component
+   * standing (isCourierEligible), which is the documented Phase 4 behaviour - it
+   * must not invalidate the whole voucher.
+   */
+  private assertVoucherConfiguration(voucher: Promo) {
+    const v = voucher as any;
+    const hasProduct = this.hasProductDiscountComponent(voucher);
+    const hasShipping = this.hasShippingDiscountComponent(voucher);
+
+    // Legacy-only voucher: unchanged rules.
+    if (!hasProduct && !hasShipping) {
+      if (voucher.voucherType === VoucherType.FREE_SHIPPING && voucher.freeShippingMaxAmount !== null && voucher.freeShippingMaxAmount < 0) {
+        throw new BadRequestException('Voucher shipping limit is invalid');
+      }
+
+      if (voucher.voucherType === VoucherType.PERCENTAGE_DISCOUNT && !voucher.discountPercentage) {
+        throw new BadRequestException('Voucher configuration is invalid');
+      }
+
+      if (voucher.voucherType === VoucherType.FIXED_DISCOUNT && (!voucher.discountAmount || voucher.discountAmount <= 0)) {
+        throw new BadRequestException('Voucher configuration is invalid');
+      }
+      return;
     }
 
-    if (voucher.voucherType === VoucherType.PERCENTAGE_DISCOUNT && !voucher.discountPercentage) {
-      throw new BadRequestException('Voucher configuration is invalid');
+    if (hasProduct) {
+      if (v.productDiscountType === 'PERCENTAGE') {
+        this.assertVoucherComponentPercentage(v.productDiscountPercentage);
+      } else if (v.productDiscountType === 'FIXED') {
+        this.assertVoucherComponentAmount(v.productDiscountAmount);
+      } else {
+        throw new BadRequestException('Voucher configuration is invalid');
+      }
+      this.assertVoucherComponentCap(v.productMaxDiscountAmount);
     }
 
-    if (voucher.voucherType === VoucherType.FIXED_DISCOUNT && (!voucher.discountAmount || voucher.discountAmount <= 0)) {
+    if (hasShipping) {
+      // A shipping discount is only ever granted to a listed courier, so a voucher
+      // without a usable list could never discount shipping.
+      this.assertVoucherEligibleCouriers(v.eligibleCouriers);
+
+      if (v.shippingDiscountType === 'PERCENTAGE') {
+        this.assertVoucherComponentPercentage(v.shippingDiscountPercentage);
+      } else if (v.shippingDiscountType === 'FIXED') {
+        this.assertVoucherComponentAmount(v.shippingDiscountAmount);
+      } else if (v.shippingDiscountType !== 'FREE_SHIPPING') {
+        throw new BadRequestException('Voucher configuration is invalid');
+      }
+      this.assertVoucherComponentCap(v.shippingMaxDiscountAmount);
+    }
+  }
+
+  private assertVoucherComponentPercentage(value: unknown) {
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 100) {
       throw new BadRequestException('Voucher configuration is invalid');
     }
   }
 
-  private calculateVoucherDiscount(voucher: Promo, subtotal: number, shippingCost: number) {
+  private assertVoucherComponentAmount(value: unknown) {
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
+      throw new BadRequestException('Voucher configuration is invalid');
+    }
+  }
+
+  /**
+   * Optional cap: absent (null) means "no cap"; present must be a positive integer.
+   * A cap of 0 would silently zero the component it belongs to, so it is refused
+   * (Phase 4N.12) the same way the admin DTO / service refuse to store one.
+   */
+  private assertVoucherComponentCap(value: unknown) {
+    if (value === null || value === undefined) return;
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
+      throw new BadRequestException('Voucher configuration is invalid');
+    }
+  }
+
+  /**
+   * Stored courier list of a shipping component. Compared the same way
+   * isCourierEligible compares it (case-insensitive, no trimming), so a list this
+   * accepts is one the discount engine can actually match.
+   */
+  private assertVoucherEligibleCouriers(value: unknown) {
+    const supported = ['paxel', 'jne'];
+    if (!Array.isArray(value) || value.length === 0) {
+      throw new BadRequestException('Voucher courier configuration is invalid');
+    }
+    const unsupported = value.some((c) => typeof c !== 'string' || !supported.includes(c.toLowerCase()));
+    if (unsupported) {
+      throw new BadRequestException('Voucher courier configuration is invalid');
+    }
+  }
+
+  private isCourierEligible(voucher: Promo, shippingProvider?: string): boolean {
+    const eligible = (voucher as any).eligibleCouriers;
+    const v = voucher as any;
+    const voucherType = voucher.voucherType;
+
+    // If new shipping component is configured, fail-closed: require eligibleCouriers with matching provider
+    if (v.shippingDiscountType !== undefined && v.shippingDiscountType !== null) {
+      if (!eligible || !Array.isArray(eligible) || eligible.length === 0) {
+        return false;
+      }
+      if (!shippingProvider) {
+        return false;
+      }
+      const normalizedProvider = String(shippingProvider).toLowerCase();
+      const allowed = eligible.some((c: string) => {
+        const lc = String(c).toLowerCase();
+        return lc === normalizedProvider && (lc === 'paxel' || lc === 'jne');
+      });
+      // Also ensure provider is one of the supported ones
+      if (normalizedProvider !== 'paxel' && normalizedProvider !== 'jne') {
+        return false;
+      }
+      return allowed;
+    }
+
+    // Legacy FREE_SHIPPING remains backward compatible
+    if (voucherType === VoucherType.FREE_SHIPPING) {
+      if (!eligible || !Array.isArray(eligible) || eligible.length === 0) {
+        return true;
+      }
+      if (!shippingProvider) {
+        return true;
+      }
+      const normalizedProvider = String(shippingProvider).toLowerCase();
+      return eligible.some((c: string) => String(c).toLowerCase() === normalizedProvider);
+    }
+
+    // Backward compatible for existing promos
+    if (!eligible || !Array.isArray(eligible) || eligible.length === 0) {
+      return true;
+    }
+    if (!shippingProvider) {
+      return true;
+    }
+    const normalizedProvider = String(shippingProvider).toLowerCase();
+    return eligible.some((c: string) => String(c).toLowerCase() === normalizedProvider);
+  }
+
+  calculateVoucherDiscountBreakdown(voucher: Promo, subtotal: number, shippingCost: number, shippingProvider?: string) {
+    const v = voucher as any;
+    const hasProductComponent = v.productDiscountType !== undefined && v.productDiscountType !== null;
+    const hasShippingComponent = v.shippingDiscountType !== undefined && v.shippingDiscountType !== null;
+
+    let productDiscountAmount = 0;
+    let shippingDiscountAmount = 0;
+
+    if (hasProductComponent || hasShippingComponent) {
+      // Product component
+      if (hasProductComponent) {
+        if (v.productDiscountType === 'PERCENTAGE') {
+          const discount = Math.floor((subtotal * (v.productDiscountPercentage ?? 0)) / 100);
+          if (v.productMaxDiscountAmount !== null && v.productMaxDiscountAmount !== undefined) {
+            productDiscountAmount = Math.min(discount, v.productMaxDiscountAmount);
+          } else {
+            productDiscountAmount = discount;
+          }
+        } else if (v.productDiscountType === 'FIXED') {
+          productDiscountAmount = Math.min(v.productDiscountAmount ?? 0, subtotal);
+          if (v.productMaxDiscountAmount !== null && v.productMaxDiscountAmount !== undefined) {
+            productDiscountAmount = Math.min(productDiscountAmount, v.productMaxDiscountAmount);
+          }
+        }
+        if (productDiscountAmount < 0) productDiscountAmount = 0;
+        if (productDiscountAmount > subtotal) productDiscountAmount = subtotal;
+      }
+
+      // Shipping component
+      if (hasShippingComponent) {
+        if (!this.isCourierEligible(voucher, shippingProvider)) {
+          shippingDiscountAmount = 0;
+        } else {
+          if (v.shippingDiscountType === 'PERCENTAGE') {
+            const discount = Math.floor((shippingCost * (v.shippingDiscountPercentage ?? 0)) / 100);
+            if (v.shippingMaxDiscountAmount !== null && v.shippingMaxDiscountAmount !== undefined) {
+              shippingDiscountAmount = Math.min(discount, v.shippingMaxDiscountAmount);
+            } else {
+              shippingDiscountAmount = discount;
+            }
+          } else if (v.shippingDiscountType === 'FIXED') {
+            shippingDiscountAmount = Math.min(v.shippingDiscountAmount ?? 0, shippingCost);
+            if (v.shippingMaxDiscountAmount !== null && v.shippingMaxDiscountAmount !== undefined) {
+              shippingDiscountAmount = Math.min(shippingDiscountAmount, v.shippingMaxDiscountAmount);
+            }
+          } else if (v.shippingDiscountType === 'FREE_SHIPPING') {
+            if (shippingCost === 0) {
+              shippingDiscountAmount = 0;
+            } else {
+              const maxAmount = v.shippingMaxDiscountAmount ?? shippingCost;
+              shippingDiscountAmount = Math.min(shippingCost, maxAmount);
+            }
+          }
+        }
+        if (shippingDiscountAmount < 0) shippingDiscountAmount = 0;
+        if (shippingDiscountAmount > shippingCost) shippingDiscountAmount = shippingCost;
+      }
+
+      return {
+        productDiscountAmount,
+        shippingDiscountAmount,
+        totalDiscountAmount: productDiscountAmount + shippingDiscountAmount,
+      };
+    }
+
+    // Legacy mapping when no new components.
+    //
+    // Courier eligibility only ever gates the SHIPPING discount (Phase 4N.12). A
+    // legacy PERCENTAGE / FIXED voucher discounts products only, so a configured
+    // eligibleCouriers list never zeroes it: its shipping discount is already Rp0
+    // and its product discount stays intact on any courier. Legacy FREE_SHIPPING is
+    // the only legacy type the courier list can affect.
+    let total = 0;
     switch (voucher.voucherType) {
       case VoucherType.FREE_SHIPPING: {
-        if (shippingCost === 0) {
-          return 0;
+        if (!this.isCourierEligible(voucher, shippingProvider)) {
+          total = 0;
+        } else {
+          if (shippingCost === 0) {
+            total = 0;
+          } else {
+            const maxAmount = voucher.freeShippingMaxAmount ?? shippingCost;
+            total = Math.min(shippingCost, maxAmount);
+          }
         }
-        const maxAmount = voucher.freeShippingMaxAmount ?? shippingCost;
-        return Math.min(shippingCost, maxAmount);
+        return {
+          productDiscountAmount: 0,
+          shippingDiscountAmount: total,
+          totalDiscountAmount: total,
+        };
       }
       case VoucherType.PERCENTAGE_DISCOUNT: {
         const discount = Math.floor((subtotal * (voucher.discountPercentage ?? 0)) / 100);
+        let pd = discount;
         if (voucher.maxDiscountAmount !== null && voucher.maxDiscountAmount !== undefined) {
-          return Math.min(discount, voucher.maxDiscountAmount);
+          pd = Math.min(pd, voucher.maxDiscountAmount);
         }
-        return discount;
+        if (pd < 0) pd = 0;
+        if (pd > subtotal) pd = subtotal;
+        return {
+          productDiscountAmount: pd,
+          shippingDiscountAmount: 0,
+          totalDiscountAmount: pd,
+        };
       }
       case VoucherType.FIXED_DISCOUNT: {
-        return Math.min(voucher.discountAmount ?? 0, subtotal);
+        let pd = Math.min(voucher.discountAmount ?? 0, subtotal);
+        if (pd < 0) pd = 0;
+        return {
+          productDiscountAmount: pd,
+          shippingDiscountAmount: 0,
+          totalDiscountAmount: pd,
+        };
       }
       default:
-        return 0;
+        return { productDiscountAmount: 0, shippingDiscountAmount: 0, totalDiscountAmount: 0 };
     }
+  }
+
+  /**
+   * Phase 4N.12: a voucher whose computed discount for THIS order is Rp0 is
+   * refused, never silently accepted. Refusing here — inside computeSummary,
+   * before any transaction — means a zero-value voucher can never reach
+   * persistOrderOnce, so it never writes a VoucherUsage row or increments
+   * currentUsageCount.
+   *
+   * It is judged on the breakdown the caller already computed (no second
+   * calculation), and the message tells the customer what to change.
+   */
+  private assertVoucherHasEffect(
+    voucher: Promo,
+    breakdown: { totalDiscountAmount: number },
+    shippingCost: number,
+    shippingProvider?: string,
+  ) {
+    if (breakdown.totalDiscountAmount > 0) return;
+
+    const v = voucher as any;
+    const hasComponents = this.hasProductDiscountComponent(voucher) || this.hasShippingDiscountComponent(voucher);
+    const discountsShipping = hasComponents
+      ? this.hasShippingDiscountComponent(voucher)
+      : voucher.voucherType === VoucherType.FREE_SHIPPING;
+
+    if (discountsShipping && !this.isCourierEligible(voucher, shippingProvider)) {
+      const labels: Record<string, string> = { paxel: 'Paxel', jne: 'JNE' };
+      const couriers = (Array.isArray(v.eligibleCouriers) ? v.eligibleCouriers : [])
+        .map((c: unknown) => labels[String(c).toLowerCase()] ?? String(c))
+        .join(' or ');
+      const scope = couriers ? `with ${couriers}` : 'with an eligible courier';
+      throw new BadRequestException(
+        shippingProvider
+          ? `This voucher only discounts shipping ${scope}. Choose an eligible courier or remove the voucher to continue.`
+          : `This voucher only discounts shipping ${scope}. Choose a courier first, or remove the voucher to continue.`,
+      );
+    }
+
+    if (discountsShipping && shippingCost <= 0) {
+      throw new BadRequestException(
+        'This voucher only discounts shipping, and this order has no shipping cost to discount. Remove the voucher to continue.',
+      );
+    }
+
+    throw new BadRequestException('This voucher gives no discount on this order. Remove the voucher to continue.');
+  }
+
+  private calculateVoucherDiscount(voucher: Promo, subtotal: number, shippingCost: number, shippingProvider?: string) {
+    const breakdown = this.calculateVoucherDiscountBreakdown(voucher, subtotal, shippingCost, shippingProvider);
+    return breakdown.totalDiscountAmount;
   }
 
   private async assertAddress(userId: string, addressId: string) {
@@ -592,17 +896,28 @@ export class OrdersService {
     try {
       const voucher = await this.findVoucherByCode(dto.voucher_code.trim().toUpperCase());
       await this.assertVoucherAvailability(voucher, userId, dto.subtotal);
-      const discount = this.calculateVoucherDiscount(voucher, dto.subtotal, 0);
+      const shippingCost = dto.shipping_cost ?? 0;
+      const shippingProvider = dto.shipping_provider;
+      const breakdown = this.calculateVoucherDiscountBreakdown(voucher, dto.subtotal, shippingCost, shippingProvider);
+      // Same zero-value rule as checkout, so preview never reports a voucher as
+      // valid that checkout would then refuse.
+      this.assertVoucherHasEffect(voucher, breakdown, shippingCost, shippingProvider);
 
       return {
         valid: true,
-        discount,
+        discount: breakdown.totalDiscountAmount,
+        productDiscountAmount: breakdown.productDiscountAmount,
+        shippingDiscountAmount: breakdown.shippingDiscountAmount,
         voucher_type: voucher.voucherType,
       };
     } catch (error) {
+      // Same amount keys as the success shape (Phase 4N.12), all Rp0, so a client
+      // can read the breakdown without first branching on `valid`.
       return {
         valid: false,
         discount: 0,
+        productDiscountAmount: 0,
+        shippingDiscountAmount: 0,
         voucher_type: null,
         message: error instanceof BadRequestException ? error.message : 'Voucher is invalid',
       };
@@ -638,11 +953,20 @@ export class OrdersService {
 
     let voucher: Promo | null = null;
     let discount = 0;
+    let productDiscountAmount = 0;
+    let shippingDiscountAmount = 0;
 
     if (dto.voucher_code) {
       voucher = await this.findVoucherByCode(dto.voucher_code.trim().toUpperCase());
       await this.assertVoucherAvailability(voucher, userId, subtotal);
-      discount = this.calculateVoucherDiscount(voucher, subtotal, deliveryFee);
+      const shippingProvider = quote.provider || dto.shipping_provider || (dto as any).courier;
+      const breakdown = this.calculateVoucherDiscountBreakdown(voucher, subtotal, deliveryFee, shippingProvider);
+      // Refuse a Rp0 voucher here, before checkout opens its transaction, so no
+      // usage is ever consumed for it.
+      this.assertVoucherHasEffect(voucher, breakdown, deliveryFee, shippingProvider);
+      discount = breakdown.totalDiscountAmount;
+      productDiscountAmount = breakdown.productDiscountAmount;
+      shippingDiscountAmount = breakdown.shippingDiscountAmount;
     }
 
     // Product subtotal, discount and shipping are settled BEFORE the payment fee and
@@ -666,6 +990,8 @@ export class OrdersService {
       shipping_cost: deliveryFee,
       delivery_fee: deliveryFee,
       discount,
+      productDiscountAmount,
+      shippingDiscountAmount,
       // Customer-charged fee: Rp0 when PAYMENT_SERVICE_FEE_ENABLED=false (merchant absorbs).
       payment_service_fee: fee?.customerFee ?? 0,
       // Whether the "Biaya Layanan" row belongs in the breakdown (shown even at Rp0).
@@ -940,6 +1266,8 @@ export class OrdersService {
           subtotal: summary.subtotal,
           deliveryFee: summary.shipping_cost,
           voucherDiscountAmount: summary.discount,
+          productDiscountAmount: (summary as any).productDiscountAmount ?? 0,
+          shippingDiscountAmount: (summary as any).shippingDiscountAmount ?? 0,
           paymentServiceFee: summary.payment_service_fee,
           // Fee breakdown of the checkout-time preview (gateway orders). Payment
           // initiation replaces it with the authoritative per-attempt figures.
