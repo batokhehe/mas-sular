@@ -470,12 +470,13 @@ describe('Paxel keeps its own operation words', () => {
         ...INPUT,
         service: 'PAXEL_REGULAR',
         invoiceValue: 250_000,
+        goodsAmount: 90_000,
         paymentMethod: 'BANK_TRANSFER',
         pickupAtIso: '2026-09-20T03:00:00.000Z',
         origin: { ...INPUT.origin, addressDetail: 'Jl. Outlet No.1', province: 'Jawa Barat', city: 'Kota Bandung', district: 'Coblong', village: 'Dago' },
         destination: { ...INPUT.destination, note: 'pagar hijau', province: 'Jawa Barat', city: 'Kota Bandung', district: 'Sukajadi', village: 'Pasteur' },
         items: [
-          { code: 'SKU-1', name: 'Bakso', category: 'Makanan', quantity: 2, unitPrice: 45_000, weightGram: 450, lengthCm: 20, widthCm: 15, heightCm: 10, isFragile: false },
+          { productId: 'prod-1', code: 'SKU-1', name: 'Bakso', category: 'Makanan', quantity: 2, unitPrice: 45_000, weightGram: 450, lengthCm: 20, widthCm: 15, heightCm: 10, isFragile: false },
         ],
       })
       .catch(() => undefined);

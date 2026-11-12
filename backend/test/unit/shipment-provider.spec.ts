@@ -59,6 +59,8 @@ const PAXEL_INPUT: CreateShipmentInput = {
   ...INPUT,
   service: 'PAXEL_REGULAR',
   invoiceValue: 250000,
+  // Order.subtotal: the Paxel Opsi A aggregate price.
+  goodsAmount: 90000,
   paymentMethod: 'BANK_TRANSFER',
   pickupAtIso: '2026-09-01T10:00:00.000Z',
   origin: {
@@ -79,6 +81,7 @@ const PAXEL_INPUT: CreateShipmentInput = {
   },
   items: [
     {
+      productId: 'prod-1',
       code: 'SKU-1',
       name: 'Bakso',
       category: 'Makanan',

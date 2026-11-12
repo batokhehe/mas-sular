@@ -25,6 +25,12 @@ export interface ShipmentEndpoint {
  * must refuse to book rather than invent one.
  */
 export interface ShipmentItem {
+  /**
+   * OrderItem.productId (NOT NULL in the schema). The identity Paxel groups order
+   * lines by — one `items` object per product. Optional on the type so couriers
+   * and fixtures that do not group (JNE) are unaffected; Paxel refuses without it.
+   */
+  productId?: string;
   code: string;
   name: string;
   category: string;

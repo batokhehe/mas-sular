@@ -97,8 +97,11 @@ function input(over: Partial<CreateShipmentInput> = {}): CreateShipmentInput {
       latitude: -6.9,
       longitude: 107.6,
     },
+    // Order.subtotal (2 × 45000, no toppings): the Opsi A aggregate `price`.
+    goodsAmount: 90000,
     items: [
       {
+        productId: 'prod-001',
         code: 'SKU-001',
         name: 'Bakso Urat',
         category: 'Makanan',
@@ -196,31 +199,34 @@ describe('Paxel create — request', () => {
       village: 'Pasteur',
       zip_code: '40131',
     });
+    // Opsi A: product fields + the order-level aggregate (subtotal, total qty,
+    // Σ weight × qty, PaxelBox S for a quantity of 2).
     expect(body.items).toEqual([
       {
         code: 'SKU-001',
         name: 'Bakso Urat',
         category: 'Makanan',
         is_fragile: false,
-        price: 45000,
+        price: 90000,
         quantity: 2,
-        weight: 450,
+        weight: 900,
         length: 20,
-        width: 15,
-        height: 10,
+        width: 20,
+        height: 8,
       },
     ]);
   });
 
-  it('takes item physical values from the snapshot, never the rate envelope or the 500g placeholder', async () => {
+  it('takes the aggregate weight from the snapshots, never the rate envelope or the 500g placeholder', async () => {
     const { provider, calls } = build();
-    // weightGram 900 is the legacy parcel placeholder; dimension 30x35x20 is the
-    // RATE envelope. Neither may appear in an item.
-    await provider.createShipment(input({ weightGram: 900 }));
+    // weightGram 7777 stands in for the legacy parcel placeholder; 30x35x20 is the
+    // RATE envelope (PAXEL_DEFAULT_DIMENSION); 20x15x10 is the product itself.
+    // None of them may appear in an item.
+    await provider.createShipment(input({ weightGram: 7777 }));
     const item = bodyOf(calls[0]).items[0];
 
-    expect(item.weight).toBe(450);
-    expect(item).toMatchObject({ length: 20, width: 15, height: 10 });
+    expect(item.weight).toBe(900);
+    expect(item).toMatchObject({ length: 20, width: 20, height: 8 });
     expect(bodyOf(calls[0])).not.toHaveProperty('dimension');
   });
 
@@ -280,23 +286,40 @@ describe('Paxel create — refuses to book rather than guess', () => {
   it('no invoice value → no HTTP call', () => noCall({ invoiceValue: undefined }));
   it('zero invoice value → no HTTP call', () => noCall({ invoiceValue: 0 }));
 
-  it.each(['weightGram', 'lengthCm', 'widthCm', 'heightCm'] as const)(
-    'missing item %s → no HTTP call, no fabricated value',
+  it('missing item weightGram → no HTTP call, no fabricated value', async () => {
+    const items = [{ ...input().items![0], weightGram: null }];
+    await noCall({ items });
+  });
+
+  it.each([0, -5, 12.5])('unusable item weightGram (%p) → no HTTP call', async (value) => {
+    const items = [{ ...input().items![0], weightGram: value }];
+    await noCall({ items });
+  });
+
+  it('an aggregate weight over 5000 g → no HTTP call (2 × 2501 g)', async () => {
+    const items = [{ ...input().items![0], weightGram: 2501 }];
+    await noCall({ items });
+  });
+
+  // Per-product dimensions are no longer transmitted (the box is order-level), so
+  // a product without them is still bookable: the requirement was only ever there
+  // to fill fields that Opsi A now fills from the PaxelBox.
+  it.each(['lengthCm', 'widthCm', 'heightCm'] as const)(
+    'a missing item %s no longer blocks booking — dimensions come from the PaxelBox',
     async (field) => {
-      const items = [{ ...input().items![0], [field]: null }];
-      await noCall({ items });
+      const { provider, calls } = build();
+      await provider.createShipment(input({ items: [{ ...input().items![0], [field]: null }] }));
+      expect(calls).toHaveLength(1);
+      expect(bodyOf(calls[0]).items[0]).toMatchObject({ length: 20, width: 20, height: 8 });
     },
   );
 
-  it.each([
-    ['weightGram', 5001],
-    ['lengthCm', 51],
-    ['widthCm', 0],
-    ['heightCm', 51],
-  ])('out-of-range item %s (%p) → no HTTP call', async (field, value) => {
-    const items = [{ ...input().items![0], [field]: value }];
+  it.each(['code', 'name', 'category'] as const)('missing item %s → no HTTP call', async (field) => {
+    const items = [{ ...input().items![0], [field]: '' }];
     await noCall({ items });
   });
+
+  it('missing order subtotal (goodsAmount) → no HTTP call', () => noCall({ goodsAmount: undefined }));
 
   it.each(['name', 'addressDetail', 'province', 'city', 'district', 'village', 'postalCode'] as const)(
     'missing destination.%s → no HTTP call',
@@ -366,6 +389,196 @@ describe('Paxel create — refuses to book rather than guess', () => {
     const { provider, calls } = build(config({ enabled: false }));
     await expect(provider.createShipment(input())).rejects.toBeInstanceOf(PermanentError);
     expect(calls).toHaveLength(0);
+  });
+});
+
+// ==================================================== Opsi A: items structure ==
+
+/**
+ * Paxel's direct integration requirement (Opsi A): one `items` object per
+ * PRODUCT carrying its own code/name/category/is_fragile, plus order-level
+ * price/quantity/weight/length/width/height repeated identically in every object.
+ */
+describe('Paxel create — Opsi A items', () => {
+  const productA = {
+    productId: 'prod-a',
+    code: 'SKU-001',
+    name: 'Bakso Urat',
+    category: 'Makanan',
+    quantity: 2,
+    unitPrice: 45000,
+    weightGram: 450,
+    lengthCm: 20,
+    widthCm: 15,
+    heightCm: 10,
+    isFragile: false,
+  };
+  const productB = {
+    productId: 'prod-b',
+    code: 'SKU-002',
+    name: 'Frozen Baso',
+    category: 'Frozen',
+    quantity: 1,
+    unitPrice: 60000,
+    weightGram: 380,
+    lengthCm: 25,
+    widthCm: 18,
+    heightCm: 9,
+    isFragile: true,
+  };
+  /** The reference order: subtotal 150000, total quantity 3, total weight 1280 g, box S. */
+  const twoProducts = (over: Partial<CreateShipmentInput> = {}) =>
+    input({ items: [productA, productB], goodsAmount: 150000, invoiceValue: 175000, ...over });
+
+  const send = async (over: Partial<CreateShipmentInput> = {}) => {
+    const { provider, calls } = build();
+    await provider.createShipment(twoProducts(over));
+    expect(calls).toHaveLength(1);
+    return { body: bodyOf(calls[0]), raw: calls[0].init.body as string, calls };
+  };
+
+  const AGGREGATE_KEYS = ['price', 'quantity', 'weight', 'length', 'width', 'height'] as const;
+
+  it('produces exactly the specified payload for two different products', async () => {
+    const { body } = await send();
+    expect(body.items).toEqual([
+      { code: 'SKU-001', name: 'Bakso Urat', category: 'Makanan', is_fragile: false, price: 150000, quantity: 3, weight: 1280, length: 20, width: 20, height: 8 },
+      { code: 'SKU-002', name: 'Frozen Baso', category: 'Frozen', is_fragile: true, price: 150000, quantity: 3, weight: 1280, length: 20, width: 20, height: 8 },
+    ]);
+  });
+
+  it('keeps product-specific fields per product', async () => {
+    const { body } = await send();
+    expect(body.items.map((i: any) => [i.code, i.name, i.category, i.is_fragile])).toEqual([
+      ['SKU-001', 'Bakso Urat', 'Makanan', false],
+      ['SKU-002', 'Frozen Baso', 'Frozen', true],
+    ]);
+  });
+
+  it('repeats identical aggregate values in every object', async () => {
+    const { body } = await send();
+    const pick = (i: any) => Object.fromEntries(AGGREGATE_KEYS.map((k) => [k, i[k]]));
+    expect(pick(body.items[1])).toEqual(pick(body.items[0]));
+  });
+
+  it('aggregate price is Order.subtotal (goodsAmount), not a unit price and not invoice_value', async () => {
+    // A subtotal that includes toppings: 150000 + 8000 of toppings.
+    const { body } = await send({ goodsAmount: 158000 });
+    expect(body.items.every((i: any) => i.price === 158000)).toBe(true);
+    expect(body.invoice_value).toBe(175000);
+  });
+
+  it('aggregate quantity is the sum of every line, weight the sum of weight × quantity', async () => {
+    const { body } = await send();
+    expect(body.items[0].quantity).toBe(3);
+    expect(body.items[0].weight).toBe(2 * 450 + 380);
+  });
+
+  it('sends weight as a JSON integer (1280), never formatted text', async () => {
+    const { body, raw } = await send();
+    expect(Number.isInteger(body.items[0].weight)).toBe(true);
+    expect(typeof body.items[0].weight).toBe('number');
+    expect(raw).toContain('"weight":1280');
+    expect(raw).not.toMatch(/"weight":"/);
+    expect(raw).not.toContain('1,280');
+    expect(raw).not.toContain('1.280');
+  });
+
+  it('groups several lines of one product into one object, first-appearance order, every line counted', async () => {
+    // Same product twice (e.g. different toppings), with another product in between.
+    const productA2 = { ...productA, quantity: 1 };
+    const { body } = await send({ items: [productA, productB, productA2], goodsAmount: 195000 });
+    expect(body.items.map((i: any) => i.code)).toEqual(['SKU-001', 'SKU-002']);
+    expect(body.items[0]).toMatchObject({ quantity: 4, weight: 3 * 450 + 380, price: 195000, length: 30, width: 22, height: 12 });
+    expect(body.items[1]).toMatchObject({ quantity: 4, weight: 3 * 450 + 380 });
+  });
+
+  it('never merges different products that happen to share a name or SKU', async () => {
+    const lookalike = { ...productB, productId: 'prod-c', code: 'SKU-001', name: 'Bakso Urat', category: 'Makanan', isFragile: false };
+    const { body } = await send({ items: [productA, lookalike] });
+    expect(body.items).toHaveLength(2);
+  });
+
+  it('refuses lines of one product whose product fields disagree, before any HTTP call', async () => {
+    const { provider, calls } = build();
+    const conflicting = { ...productA, name: 'Bakso Urat (renamed)' };
+    await expect(provider.createShipment(twoProducts({ items: [productA, conflicting] }))).rejects.toBeInstanceOf(PermanentError);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('missing productId fails safely, before any HTTP call — never grouped by name or SKU', async () => {
+    const { provider, calls } = build();
+    const { productId: _drop, ...noId } = productB;
+    await expect(provider.createShipment(twoProducts({ items: [productA, noId] }))).rejects.toThrow(/productId/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('missing weight snapshot on any line rejects booking before HTTP', async () => {
+    const { provider, calls } = build();
+    await expect(provider.createShipment(twoProducts({ items: [productA, { ...productB, weightGram: null }] }))).rejects.toThrow(/weight/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it.each([
+    [3, 20, 20, 8],
+    [4, 30, 22, 12],
+    [10, 30, 22, 12],
+    [11, 35, 30, 25],
+    [20, 35, 30, 25],
+  ])('total quantity %p uses the checkout PaxelBox (%p x %p x %p)', async (qty, length, width, height) => {
+    const { body } = await send({ items: [{ ...productA, quantity: qty, weightGram: 100 }] });
+    expect(body.items[0]).toMatchObject({ quantity: qty, length, width, height });
+  });
+
+  it('more than 20 items has no PaxelBox and is refused before HTTP', async () => {
+    const { provider, calls } = build();
+    await expect(
+      provider.createShipment(twoProducts({ items: [{ ...productA, quantity: 20, weightGram: 100 }, { ...productB, quantity: 1, weightGram: 100 }] })),
+    ).rejects.toThrow(/PaxelBox/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('aggregate weight over 5000 g is refused before HTTP; exactly 5000 g is accepted', async () => {
+    const { provider, calls } = build();
+    await expect(
+      provider.createShipment(twoProducts({ items: [{ ...productA, weightGram: 2310 }, productB] })), // 4620 + 380 = 5000
+    ).resolves.toBeDefined();
+    await expect(
+      provider.createShipment(twoProducts({ items: [{ ...productA, weightGram: 2311 }, productB] })), // 5002
+    ).rejects.toBeInstanceOf(PermanentError);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('the signature uses the first transmitted item name', async () => {
+    const { body, calls } = await send({ items: [productB, productA] });
+    expect(body.items[0].name).toBe('Frozen Baso');
+    expect(calls[0].init.headers['X-Paxel-Signature']).toBe(
+      paxelCreateSignature(
+        { invoiceNumber: body.invoice_number, originName: body.origin.name, destinationName: body.destination.name, firstItemName: 'Frozen Baso' },
+        API_SECRET,
+      ),
+    );
+  });
+
+  it('leaves every top-level field unchanged; only items changed', async () => {
+    const { body } = await send();
+    expect(Object.keys(body).sort()).toEqual(
+      ['destination', 'invoice_number', 'invoice_value', 'items', 'need_insurance', 'origin', 'payment_type', 'pickup_datetime', 'service_type'].sort(),
+    );
+    expect(body).toMatchObject({
+      invoice_number: 'BMS-000123',
+      payment_type: 'CRD',
+      invoice_value: 175000,
+      need_insurance: false,
+      service_type: 'SAMEDAY',
+      pickup_datetime: '2026-09-01 17:30:00',
+    });
+  });
+
+  it('never sends the legacy 500 g parcel placeholder', async () => {
+    const { body, raw } = await send({ weightGram: 1500 });
+    expect(body.items.every((i: any) => i.weight === 1280)).toBe(true);
+    expect(raw).not.toContain('"weight":1500');
   });
 });
 
