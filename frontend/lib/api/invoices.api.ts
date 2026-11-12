@@ -17,6 +17,8 @@ export interface CustomerInvoice {
   }>
   subtotal: number
   discount: number
+  productDiscountAmount?: number
+  shippingDiscountAmount?: number
   voucherCode: string | null
   shippingCost: number
   /** Customer-charged "Biaya Layanan" (Rp0 when the merchant absorbs it). */

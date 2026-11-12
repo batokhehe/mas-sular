@@ -111,7 +111,15 @@ export class ShipmentService {
         // the physical SNAPSHOT taken at checkout plus the product's sku and
         // category. One query, not one per item.
         items: {
+          // A FIXED line order, so a retry of the same order sends the same courier
+          // payload: Paxel's first `items` object feeds its signature. `id` is unique
+          // and immutable; OrderItem has no createdAt/sequence column, so this is a
+          // stable order, not the cart's. JNE is order-independent (sums, and a
+          // GOODS_DESC sorted by name).
+          orderBy: { id: 'asc' },
           select: {
+            // Product identity: Paxel sends one `items` object per product.
+            productId: true,
             quantity: true,
             productName: true,
             unitPrice: true,
@@ -219,6 +227,7 @@ export class ShipmentService {
 
     const totalItems = order.items.reduce((sum, i) => sum + i.quantity, 0);
     const items: ShipmentItem[] = order.items.map((item) => ({
+      productId: item.productId,
       code: item.product?.sku ?? '',
       // The order-time name, not the catalogue's current one.
       name: item.productName,

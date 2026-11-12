@@ -35,7 +35,7 @@ export const ordersApi = {
     api.post<ShippingQuote>('/checkout/shipping-cost', body, 'customer'),
   shippingOptions: (body: { address_id: string; items: CheckoutItem[] }) =>
     api.post<ShippingOption[]>('/checkout/shipping-options', body, 'customer'),
-  validateVoucher: (body: { voucher_code: string; subtotal: number }) =>
+  validateVoucher: (body: { voucher_code: string; subtotal: number; shipping_cost?: number; shipping_provider?: string }) =>
     api.post<VoucherPreview>('/checkout/validate-voucher', body, 'customer'),
   summary: (body: CreateOrderInput) =>
     api.post<CheckoutSummary>('/checkout/summary', body, 'customer'),

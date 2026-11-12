@@ -85,6 +85,19 @@ export type AdminPromo = {
   discountAmount?: number | null;
   maxDiscountAmount?: number | null;
   freeShippingMaxAmount?: number | null;
+  // Phase 4 discount components. Independent of the legacy columns above and of
+  // each other: a voucher may carry both, and they stack. The backend ignores the
+  // legacy columns as soon as either of these is set.
+  productDiscountType?: 'PERCENTAGE' | 'FIXED' | null;
+  productDiscountPercentage?: number | null;
+  productDiscountAmount?: number | null;
+  productMaxDiscountAmount?: number | null;
+  shippingDiscountType?: 'PERCENTAGE' | 'FIXED' | 'FREE_SHIPPING' | null;
+  shippingDiscountPercentage?: number | null;
+  shippingDiscountAmount?: number | null;
+  shippingMaxDiscountAmount?: number | null;
+  /** Couriers a shipping discount may apply to; 'paxel' and 'jne' only. */
+  eligibleCouriers?: string[] | null;
   minimumOrderAmount: number;
   maxUsageCount?: number | null;
   currentUsageCount: number;
@@ -506,6 +519,8 @@ export type AdminOrderDetail = AdminOrder & {
   // Accounting + snapshot fields (operations center).
   subtotal?: number;
   voucherDiscountAmount?: number;
+  productDiscountAmount?: number;
+  shippingDiscountAmount?: number;
   voucherCode?: string | null;
   outletId?: string | null;
   // Payment service fee (gateway orders): the customer-charged "Biaya Layanan"

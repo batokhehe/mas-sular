@@ -218,13 +218,17 @@ export interface ShippingOption {
 export interface VoucherPreview {
   valid: boolean
   discount: number
-  voucher_type: VoucherType
+  productDiscountAmount?: number
+  shippingDiscountAmount?: number
+  voucher_type: VoucherType | null
 }
 
 export interface CheckoutSummary {
   subtotal: number
   shipping_cost: number
   discount: number
+  productDiscountAmount?: number
+  shippingDiscountAmount?: number
   /** Customer-charged "Biaya Layanan" (Rp0 when the merchant absorbs it). */
   payment_service_fee: number
   /** True for gateway payments: the "Biaya Layanan" row is shown, even at Rp0. */
@@ -315,6 +319,8 @@ export interface Order {
   status: OrderStatus
   subtotal: number
   voucherDiscountAmount: number
+  productDiscountAmount?: number
+  shippingDiscountAmount?: number
   deliveryFee: number
   paymentServiceFee: number
   totalPrice: number

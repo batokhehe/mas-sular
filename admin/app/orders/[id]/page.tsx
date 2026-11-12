@@ -175,7 +175,25 @@ export default function OrderDetailPage() {
               <Field label="Kode Unik" value={uniqueCode != null ? String(uniqueCode) : '—'} />
               <Field label="Metode Pembayaran" value={paymentMethodLabel(payment?.method ?? order.paymentMethod)} />
               <Field label="Voucher" value={order.voucherCode ?? '—'} />
-              <Field label="Diskon" value={rp(order.voucherDiscountAmount ?? 0)} />
+              {(() => {
+                const productDiscount = (order as any).productDiscountAmount ?? 0
+                const shippingDiscount = (order as any).shippingDiscountAmount ?? 0
+                const hasBreakdown =
+                  (productDiscount > 0 || shippingDiscount > 0) &&
+                  ((order as any).productDiscountAmount !== undefined || (order as any).shippingDiscountAmount !== undefined)
+                if (hasBreakdown) {
+                  return (
+                    <>
+                      {productDiscount > 0 ? <Field label="Diskon Produk" value={rp(productDiscount)} /> : null}
+                      {shippingDiscount > 0 ? <Field label="Diskon Ongkir" value={rp(shippingDiscount)} /> : null}
+                    </>
+                  )
+                }
+                if ((order.voucherDiscountAmount ?? 0) > 0) {
+                  return <Field label="Diskon Voucher" value={rp(order.voucherDiscountAmount ?? 0)} />
+                }
+                return <Field label="Diskon" value={rp(0)} />
+              })()}
               <Field label="Ongkos Kirim" value={rp(order.shippingCost ?? order.deliveryFee ?? 0)} />
               {isGateway ? <Field label="Biaya Layanan (pelanggan)" value={rp(order.paymentServiceFee ?? 0)} /> : null}
               <Field label="Outlet" value={order.reservations?.[0]?.outlet?.name ?? order.outletId ?? '—'} />

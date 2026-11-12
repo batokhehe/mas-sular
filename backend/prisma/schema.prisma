@@ -60,6 +60,17 @@ enum VoucherType {
   FIXED_DISCOUNT
 }
 
+enum ProductDiscountType {
+  PERCENTAGE
+  FIXED
+}
+
+enum ShippingDiscountType {
+  PERCENTAGE
+  FIXED
+  FREE_SHIPPING
+}
+
 model User {
   id            String         @id @default(uuid())
   googleId      String?        @unique
@@ -482,11 +493,26 @@ model Promo {
   isActive              Boolean        @default(true)
   startDate             DateTime?
   endDate               DateTime?
-  usages                VoucherUsage[]
-  orders                Order[]
-  createdAt             DateTime       @default(now())
-  updatedAt             DateTime       @updatedAt
-  deletedAt             DateTime?
+  /// Eligible couriers for shipping discounts.
+  eligibleCouriers      Json?
+
+  // Product/order discount component (independent)
+  productDiscountType       ProductDiscountType?
+  productDiscountPercentage Int?
+  productDiscountAmount     Int?
+  productMaxDiscountAmount  Int?
+
+  // Shipping discount component (independent)
+  shippingDiscountType       ShippingDiscountType?
+  shippingDiscountPercentage Int?
+  shippingDiscountAmount     Int?
+  shippingMaxDiscountAmount  Int?
+
+  usages    VoucherUsage[]
+  orders    Order[]
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  deletedAt DateTime?
 
   @@index([code])
   @@index([isActive])
@@ -532,6 +558,8 @@ model Order {
   status                   OrderStatus            @default(PENDING)
   subtotal                 Int
   voucherDiscountAmount    Int                    @default(0)
+  productDiscountAmount    Int                    @default(0)
+  shippingDiscountAmount   Int                    @default(0)
   deliveryFee              Int
   /// Customer-charged gateway fee ("Biaya Layanan") of the CURRENT payment attempt;
   /// legacy orders are zero. See payment-service-fee.ts.

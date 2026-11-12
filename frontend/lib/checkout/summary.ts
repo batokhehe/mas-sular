@@ -23,8 +23,18 @@ export function checkoutSummaryRows(summary: CheckoutSummary): SummaryRow[] {
     { key: 'subtotal', label: 'Subtotal', value: summary.subtotal },
     { key: 'shipping', label: 'Ongkos kirim', value: summary.shipping_cost },
   ]
-  if (summary.discount > 0) {
-    rows.push({ key: 'discount', label: 'Diskon', value: -summary.discount })
+  const productDiscount = summary.productDiscountAmount ?? 0
+  const shippingDiscount = summary.shippingDiscountAmount ?? 0
+  const hasBreakdown = (productDiscount > 0 || shippingDiscount > 0) && (summary.productDiscountAmount !== undefined || summary.shippingDiscountAmount !== undefined)
+  if (hasBreakdown) {
+    if (productDiscount > 0) {
+      rows.push({ key: 'product_discount', label: 'Diskon produk', value: -productDiscount })
+    }
+    if (shippingDiscount > 0) {
+      rows.push({ key: 'shipping_discount', label: 'Diskon ongkir', value: -shippingDiscount })
+    }
+  } else if (summary.discount > 0) {
+    rows.push({ key: 'discount', label: 'Diskon voucher', value: -summary.discount })
   }
   // Gateway payments always show "Biaya Layanan" — Rp0 when the merchant absorbs
   // the fee. Older responses without the flag fall back to "shown when charged".
@@ -75,7 +85,13 @@ export type PaymentBreakdownInput = {
   /** Payment.amount — the exact amount to transfer (business + code). */
   transferExactly: number
   /** Line items (success page only); the upload page omits them. */
-  itemization?: { subtotal: number; shipping: number; discount: number }
+  itemization?: {
+    subtotal: number
+    shipping: number
+    discount: number
+    productDiscountAmount?: number
+    shippingDiscountAmount?: number
+  }
 }
 
 export type PaymentBreakdownRow = {
@@ -95,7 +111,19 @@ export function paymentBreakdownRows(input: PaymentBreakdownInput): PaymentBreak
   if (input.itemization) {
     rows.push({ key: 'subtotal', label: 'Subtotal', value: input.itemization.subtotal, kind: 'line' })
     rows.push({ key: 'shipping', label: 'Ongkos kirim', value: input.itemization.shipping, kind: 'line' })
-    if (input.itemization.discount > 0) {
+    const productDiscount = input.itemization.productDiscountAmount ?? 0
+    const shippingDiscount = input.itemization.shippingDiscountAmount ?? 0
+    const hasBreakdown =
+      (productDiscount > 0 || shippingDiscount > 0) &&
+      (input.itemization.productDiscountAmount !== undefined || input.itemization.shippingDiscountAmount !== undefined)
+    if (hasBreakdown) {
+      if (productDiscount > 0) {
+        rows.push({ key: 'product_discount', label: 'Diskon produk', value: productDiscount, kind: 'discount' })
+      }
+      if (shippingDiscount > 0) {
+        rows.push({ key: 'shipping_discount', label: 'Diskon ongkir', value: shippingDiscount, kind: 'discount' })
+      }
+    } else if (input.itemization.discount > 0) {
       rows.push({ key: 'discount', label: 'Diskon voucher', value: input.itemization.discount, kind: 'discount' })
     }
   }
@@ -114,7 +142,13 @@ export function paymentBreakdownFromOrder(order: Order): PaymentBreakdownInput {
     businessTotal: view.businessTotal,
     uniqueCode: view.uniqueCode,
     transferExactly: view.transferExactly,
-    itemization: { subtotal: view.subtotal, shipping: view.shipping, discount: view.discount },
+    itemization: {
+      subtotal: view.subtotal,
+      shipping: view.shipping,
+      discount: view.discount,
+      productDiscountAmount: (order as any).productDiscountAmount,
+      shippingDiscountAmount: (order as any).shippingDiscountAmount,
+    },
   }
 }
 

@@ -195,6 +195,7 @@ describe('D: the Paxel create request carries the Jakarta wall-clock time', () =
       service: 'PAXEL_SAMEDAY',
       weightGram: 500,
       invoiceValue: 73000,
+      goodsAmount: 50000,
       paymentMethod: 'BANK_TRANSFER',
       pickupAtIso: ADMIN_PICKUP_ISO,
       origin: {
@@ -223,6 +224,7 @@ describe('D: the Paxel create request carries the Jakarta wall-clock time', () =
       },
       items: [
         {
+          productId: 'qa-product-1',
           code: 'QA-SKU-0001',
           name: 'QA Snack',
           category: 'Makanan',

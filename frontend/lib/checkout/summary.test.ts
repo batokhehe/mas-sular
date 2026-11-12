@@ -168,3 +168,105 @@ test('upload breakdown falls back to amount for legacy responses without busines
   assert.equal(rowValue(rows, 'business_total'), 110000)
   assert.equal(rowValue(rows, 'transfer_exactly'), 110000)
 })
+
+// Phase 4D: discount breakdown display tests
+test('checkout summary shows both product and shipping discount rows when breakdown present (no generic row)', () => {
+  const rows = checkoutSummaryRows({
+    subtotal: 100000, shipping_cost: 10000, discount: 15000,
+    productDiscountAmount: 10000, shippingDiscountAmount: 5000,
+    payment_service_fee: 0, grand_total: 95000,
+  } as never)
+  assert.equal(rowValue(rows, 'product_discount'), -10000)
+  assert.equal(rowValue(rows, 'shipping_discount'), -5000)
+  assert.equal(hasRow(rows, 'discount'), false)
+  assert.equal(rowValue(rows, 'grand_total'), 95000) // unchanged
+})
+
+test('checkout summary shows product-only discount row', () => {
+  const rows = checkoutSummaryRows({
+    subtotal: 100000, shipping_cost: 10000, discount: 10000,
+    productDiscountAmount: 10000, shippingDiscountAmount: 0,
+    payment_service_fee: 0, grand_total: 100000,
+  } as never)
+  assert.equal(rowValue(rows, 'product_discount'), -10000)
+  assert.equal(hasRow(rows, 'shipping_discount'), false)
+  assert.equal(hasRow(rows, 'discount'), false)
+})
+
+test('checkout summary shows shipping-only discount row', () => {
+  const rows = checkoutSummaryRows({
+    subtotal: 100000, shipping_cost: 10000, discount: 10000,
+    productDiscountAmount: 0, shippingDiscountAmount: 10000,
+    payment_service_fee: 0, grand_total: 100000,
+  } as never)
+  assert.equal(hasRow(rows, 'product_discount'), false)
+  assert.equal(rowValue(rows, 'shipping_discount'), -10000)
+  assert.equal(hasRow(rows, 'discount'), false)
+})
+
+test('checkout summary shows generic voucher row for historical order (no breakdown, discount > 0)', () => {
+  const rows = checkoutSummaryRows({
+    subtotal: 100000, shipping_cost: 10000, discount: 8000,
+    productDiscountAmount: 0, shippingDiscountAmount: 0,
+    payment_service_fee: 0, grand_total: 102000,
+  } as never)
+  assert.equal(rowValue(rows, 'discount'), -8000)
+  assert.equal(hasRow(rows, 'product_discount'), false)
+  assert.equal(hasRow(rows, 'shipping_discount'), false)
+})
+
+test('checkout summary shows generic voucher row when breakdown fields are absent (legacy response)', () => {
+  const rows = checkoutSummaryRows({
+    subtotal: 100000, shipping_cost: 10000, discount: 8000,
+    payment_service_fee: 0, grand_total: 102000,
+  } as never)
+  assert.equal(rowValue(rows, 'discount'), -8000)
+  assert.equal(hasRow(rows, 'product_discount'), false)
+  assert.equal(hasRow(rows, 'shipping_discount'), false)
+})
+
+test('checkout summary shows no discount rows when discount is zero', () => {
+  const rows = checkoutSummaryRows({
+    subtotal: 100000, shipping_cost: 10000, discount: 0,
+    productDiscountAmount: 0, shippingDiscountAmount: 0,
+    payment_service_fee: 0, grand_total: 110000,
+  } as never)
+  assert.equal(hasRow(rows, 'discount'), false)
+  assert.equal(hasRow(rows, 'product_discount'), false)
+  assert.equal(hasRow(rows, 'shipping_discount'), false)
+})
+
+test('payment breakdown shows component rows when order has breakdown (no generic row)', () => {
+  const rows = paymentBreakdownRows(paymentBreakdownFromOrder({
+    paymentMethod: 'BANK_TRANSFER', totalPrice: 95000, subtotal: 100000, deliveryFee: 10000,
+    voucherDiscountAmount: 15000, productDiscountAmount: 10000, shippingDiscountAmount: 5000,
+    payment: { amount: 95123, uniqueCode: 123 },
+  } as never))
+  assert.equal(hasRow(rows, 'product_discount'), true)
+  assert.equal(hasRow(rows, 'shipping_discount'), true)
+  assert.equal(rowValue(rows, 'product_discount'), 10000)
+  assert.equal(rowValue(rows, 'shipping_discount'), 5000)
+  assert.equal(hasRow(rows, 'discount'), false)
+  assert.equal(rowValue(rows, 'business_total'), 95000)
+  assert.equal(rowValue(rows, 'transfer_exactly'), 95123)
+})
+
+test('payment breakdown shows generic discount for historical order', () => {
+  const rows = paymentBreakdownRows(paymentBreakdownFromOrder({
+    paymentMethod: 'BANK_TRANSFER', totalPrice: 102000, subtotal: 100000, deliveryFee: 10000,
+    voucherDiscountAmount: 8000, productDiscountAmount: 0, shippingDiscountAmount: 0,
+    payment: { amount: 102045, uniqueCode: 45 },
+  } as never))
+  assert.equal(rowValue(rows, 'discount'), 8000)
+  assert.equal(hasRow(rows, 'product_discount'), false)
+  assert.equal(hasRow(rows, 'shipping_discount'), false)
+})
+
+test('displaying component rows does not change totals (no recalculation)', () => {
+  const rows = checkoutSummaryRows({
+    subtotal: 100000, shipping_cost: 10000, discount: 15000,
+    productDiscountAmount: 10000, shippingDiscountAmount: 5000,
+    payment_service_fee: 0, grand_total: 88888, // deliberately not matching formula
+  } as never)
+  assert.equal(rowValue(rows, 'grand_total'), 88888) // backend total preserved
+})

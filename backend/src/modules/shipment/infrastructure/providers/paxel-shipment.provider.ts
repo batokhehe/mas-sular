@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { IntegrationProvider } from '@prisma/client';
 import { IntegrationLogService } from '../../../../infrastructure/integration-log/integration-log.service';
 import { ShipmentStatus } from '@prisma/client';
+import { paxelBoxSpec, selectPaxelBox } from '../../../shipping/domain/paxel-box';
 import { PermanentError } from '../../../shipping/domain/shipping-errors';
 import {
   defaultShippingHttpClient,
@@ -86,17 +87,101 @@ interface PaxelEndpoint {
   longitude?: number;
 }
 
-interface PaxelItem {
+/** The per-product half of a Paxel `items` object. */
+interface PaxelProductFields {
   code: string;
   name: string;
   category: string;
   is_fragile: boolean;
+}
+
+/**
+ * The order-level half of a Paxel `items` object (Opsi A, the direct Paxel
+ * integration requirement): the SAME values are repeated in every object.
+ */
+export interface PaxelOrderAggregate {
+  /** Order.subtotal — goods and toppings, no delivery fee, service fee or voucher. */
   price: number;
+  /** Sum of every order line's quantity. */
   quantity: number;
+  /** Sum of snapshot weightGram × quantity over every order line, whole grams. */
   weight: number;
+  /** The PaxelBox for `quantity` — the same selection the rate quotation used. */
   length: number;
   width: number;
   height: number;
+}
+
+type PaxelItem = PaxelProductFields & PaxelOrderAggregate;
+
+/** Every Paxel service offered at checkout is capped at 5000 g (paxel-rate.map). */
+const PAXEL_MAX_PARCEL_WEIGHT_GRAM = 5000;
+
+/**
+ * Order-level aggregate for Paxel create (Opsi A). PURE: no I/O, no config.
+ *
+ * `price` is the order subtotal the caller passes as `goodsAmount`; it is never
+ * recomputed from unit prices (those exclude toppings). The box comes from
+ * `selectPaxelBox` — the one rule checkout's rate quotation also uses — so the
+ * dimensions booked are the dimensions that were priced. The legacy
+ * `input.weightGram` placeholder is never read.
+ *
+ * Throws PermanentError, before any HTTP call, for anything Paxel could not book.
+ */
+export function buildPaxelOrderAggregate(
+  items: readonly ShipmentItem[],
+  orderSubtotal: number | undefined,
+  provider = 'paxel',
+): PaxelOrderAggregate {
+  if (items.length === 0) {
+    throw new PermanentError('Paxel booking requires at least one order item', provider);
+  }
+  if (typeof orderSubtotal !== 'number' || !Number.isInteger(orderSubtotal) || orderSubtotal <= 0) {
+    throw new PermanentError('Paxel booking requires a positive order subtotal', provider);
+  }
+
+  let quantity = 0;
+  let weight = 0;
+  const missingWeight: string[] = [];
+  items.forEach((item, index) => {
+    const label = `items[${index}]`;
+    if (!Number.isInteger(item.quantity) || item.quantity < 1) {
+      throw new PermanentError(`${label}.quantity must be a whole number of at least 1 (got ${item.quantity})`, provider);
+    }
+    quantity += item.quantity;
+    // No fallback of any kind: not the rate envelope, not the legacy 500g
+    // placeholder. An unmeasured product cannot be booked, only measured.
+    if (item.weightGram == null) {
+      missingWeight.push(`${label}.weight`);
+      return;
+    }
+    if (!Number.isInteger(item.weightGram) || item.weightGram < 1) {
+      throw new PermanentError(`${label}.weight must be a whole number of grams of at least 1 (got ${item.weightGram})`, provider);
+    }
+    weight += item.weightGram * item.quantity;
+  });
+  if (missingWeight.length) {
+    throw new PermanentError(
+      `Paxel booking is missing product physical data: ${missingWeight.join(', ')}. Set the product weight, then retry.`,
+      provider,
+    );
+  }
+  assertRange(weight, 1, PAXEL_MAX_PARCEL_WEIGHT_GRAM, 'parcel weight', provider);
+
+  const box = selectPaxelBox(quantity);
+  if (!box) {
+    throw new PermanentError(`Paxel booking has no PaxelBox for a total quantity of ${quantity} (maximum 20)`, provider);
+  }
+  const spec = paxelBoxSpec(box);
+  // Whole centimetres, exactly as the rate request rounds them (paxelBoxRateDimension).
+  return {
+    price: orderSubtotal,
+    quantity,
+    weight,
+    length: Math.round(spec.lengthCm),
+    width: Math.round(spec.widthCm),
+    height: Math.round(spec.heightCm),
+  };
 }
 
 interface PaxelCreatePayload {
@@ -251,10 +336,15 @@ export class PaxelShipmentProvider implements ShipmentProvider {
       throw new PermanentError('Paxel booking requires a positive order value', this.name);
     }
 
-    const items = (input.items ?? []).map((item, index) => this.buildItem(item, index));
-    if (items.length === 0) {
+    const lines = input.items ?? [];
+    if (lines.length === 0) {
       throw new PermanentError('Paxel booking requires at least one order item', this.name);
     }
+    // Opsi A: one object per PRODUCT carrying its own code/name/category/is_fragile,
+    // plus the order-level aggregate repeated identically in every object.
+    const products = this.buildProducts(lines);
+    const aggregate = buildPaxelOrderAggregate(lines, input.goodsAmount, this.name);
+    const items: PaxelItem[] = products.map((product) => ({ ...product, ...aggregate }));
 
     return {
       invoice_number: input.orderNumber,
@@ -269,43 +359,55 @@ export class PaxelShipmentProvider implements ShipmentProvider {
     };
   }
 
-  /** One parcel line. Physical values come from the OrderItem snapshot or not at all. */
-  private buildItem(item: ShipmentItem, index: number): PaxelItem {
-    const label = `items[${index}]`;
-    const missing: string[] = [];
-    if (!item.code) missing.push(`${label}.code`);
-    if (!item.name) missing.push(`${label}.name`);
-    if (!item.category) missing.push(`${label}.category`);
-    // No fallback of any kind: not the rate envelope, not the legacy 500g
-    // placeholder. An unmeasured product cannot be booked, only measured.
-    if (item.weightGram == null) missing.push(`${label}.weight`);
-    if (item.lengthCm == null) missing.push(`${label}.length`);
-    if (item.widthCm == null) missing.push(`${label}.width`);
-    if (item.heightCm == null) missing.push(`${label}.height`);
-    if (missing.length) {
-      throw new PermanentError(
-        `Paxel booking is missing product physical data: ${missing.join(', ')}. Set the product weight and dimensions, then retry.`,
-        this.name,
-      );
-    }
+  /**
+   * One entry per product, grouped by productId in first-appearance order (so
+   * `items[0]` — the signature input — is the first product on the order). Never
+   * grouped by SKU (nullable) or name. Lines of one product that disagree on a
+   * product field are refused rather than silently merged.
+   *
+   * Per-product dimensions are no longer transmitted (the box is order-level), so
+   * they are not required here; weight is still required on every line, by
+   * buildPaxelOrderAggregate.
+   */
+  private buildProducts(lines: readonly ShipmentItem[]): PaxelProductFields[] {
+    const byProduct = new Map<string, PaxelProductFields>();
+    lines.forEach((line, index) => {
+      const label = `items[${index}]`;
+      if (!line.productId) {
+        throw new PermanentError(`Paxel booking is missing ${label}.productId; order lines cannot be grouped safely`, this.name);
+      }
+      const missing: string[] = [];
+      if (!line.code) missing.push(`${label}.code`);
+      if (!line.name) missing.push(`${label}.name`);
+      if (!line.category) missing.push(`${label}.category`);
+      if (missing.length) {
+        throw new PermanentError(`Paxel booking is missing required fields: ${missing.join(', ')}`, this.name);
+      }
 
-    assertRange(item.weightGram as number, 1, 5000, `${label}.weight`, this.name);
-    assertRange(item.lengthCm as number, 1, 50, `${label}.length`, this.name);
-    assertRange(item.widthCm as number, 1, 50, `${label}.width`, this.name);
-    assertRange(item.heightCm as number, 1, 50, `${label}.height`, this.name);
-
-    return {
-      code: item.code,
-      name: item.name,
-      category: item.category,
-      is_fragile: item.isFragile ?? false,
-      price: item.unitPrice,
-      quantity: item.quantity,
-      weight: item.weightGram as number,
-      length: item.lengthCm as number,
-      width: item.widthCm as number,
-      height: item.heightCm as number,
-    };
+      const fields: PaxelProductFields = {
+        code: line.code,
+        name: line.name,
+        category: line.category,
+        is_fragile: line.isFragile ?? false,
+      };
+      const seen = byProduct.get(line.productId);
+      if (!seen) {
+        byProduct.set(line.productId, fields);
+        return;
+      }
+      const conflict =
+        seen.code !== fields.code ||
+        seen.name !== fields.name ||
+        seen.category !== fields.category ||
+        seen.is_fragile !== fields.is_fragile;
+      if (conflict) {
+        throw new PermanentError(
+          `Paxel booking has conflicting product data for one product across order lines (${label})`,
+          this.name,
+        );
+      }
+    });
+    return [...byProduct.values()];
   }
 
   /**

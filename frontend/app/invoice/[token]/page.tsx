@@ -145,9 +145,29 @@ function InvoiceDocument({ invoice }: { invoice: CustomerInvoice }) {
 
         <section className="space-y-2 border-b py-5 text-sm">
           <Row label="Subtotal" value={formatIDR(invoice.subtotal)} />
-          {invoice.discount > 0 ? (
-            <Row label={invoice.voucherCode ? `Diskon (${invoice.voucherCode})` : 'Diskon'} value={`- ${formatIDR(invoice.discount)}`} />
-          ) : null}
+          {(() => {
+            const productDiscount = (invoice as any).productDiscountAmount ?? 0
+            const shippingDiscount = (invoice as any).shippingDiscountAmount ?? 0
+            const hasBreakdown =
+              (productDiscount > 0 || shippingDiscount > 0) &&
+              ((invoice as any).productDiscountAmount !== undefined || (invoice as any).shippingDiscountAmount !== undefined)
+            if (hasBreakdown) {
+              return (
+                <>
+                  {productDiscount > 0 ? (
+                    <Row label={invoice.voucherCode ? `Diskon produk (${invoice.voucherCode})` : 'Diskon produk'} value={`- ${formatIDR(productDiscount)}`} />
+                  ) : null}
+                  {shippingDiscount > 0 ? (
+                    <Row label={invoice.voucherCode ? `Diskon ongkir (${invoice.voucherCode})` : 'Diskon ongkir'} value={`- ${formatIDR(shippingDiscount)}`} />
+                  ) : null}
+                </>
+              )
+            }
+            if (invoice.discount > 0) {
+              return <Row label={invoice.voucherCode ? `Diskon voucher (${invoice.voucherCode})` : 'Diskon voucher'} value={`- ${formatIDR(invoice.discount)}`} />
+            }
+            return null
+          })()}
           <Row label="Ongkos kirim" value={formatIDR(invoice.shippingCost)} />
           {/* Gateway orders always list the fee - Rp0 when the merchant absorbs it. */}
           {(invoice.paymentServiceFeeApplies ?? invoice.paymentServiceFee > 0) ? (
