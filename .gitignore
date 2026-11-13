@@ -54,3 +54,5 @@ backend/prisma/data/rajaongkir-cache/
 # Machine-local Claude Code settings (per-developer permission allowlists).
 # The shared, reviewed project settings file (.claude/settings.json) is NOT ignored.
 .claude/settings.local.json
+
+.pnpm-store/
