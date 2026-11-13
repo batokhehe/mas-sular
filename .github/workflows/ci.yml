@@ -21,6 +21,25 @@ jobs:
       - run: pnpm lint
       - run: pnpm --filter backend test
 
+  # Unit tests of the two Next.js apps (node --test, no services, no network).
+  # Separate job so a failure here never hides the backend result above.
+  # Path selectors on purpose: frontend's package name is not "frontend".
+  web-unit:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [admin, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4   # version comes from packageManager in package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter ./${{ matrix.app }} test
+
   # Each Docker image installs from its own app directory with that app's lockfile
   # (`pnpm install --frozen-lockfile`, no workspace), so the root install above cannot
   # catch an app lockfile that has fallen behind its package.json.
