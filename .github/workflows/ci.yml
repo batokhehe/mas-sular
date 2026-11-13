@@ -71,6 +71,12 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter ./${{ matrix.app }} build
+      # The storefront build skips type validation (typescript.ignoreBuildErrors), so
+      # type-check it here, after the build has generated .next/types. Admin's build
+      # already type-checks.
+      - if: matrix.app == 'frontend'
+        run: pnpm exec tsc --noEmit -p tsconfig.json --pretty false
+        working-directory: frontend
 
   # Each Docker image installs from its own app directory with that app's lockfile
   # (`pnpm install --frozen-lockfile`, no workspace), so the root install above cannot
