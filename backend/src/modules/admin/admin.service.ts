@@ -3,6 +3,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Inject, Inj
 import type { Cache } from 'cache-manager';
 import { OrderStatus, PaymentStatus, Prisma, ShipmentStatus } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
+import { isCheckViolation, PROMO_COUNTER_WITHIN_MAX } from '../orders/voucher-errors.util';
 import { ShipmentService } from '../shipment/shipment.service';
 import { trackingCacheKey } from '../shipment/shipment-sync.service';
 import { mergeAdminShipmentMetadata } from '../shipment/shipment-metadata';
@@ -75,6 +76,9 @@ const ADDRESS_WITH_REGIONS = {
     village: { select: { id: true, code: true, name: true, postalCode: true } },
   },
 } as const;
+
+/** Admin-facing message for a maxUsageCount below the usage already counted. */
+const PROMO_MAX_BELOW_USAGE = 'Maximum usage cannot be lower than the usage already counted for this voucher';
 
 // Promo discount-configuration columns, grouped the way the discount engine reads
 // them (see AdminService.normalizePromoPatch).
@@ -157,9 +161,13 @@ export class AdminService {
         _count: { status: true },
       }),
       this.prisma.promo.findMany({ where: { deletedAt: null } }),
-      this.prisma.voucherUsage.count(),
+      // Redemption metrics count only ACTIVE or CONSUMED usage: a row released by an
+      // unpaid cancelled/expired/failed order (releasedAt set) is history, not a
+      // redemption. The rows themselves are kept for audit.
+      this.prisma.voucherUsage.count({ where: { releasedAt: null } }),
       this.prisma.voucherUsage.groupBy({
         by: ['voucherId'],
+        where: { releasedAt: null },
         _count: { voucherId: true },
         orderBy: { _count: { voucherId: 'desc' } },
         take: 5,
@@ -426,7 +434,73 @@ export class AdminService {
     // PATCH (and the fields it clears) applied.
     const merged: any = { ...existing, ...data };
     this.validatePromoConfiguration(merged, existing);
-    return this.prisma.promo.update({ where: { id }, data });
+
+    // An edit that cannot affect usage rules keeps the plain single write.
+    const touchesUsageRules =
+      data.isNewUserOnly !== undefined || (data.maxUsageCount !== undefined && data.maxUsageCount !== null);
+    if (!touchesUsageRules) {
+      return this.prisma.promo.update({ where: { id }, data });
+    }
+
+    // P1.2.3: classification and limit edits SERIALIZE with checkout on the Promo row.
+    // Checkout's quota update locks the same row until its order commits, so:
+    //  - checkout first -> this FOR UPDATE waits, then counts the committed usage
+    //                      and refuses to reclassify;
+    //  - admin first    -> checkout's update waits, then reads the new
+    //                      classification from the locked row.
+    // Rules are judged on the LOCKED row, never on the pre-transaction snapshot.
+    try {
+      return await this.prisma.$transaction(
+        async (tx) => {
+          const rows = await tx.$queryRaw<Array<{ isNewUserOnly: boolean; currentUsageCount: number }>>(
+            Prisma.sql`SELECT "isNewUserOnly", "currentUsageCount" FROM "Promo" WHERE id = ${id} FOR UPDATE`,
+          );
+          const locked = rows[0];
+          if (!locked) throw new NotFoundException('Promo not found');
+          await this.assertPromoUsageRules(tx, id, locked, data);
+          return tx.promo.update({ where: { id }, data });
+        },
+        { timeout: 10000 },
+      );
+    } catch (err) {
+      // Backstop: the Promo_currentUsageCount_within_max CHECK refused the lower limit.
+      if (isCheckViolation(err, PROMO_COUNTER_WITHIN_MAX)) {
+        throw new BadRequestException(PROMO_MAX_BELOW_USAGE);
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Promo usage rules, judged on the Promo row locked FOR UPDATE.
+   *
+   * - New User classification is frozen once the promo has ANY usage record (released
+   *   ones included): it decides which orders hold the account's single New User
+   *   redemption, so flipping it afterwards would rewrite history.
+   * - maxUsageCount may not drop below currentUsageCount (active + consumed usage).
+   *   The database CHECK enforces the same rule as the last line of defence.
+   */
+  private async assertPromoUsageRules(
+    tx: Prisma.TransactionClient,
+    id: string,
+    locked: { isNewUserOnly: boolean; currentUsageCount: number },
+    data: any,
+  ) {
+    if (data.isNewUserOnly !== undefined && data.isNewUserOnly !== locked.isNewUserOnly) {
+      const usages = await tx.voucherUsage.count({ where: { voucherId: id } });
+      if (usages > 0) {
+        throw new BadRequestException(
+          'The New User setting cannot be changed after this voucher has been used. Create a new voucher instead.',
+        );
+      }
+    }
+    if (
+      data.maxUsageCount !== undefined &&
+      data.maxUsageCount !== null &&
+      data.maxUsageCount < (locked.currentUsageCount ?? 0)
+    ) {
+      throw new BadRequestException(PROMO_MAX_BELOW_USAGE);
+    }
   }
 
   /**
