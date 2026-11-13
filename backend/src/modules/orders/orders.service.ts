@@ -20,6 +20,15 @@ import {
   ValidateVoucherDto,
 } from './application/dto/create-order.dto';
 import { generateOrderNumber, isOrderNumberConflict } from './order-number.util';
+import {
+  isCheckViolation,
+  isRecordNotFound,
+  isUniqueViolationOn,
+  NEW_CUSTOMERS_ONLY,
+  NEW_USER_VOUCHER_ALREADY_REDEEMED,
+  PROMO_COUNTER_WITHIN_MAX,
+  VOUCHER_LIMIT_REACHED,
+} from './voucher-errors.util';
 import { buildOutboxEvent } from '../../infrastructure/outbox/outbox-event.builder';
 import { PaymentInitiationService } from '../payments/gateway/payment-initiation.service';
 import { PaymentChannelRegistry } from '../payments/gateway/payment-channel.registry';
@@ -421,27 +430,35 @@ export class OrdersService {
     }
 
     if (voucher.maxUsageCount !== null && voucher.currentUsageCount >= voucher.maxUsageCount) {
-      throw new BadRequestException('Voucher usage limit has been reached');
+      throw new BadRequestException(VOUCHER_LIMIT_REACHED);
     }
 
     if (voucher.minimumOrderAmount > 0 && subtotal < voucher.minimumOrderAmount) {
       throw new BadRequestException(`Minimum order amount is Rp ${voucher.minimumOrderAmount.toLocaleString('id-ID')}`);
     }
 
+    // Regular vouchers (P1.2.2): the same user may reuse the voucher across orders;
+    // only the global quota above limits them. New User vouchers: ONE redemption per
+    // account across ALL New User promos, and only before any successful payment.
     if (voucher.isNewUserOnly) {
-      const completedOrders = await this.prisma.order.count({
-        where: { userId, status: OrderStatus.COMPLETED, deletedAt: null },
+      // Any successfully paid order disqualifies, whatever its later order status
+      // (PROCESSING, SHIPPED, DELIVERED, COMPLETED, even CANCELLED after payment).
+      // Unpaid cancelled / expired / failed orders do not.
+      const paidOrders = await this.prisma.order.count({
+        where: {
+          userId,
+          payment: { is: { OR: [{ status: { in: [PaymentStatus.PAID, PaymentStatus.REFUNDED] } }, { verifiedAt: { not: null } }] } },
+        },
       });
-      if (completedOrders > 0) {
-        throw new BadRequestException('Voucher is only available for new customers');
+      if (paidOrders > 0) {
+        throw new BadRequestException(NEW_CUSTOMERS_ONLY);
       }
-    }
-
-    const existingUsage = await this.prisma.voucherUsage.findFirst({
-      where: { voucherId: voucher.id, userId },
-    });
-    if (existingUsage) {
-      throw new BadRequestException('This voucher has already been used by your account');
+      // An active or consumed redemption of ANY New User promo. Re-checked by the
+      // unique NewUserVoucherRedemption.userId inside the checkout transaction.
+      const redemption = await this.prisma.newUserVoucherRedemption.findUnique({ where: { userId } });
+      if (redemption) {
+        throw new BadRequestException(NEW_USER_VOUCHER_ALREADY_REDEEMED);
+      }
     }
 
     // Configuration validity. A Phase 4 voucher carries its own product / shipping
@@ -1371,14 +1388,30 @@ export class OrdersService {
       }
 
       if (voucher) {
-        const voucherUpdate = voucher.maxUsageCount !== null
-          ? tx.promo.update({
-              where: { id: voucher.id, currentUsageCount: { lt: voucher.maxUsageCount } },
-              data: { currentUsageCount: { increment: 1 } },
-            })
-          : tx.promo.update({ where: { id: voucher.id }, data: { currentUsageCount: { increment: 1 } } });
-
-        await voucherUpdate;
+        // Reserve one unit of the global quota. The conditional update is atomic
+        // (row lock + re-evaluated predicate); the Promo_currentUsageCount_within_max
+        // CHECK is the backstop when an admin lowers maxUsageCount concurrently.
+        // Losing either race is the same friendly 400 as the up-front gate, and the
+        // throw rolls the whole order transaction back.
+        //
+        // The update also LOCKS the Promo row until commit and returns its CURRENT
+        // values. Admin classification changes lock the same row (AdminService
+        // .updatePromo), so the New User decision below is made on the row as it is
+        // under the lock - never on the snapshot read before the transaction.
+        let lockedPromo: Promo;
+        try {
+          lockedPromo = await (voucher.maxUsageCount !== null
+            ? tx.promo.update({
+                where: { id: voucher.id, currentUsageCount: { lt: voucher.maxUsageCount } },
+                data: { currentUsageCount: { increment: 1 } },
+              })
+            : tx.promo.update({ where: { id: voucher.id }, data: { currentUsageCount: { increment: 1 } } }));
+        } catch (err) {
+          if (isRecordNotFound(err) || isCheckViolation(err, PROMO_COUNTER_WITHIN_MAX)) {
+            throw new BadRequestException(VOUCHER_LIMIT_REACHED);
+          }
+          throw err;
+        }
 
         await tx.voucherUsage.create({
           data: {
@@ -1387,6 +1420,35 @@ export class OrdersService {
             orderId: createdOrder.id,
           },
         });
+
+        // New User voucher: the account's single lifetime redemption, reserved with
+        // the order. The unique userId makes two concurrent checkouts (same or
+        // different New User codes) resolve to exactly one winner.
+        if (lockedPromo.isNewUserOnly) {
+          // Eligibility re-checked under the lock: the up-front gate may have judged
+          // this promo as regular (admin reclassified it before any usage), and a
+          // paid order may have committed since. Any paid evidence disqualifies.
+          const paidOrders = await tx.order.count({
+            where: {
+              userId,
+              id: { not: createdOrder.id },
+              payment: { is: { OR: [{ status: { in: [PaymentStatus.PAID, PaymentStatus.REFUNDED] } }, { verifiedAt: { not: null } }] } },
+            },
+          });
+          if (paidOrders > 0) {
+            throw new BadRequestException(NEW_CUSTOMERS_ONLY);
+          }
+          try {
+            await tx.newUserVoucherRedemption.create({
+              data: { userId, promoId: voucher.id, orderId: createdOrder.id },
+            });
+          } catch (err) {
+            if (isUniqueViolationOn(err, 'userId')) {
+              throw new BadRequestException(NEW_USER_VOUCHER_ALREADY_REDEEMED);
+            }
+            throw err;
+          }
+        }
       }
 
       // Finalize the idempotency key in the SAME transaction as the order, so the

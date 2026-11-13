@@ -87,6 +87,7 @@ model User {
   favorites     Favorite[]
   auditLogs     AuditLog[]     @relation("AuditActor")
   voucherUsages VoucherUsage[]
+  newUserVoucherRedemption NewUserVoucherRedemption?
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
   deletedAt     DateTime?
@@ -509,29 +510,55 @@ model Promo {
   shippingMaxDiscountAmount  Int?
 
   usages    VoucherUsage[]
+  newUserRedemptions NewUserVoucherRedemption[]
   orders    Order[]
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
   deletedAt DateTime?
 
+  // Database CHECK constraints (migration SQL; Prisma does not model CHECKs):
+  //   Promo_currentUsageCount_nonneg      currentUsageCount >= 0
+  //   Promo_currentUsageCount_within_max  maxUsageCount IS NULL OR currentUsageCount <= maxUsageCount
   @@index([code])
   @@index([isActive])
   @@index([deletedAt])
 }
 
+/// One row per order that applied a voucher. Regular vouchers may be reused by
+/// the same user across orders, so (voucherId, userId) is NOT unique; an order
+/// carries at most one voucher (orderId stays unique). `releasedAt` marks usage
+/// released by an unpaid cancelled/expired/failed order; the row is kept.
 model VoucherUsage {
-  id        String   @id @default(uuid())
-  voucherId String
-  userId    String
-  orderId   String   @unique
-  voucher   Promo    @relation(fields: [voucherId], references: [id], onDelete: Cascade)
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now())
+  id         String    @id @default(uuid())
+  voucherId  String
+  userId     String
+  orderId    String    @unique
+  releasedAt DateTime?
+  voucher    Promo     @relation(fields: [voucherId], references: [id], onDelete: Cascade)
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  order      Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  createdAt  DateTime  @default(now())
 
-  @@unique([voucherId, userId])
+  @@index([voucherId, userId])
   @@index([userId, voucherId])
   @@index([createdAt])
+}
+
+/// The ONE New User voucher redemption a user may hold, across ALL New User
+/// promos, for the lifetime of the account (active reservation or consumed).
+/// Released (deleted) only when its order is cancelled/expires/fails unpaid;
+/// a paid order keeps it permanently. The VoucherUsage row remains the history.
+model NewUserVoucherRedemption {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  promoId   String
+  orderId   String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  promo     Promo    @relation(fields: [promoId], references: [id], onDelete: NoAction)
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: NoAction)
+  createdAt DateTime @default(now())
+
+  @@index([promoId])
 }
 
 model CartSession {
@@ -601,6 +628,7 @@ model Order {
   shipment                 Shipment?
   events                   OrderEvent[]
   voucherUsage             VoucherUsage?
+  newUserVoucherRedemption NewUserVoucherRedemption?
   reservations             InventoryReservation[]
   internalNotes            OrderNote[]
   invoiceTokens            OrderInvoiceToken[]

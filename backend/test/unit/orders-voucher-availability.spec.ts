@@ -45,15 +45,18 @@ describe('OrdersService voucher availability gate (Phase 4I)', () => {
   let service: OrdersService;
   let orderCount: jest.Mock;
   let voucherUsageFindFirst: jest.Mock;
+  let redemptionFindUnique: jest.Mock;
 
   // No voucher history and no completed orders: the usage checks pass unless a
   // test says otherwise, so a rejection can only come from the rule under test.
   beforeEach(() => {
     orderCount = jest.fn().mockResolvedValue(0);
     voucherUsageFindFirst = jest.fn().mockResolvedValue(null);
+    redemptionFindUnique = jest.fn().mockResolvedValue(null);
     const prisma = {
       order: { count: orderCount },
       voucherUsage: { findFirst: voucherUsageFindFirst },
+      newUserVoucherRedemption: { findUnique: redemptionFindUnique },
     };
     service = new OrdersService(prisma as any, {} as any, {} as any, {} as any);
   });
@@ -319,20 +322,43 @@ describe('OrdersService voucher availability gate (Phase 4I)', () => {
       ).rejects.toThrow('Voucher usage limit has been reached');
     });
 
-    it('18b. a voucher already used by this account is rejected', async () => {
+    // P1.2.2: regular vouchers are reusable by the same user; only the global quota limits them.
+    it('18b. a regular voucher already used by this account is accepted again', async () => {
       voucherUsageFindFirst.mockResolvedValue({ id: 'usage-1' });
-      await expect(assertAvailability(componentVoucher())).rejects.toThrow(
-        'This voucher has already been used by your account',
-      );
-      expect(voucherUsageFindFirst).toHaveBeenCalled();
+      await expect(assertAvailability(componentVoucher())).resolves.toBeUndefined();
+      // Neither per-user history nor the New User redemption is consulted for a regular voucher.
+      expect(voucherUsageFindFirst).not.toHaveBeenCalled();
+      expect(redemptionFindUnique).not.toHaveBeenCalled();
+      expect(orderCount).not.toHaveBeenCalled();
     });
 
-    it('18c. a new-user-only voucher is rejected for a returning customer', async () => {
+    it('18c. a new-user-only voucher is rejected once the customer has a successfully paid order', async () => {
       orderCount.mockResolvedValue(2);
       await expect(assertAvailability({ ...componentVoucher(), isNewUserOnly: true })).rejects.toThrow(
         'Voucher is only available for new customers',
       );
       expect(orderCount).toHaveBeenCalled();
+    });
+
+    it('18c-2. "paid" means payment evidence, whatever the order status - not COMPLETED orders', async () => {
+      await assertAvailability({ ...componentVoucher(), isNewUserOnly: true });
+      const where = orderCount.mock.calls[0][0].where;
+      expect(where.userId).toBe(USER);
+      // No order-status filter: PROCESSING, SHIPPED, DELIVERED and paid-then-cancelled all count.
+      expect(where).not.toHaveProperty('status');
+      // Unpaid cancelled / expired / failed orders carry no paid evidence, so they do not count.
+      expect(where.payment).toEqual({
+        is: { OR: [{ status: { in: ['PAID', 'REFUNDED'] } }, { verifiedAt: { not: null } }] },
+      });
+    });
+
+    it('18e. a new-user-only voucher is rejected when the account already holds ANY New User redemption', async () => {
+      // e.g. an active reservation or consumed redemption of a DIFFERENT New User code.
+      redemptionFindUnique.mockResolvedValue({ id: 'r1', userId: USER, promoId: 'another-new-user-promo' });
+      await expect(assertAvailability({ ...componentVoucher(), isNewUserOnly: true })).rejects.toThrow(
+        'A new customer voucher can only be used once per account',
+      );
+      expect(redemptionFindUnique).toHaveBeenCalledWith({ where: { userId: USER } });
     });
 
     it('18d. a new-user-only voucher is accepted for a first-time customer', async () => {

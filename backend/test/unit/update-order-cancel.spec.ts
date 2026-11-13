@@ -13,6 +13,11 @@ type Opts = {
 function buildTx(opts: Opts = {}) {
   const { orderCancel = 1, items = [{ productId: 'p1', quantity: 2 }], fail } = opts;
   const tx = {
+    // P1.2.3: cancelAndRestock locks the order's Payment row (unpaid here) and
+    // releases voucher usage; this order carries no voucher.
+    $queryRaw: jest.fn().mockResolvedValue([{ status: 'PENDING', verifiedAt: null }]),
+    voucherUsage: { findUnique: jest.fn().mockResolvedValue(null), updateMany: jest.fn() },
+    newUserVoucherRedemption: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
     order: {
       updateMany: jest.fn().mockResolvedValue({ count: orderCancel }),
       findUnique: jest.fn().mockResolvedValue(CANCELLED_ORDER),
@@ -102,6 +107,11 @@ describe('AdminService.updateOrderStatus(CANCELLED) — cancellation + restock',
 describe('OrderCancellationService restock fallback (F2)', () => {
   function buildCancelTx(reservationRowCount: number) {
     return {
+      // P1.2.3: cancelAndRestock locks the order's Payment row (unpaid here) and
+      // releases voucher usage; this order carries no voucher.
+      $queryRaw: jest.fn().mockResolvedValue([{ status: 'PENDING', verifiedAt: null }]),
+      voucherUsage: { findUnique: jest.fn().mockResolvedValue(null), updateMany: jest.fn() },
+      newUserVoucherRedemption: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
       order: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       orderEvent: { create: jest.fn().mockResolvedValue({}) },
       inventoryReservation: { count: jest.fn().mockResolvedValue(reservationRowCount) },
