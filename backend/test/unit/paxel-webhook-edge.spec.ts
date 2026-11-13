@@ -13,9 +13,12 @@ import { lookupProviderStatus } from '../../src/modules/shipment/shipment-status
 
 const ROOT = join(__dirname, '../../..');
 const NGINX_DIR = join(ROOT, 'ops/nginx');
-const STAGING_CONF = readFileSync(join(NGINX_DIR, 'mas-sular.conf'), 'utf8');
-const RUNBOOK = readFileSync(join(__dirname, '../../src/modules/shipment/paxel-webhook.RUNBOOK.md'), 'utf8');
-const SERVICE = readFileSync(join(__dirname, '../../src/modules/shipment/paxel-webhook.service.ts'), 'utf8');
+// Config and docs are read as text fixtures: line endings are a checkout detail (a
+// Windows checkout has CRLF), not part of what these assertions check.
+const readText = (path: string) => readFileSync(path, 'utf8').replace(/\r\n/g, '\n');
+const STAGING_CONF = readText(join(NGINX_DIR, 'mas-sular.conf'));
+const RUNBOOK = readText(join(__dirname, '../../src/modules/shipment/paxel-webhook.RUNBOOK.md'));
+const SERVICE = readText(join(__dirname, '../../src/modules/shipment/paxel-webhook.service.ts'));
 
 const PAXEL_NON_PRODUCTION_IP = '34.85.159.153';
 const PAXEL_PRODUCTION_IP = '34.126.76.148';
@@ -171,7 +174,7 @@ describe('this VPS nginx: Paxel webhook allowlist (TEMPORARY: staging + producti
 describe('production nginx: Paxel webhook allowlist', () => {
   const confs = readdirSync(NGINX_DIR).filter((f) => f.endsWith('.conf'));
   const productionServers = confs
-    .flatMap((f) => serverBlocks(readFileSync(join(NGINX_DIR, f), 'utf8')))
+    .flatMap((f) => serverBlocks(readText(join(NGINX_DIR, f))))
     .filter((s) => serverNames(s).some((n) => n !== '_' && n.includes('baksomassular.com') && !n.startsWith('staging-')));
 
   it('any production server block with the Paxel route allows 34.126.76.148; 34.85.159.153 only while the TEMPORARY coexistence exception is documented', () => {
