@@ -1,7 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { mkdtempSync, readdirSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { join, relative, isAbsolute, sep } from 'path';
 import {
   ALLOWED_IMAGE_EXTENSIONS,
   ALLOWED_IMAGE_MIME_TYPES,
@@ -157,10 +157,19 @@ describe('upload.util', () => {
     });
     it('receipts live OUTSIDE the publicly served directory', () => {
       process.env.UPLOAD_ROOT = '/srv/uploads';
+      // The directories are built with path.join, so the separator is the platform's
+      // (production is Linux: '/'). Compare the layout in '/' form on every platform.
+      const posix = (p: string) => p.split(sep).join('/');
       expect(uploadRoot()).toBe('/srv/uploads');
-      expect(publicUploadDir()).toBe('/srv/uploads/public');
-      expect(receiptUploadDir()).toBe('/srv/uploads/private/receipts');
+      expect(posix(publicUploadDir())).toBe('/srv/uploads/public');
+      expect(posix(receiptUploadDir())).toBe('/srv/uploads/private/receipts');
+      expect(publicUploadDir()).toBe(join('/srv/uploads', 'public'));
+      expect(receiptUploadDir()).toBe(join('/srv/uploads', 'private', 'receipts'));
       expect(receiptUploadDir().startsWith(publicUploadDir())).toBe(false);
+      // Path-aware too: walking from the public dir to the receipts dir must leave it.
+      const fromPublic = relative(publicUploadDir(), receiptUploadDir());
+      expect(fromPublic.split(sep)[0]).toBe('..');
+      expect(isAbsolute(fromPublic)).toBe(false);
     });
   });
 });
