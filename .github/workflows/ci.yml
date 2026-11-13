@@ -20,6 +20,10 @@ jobs:
       - run: pnpm --filter backend prisma:generate
       - run: pnpm lint
       - run: pnpm --filter backend test
+      # Type-checks src, prisma and test (jest only compiles the files it loads).
+      # Same command as jne-master-import.yml; needs the Prisma Client generated above.
+      - run: pnpm exec tsc --noEmit -p tsconfig.json
+        working-directory: backend
 
   # Unit tests of the two Next.js apps (node --test, no services, no network).
   # Separate job so a failure here never hides the backend result above.
