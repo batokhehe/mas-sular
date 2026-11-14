@@ -1,9 +1,30 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { PaymentMethod, Prisma, ReservationStatus } from '@prisma/client';
+import { PaymentMethod, PaymentStatus, Prisma, ReservationStatus } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { ListReservationsQueryDto } from './application/dto/inventory-reservation-query.dto';
 import { pageArgs, paginate } from '../../common/pagination/pagination';
 import { positiveInt } from '../../common/utils/number.util';
+import { InventoryCoverageError, InventoryCoverageShortfall } from './inventory-coverage.error';
+
+/**
+ * C1-a: payment states in which the customer may still pay (or an uploaded receipt
+ * is still awaiting verification). While the order's payment is in one of these,
+ * its reservations must stay RESERVED: expiring them would let a later settlement
+ * mark the payment PAID without deducting stock (audit finding H1). Mirrors
+ * EXPIRY_ELIGIBLE_STATUSES in PaymentSettlementService, which is kept separate to
+ * avoid a payments → inventory → payments import cycle.
+ */
+export const PAYMENT_AWAITING_STATUSES: PaymentStatus[] = [
+  PaymentStatus.PENDING,
+  PaymentStatus.WAITING_VERIFICATION,
+];
+
+/** Result of the post-commit coverage check (C1-a B guard). */
+export type CoverageResult =
+  /** The order has no reservation rows at all: a legacy order, checked as before. */
+  | { mode: 'LEGACY_NO_RESERVATIONS' }
+  /** Every ordered product is fully covered by COMMITTED reservations. */
+  | { mode: 'COVERED'; products: number };
 
 const ADMIN_INCLUDE = {
   order: { select: { id: true, orderNumber: true, user: { select: { id: true, name: true, email: true } } } },
@@ -183,6 +204,57 @@ export class InventoryReservationService {
   }
 
   /**
+   * C1-a B guard. Run INSIDE the settlement transaction, after commitForOrder:
+   * verifies that the order's COMMITTED reservations cover every ordered product
+   * in full. Quantities are compared per product (order items for the same product
+   * are summed, matching reserveForOrder's one-row-per-product aggregation), and
+   * the check is the same for the legacy Product.stock and the per-outlet
+   * ProductInventory models because it reads only the reservation ledger.
+   *
+   * - No reservation rows at all → a legacy order (created before reservations
+   *   existed, or without the inventory module): returned as-is, behaviour
+   *   unchanged.
+   * - Reservation rows exist but any product is under- or over-committed
+   *   (including zero committed because every row EXPIRED/RELEASED) → throws
+   *   InventoryCoverageError, which aborts and rolls back the whole settlement.
+   */
+  async assertCommittedCoverage(tx: Prisma.TransactionClient, orderId: string): Promise<CoverageResult> {
+    const reservations = await tx.inventoryReservation.findMany({
+      where: { orderId },
+      select: { productId: true, status: true, committedQty: true },
+    });
+    if (reservations.length === 0) return { mode: 'LEGACY_NO_RESERVATIONS' };
+
+    const items = await tx.orderItem.findMany({
+      where: { orderId },
+      select: { productId: true, quantity: true },
+    });
+
+    const required = new Map<string, number>();
+    for (const item of items) {
+      required.set(item.productId, (required.get(item.productId) ?? 0) + item.quantity);
+    }
+    const committed = new Map<string, number>();
+    for (const r of reservations) {
+      if (r.status !== ReservationStatus.COMMITTED) continue;
+      committed.set(r.productId, (committed.get(r.productId) ?? 0) + r.committedQty);
+    }
+
+    const shortfalls: InventoryCoverageShortfall[] = [];
+    const productIds = [...new Set([...required.keys(), ...committed.keys()])].sort();
+    for (const productId of productIds) {
+      const need = required.get(productId) ?? 0;
+      const have = committed.get(productId) ?? 0;
+      if (need !== have) shortfalls.push({ productId, required: need, committed: have });
+    }
+    if (shortfalls.length > 0) {
+      this.logger.warn(`order ${orderId} settlement blocked: committed reservations do not cover the order (${shortfalls.length} product(s))`);
+      throw new InventoryCoverageError(orderId, shortfalls);
+    }
+    return { mode: 'COVERED', products: required.size };
+  }
+
+  /**
    * Per-outlet inventory row locked FOR UPDATE (C5) — mirrors reserveForOrder's
    * locking so `available` is always recomputed from current, serialized values
    * (never a stale snapshot). Null → legacy Product.stock path.
@@ -257,9 +329,38 @@ export class InventoryReservationService {
     return { handled: reservations.length > 0 };
   }
 
-  /** Worker: CAS-expire a single RESERVED reservation (concurrency-safe). */
+  /**
+   * Worker: CAS-expire a single RESERVED reservation (concurrency-safe).
+   *
+   * C1-a Option A: the order's Payment row is locked FOR UPDATE BEFORE the
+   * reservation is touched. That is the same first lock settle(), expire() and
+   * cancelAndRestock() take, so this transaction and a settlement for the same
+   * order are strictly serialized:
+   * - payment still PENDING / WAITING_VERIFICATION → the customer can still pay,
+   *   so the reservation is left RESERVED (returns false). Payment expiry, not this
+   *   worker, owns the release for such orders.
+   * - payment terminal (PAID / FAILED / EXPIRED / REFUNDED), soft-deleted, or no
+   *   payment at all (orphan / legacy) → the existing CAS expiry runs unchanged, as
+   *   the safety net.
+   * Lock order: Payment → InventoryReservation → ProductInventory, a prefix-
+   * compatible subset of settlement's Payment → Order → InventoryReservation →
+   * ProductInventory/Product, so no new lock cycle is introduced.
+   */
   async expireReservation(id: string): Promise<boolean> {
     return this.prisma.$transaction(async (tx) => {
+      // Lock ONLY the payment row (FOR UPDATE OF p), found through the reservation's
+      // immutable orderId. No row → orphan reservation (no payment): proceed.
+      const payments = await tx.$queryRaw<Array<{ status: PaymentStatus; deletedAt: Date | null }>>(
+        Prisma.sql`SELECT p.status, p."deletedAt" FROM "Payment" p
+                   JOIN "InventoryReservation" r ON r."orderId" = p."orderId"
+                   WHERE r.id = ${id}
+                   FOR UPDATE OF p`,
+      );
+      const payment = payments[0];
+      if (payment && !payment.deletedAt && PAYMENT_AWAITING_STATUSES.includes(payment.status)) {
+        return false; // still payable: keep the stock held for it
+      }
+
       const flip = await tx.inventoryReservation.updateMany({
         where: { id, status: ReservationStatus.RESERVED },
         data: { status: ReservationStatus.EXPIRED },

@@ -53,7 +53,11 @@ suite('voucher lifecycle on PostgreSQL (P1.2.3)', () => {
     }
   }
   /** Settlement whose transaction stays open after the payment flip + order lock (via commitForOrder). */
-  const holdingInventory = { commitForOrder: async (tx: Prisma.TransactionClient) => (await sleepIn(tx), 0) };
+  const holdingInventory = {
+    commitForOrder: async (tx: Prisma.TransactionClient) => (await sleepIn(tx), 0),
+    // C1-a B guard: stubbed with the inventory double — coverage is not under test here.
+    assertCommittedCoverage: async () => ({ mode: 'LEGACY_NO_RESERVATIONS' as const }),
+  };
 
   type Seed = { userId: string; orderId: string; paymentId: string; promoId: string; productId: string };
 

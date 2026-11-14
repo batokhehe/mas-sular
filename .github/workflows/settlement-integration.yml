@@ -1,0 +1,69 @@
+name: Settlement integration
+
+# Payment settlement / inventory reservation suites against REAL PostgreSQL 16 and
+# RabbitMQ (Testcontainers, thrown away with the job). ci.yml does not run these.
+#
+# INFORMATIONAL: not a required check. It becomes a candidate for branch protection
+# only after it has been observed green on pull requests.
+#
+# Scope: the C1-a coverage suite plus the existing settlement, gateway-concurrency
+# and inventory-concurrency suites. Path filter is the whole backend source because
+# the shared integration world (test/integration/world.ts) boots the outbox,
+# consumers, lifecycle worker, admin and payments services.
+on:
+  pull_request:
+    paths:
+      - 'backend/src/**'
+      - 'backend/prisma/schema.prisma'
+      - 'backend/prisma/migrations/**'
+      - 'backend/prisma.config.ts'
+      - 'backend/package.json'
+      - 'backend/tsconfig.json'
+      - 'package.json'
+      - 'pnpm-workspace.yaml'
+      - 'backend/test/integration/world.ts'
+      - 'backend/test/integration/jest.integration.config.js'
+      - 'backend/test/integration/c1a-settlement-coverage.int-spec.ts'
+      - 'backend/test/integration/payment-settlement.int-spec.ts'
+      - 'backend/test/integration/payment-gateway-concurrency.int-spec.ts'
+      - 'backend/test/integration/inventory-concurrency.int-spec.ts'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/settlement-integration.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  settlement-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v5   # version comes from packageManager in package.json
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # pnpm 10 skips dependency build scripts, so @prisma/client is not generated on install.
+      - run: pnpm --filter backend prisma:generate
+      # Pull the world's images up front so a cold registry pull is not charged to
+      # a spec's beforeAll timeout. Same tags as test/integration/world.ts.
+      - run: docker pull postgres:16-alpine && docker pull rabbitmq:3.13-management
+      # One Jest process, files serially (the config already pins maxWorkers=1).
+      # Each spec file boots its own disposable world (Jest isolates modules per
+      # file); most of these specs never call closeWorld(), so --forceExit ends the
+      # process once the run is complete instead of waiting on their open
+      # Prisma / AMQP handles. Test results are unaffected.
+      - run: >-
+          pnpm exec jest --config test/integration/jest.integration.config.js --runInBand --forceExit
+          test/integration/c1a-settlement-coverage
+          test/integration/payment-settlement
+          test/integration/payment-gateway-concurrency
+          test/integration/inventory-concurrency
+        working-directory: backend
+      # Testcontainers' reaper (Ryuk) removes these when the process exits; this is
+      # the belt-and-braces cleanup, also after a failure or timeout.
+      - if: always()
+        run: docker ps -aq --filter label=org.testcontainers=true | xargs -r docker rm -f

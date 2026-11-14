@@ -161,6 +161,15 @@ export class PaymentSettlementService {
       let committed = 0;
       if (this.inventory) {
         committed = await this.inventory.commitForOrder(tx, payment.orderId);
+        // C1-a B guard: the order's COMMITTED reservations must cover every ordered
+        // quantity. commitForOrder silently skips rows that already left RESERVED
+        // (e.g. EXPIRED), so without this check a late settlement could mark the
+        // payment PAID with no stock deducted (H1). A shortfall throws
+        // InventoryCoverageError and rolls back EVERYTHING above — payment flip,
+        // order transition, reservation commits — and nothing below (ledger,
+        // audit, payment.paid, shipment) ever runs. Orders with no reservation
+        // rows at all (legacy) are unaffected.
+        await this.inventory.assertCommittedCoverage(tx, payment.orderId);
       }
 
       // Gateway ledger, in the SAME transaction (§5). CAS-guarded on a non-terminal
@@ -340,6 +349,15 @@ export class PaymentSettlementService {
     }, { timeout: 10000 });
 
     return { result: 'APPLIED', payment: updated };
+  }
+
+  /**
+   * C1-a: plain read of a payment's current status and order, used AFTER a
+   * transition was refused (and rolled back) to tell a genuine exception apart
+   * from a lost race against a concurrent settle of the same payment.
+   */
+  async currentState(paymentId: string): Promise<{ status: PaymentStatus; orderId: string } | null> {
+    return this.prisma.payment.findUnique({ where: { id: paymentId }, select: { status: true, orderId: true } });
   }
 
   /** Gateway ledger snapshot, inside whichever business transaction is running. */
