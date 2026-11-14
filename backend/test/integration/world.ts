@@ -255,11 +255,12 @@ export async function checkout(world: IntegrationWorld): Promise<{ scenario: See
       eventName: 'order.created',
       exchange: 'orders',
       routingKey: 'order.created',
-      // Real checkout issues a single-use upload token for BANK_TRANSFER/QRIS and
-      // rides its URL along in order.created (orders.service.ts). Omitting it here
-      // made the fixture unfaithful: the consumer used to enqueue a transfer row
-      // that could never be built ("missing uploadToken") and was doomed to
-      // permanently FAIL — which is exactly what was observed on the dev database.
+      // S1 phase 2: real checkout no longer mints an upload token and order.created
+      // carries no link — the notification sender mints a fresh token right before
+      // WhatsApp delivery (UploadLinkBinder) and stores only its hash. The
+      // `uploadUrl` below is deliberately the PRE-S1 event shape (as a message still
+      // sitting in a retry queue or DLQ would look), so end-to-end runs keep proving
+      // the consumer ignores it and never copies it into NotificationOutbox.
       payload: {
         orderId: scenario.order.id,
         orderNumber: scenario.order.orderNumber,

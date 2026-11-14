@@ -217,7 +217,7 @@ describe('OrdersService voucher discount persistence (Phase 4C/4G.1)', () => {
     expect(paymentCreate.method).toBe(PaymentMethod.BANK_TRANSFER);
     expect(paymentCreate.status).toBe('PENDING');
 
-    // Upload token issued (BANK_TRANSFER path) using tx and created payment id
-    expect(uploadTokens.issue).toHaveBeenCalledWith(capturedTx, 'pay1');
+    // S1: checkout no longer mints an upload token (the notification sender does).
+    expect(uploadTokens.issue).not.toHaveBeenCalled();
   });
 });

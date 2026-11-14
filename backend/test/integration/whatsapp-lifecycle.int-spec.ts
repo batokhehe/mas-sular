@@ -20,6 +20,7 @@ import { ShipmentService } from '../../src/modules/shipment/shipment.service'
 import { TemplateRegistry } from '../../src/infrastructure/notifications/template-registry'
 import { NotificationMessageBuilder } from '../../src/infrastructure/notifications/notification-message.builder'
 import { QontakWhatsAppProvider } from '../../src/infrastructure/notifications/qontak-whatsapp.provider'
+import { UploadLinkBinder } from '../../src/infrastructure/notifications/upload-link.binder'
 import {
   NotificationDeliveryGate,
   NotificationBlockedError,
@@ -116,7 +117,14 @@ describe('WA lifecycle (real DB, stubbed Qontak)', () => {
     )
   }
 
-  /** Build the persisted row and send it through the real provider; capture the body. */
+  /** Raw upload token bound by the most recent sendRow (S1: minted at send time). */
+  let lastBoundToken: string | undefined
+
+  /**
+   * Build the persisted row and send it through the real provider; capture the body.
+   * Same order as NotificationSenderWorker: build → bind the upload link (real
+   * UploadLinkBinder + real PaymentUploadTokenService against the real DB) → send.
+   */
   async function sendRow(row: NotificationOutbox): Promise<QontakBody> {
     const builder = new NotificationMessageBuilder(
       { getActiveAccount: async () => {
@@ -125,7 +133,11 @@ describe('WA lifecycle (real DB, stubbed Qontak)', () => {
       } } as never,
       registry,
     )
-    const message = await builder.build(row)
+    const built = await builder.build(row)
+    const message = built.uploadLinkFor
+      ? await new UploadLinkBinder(world.prisma, world.uploadTokens).bind(built)
+      : built
+    lastBoundToken = (message.variables as { uploadToken?: string }).uploadToken || undefined
     let captured: QontakBody | undefined
     const provider = new QontakWhatsAppProvider(
       { baseUrl: 'https://qontak.invalid', apiToken: 't', channelIntegrationId: 'c', qrisImageUrl: TPL.QONTAK_QRIS_IMAGE_URL, timeoutMs: 1000, maxRetry: 0 } as never,
@@ -163,17 +175,20 @@ describe('WA lifecycle (real DB, stubbed Qontak)', () => {
     it('produces the customer invoice exactly per contract', async () => {
       const { order } = await seedOrder()
       await ensurePaymentAccount()
-      const token = 'b'.repeat(64)
       const msgId = randomUUID() // 36 chars, exactly as the relay emits
 
+      // S1 phase 2: order.created carries no upload link.
       await consumerFor().process(msgId, {
         name: 'order.created',
-        payload: { orderId: order.id, orderNumber: order.orderNumber, totalPrice: 154378, uploadUrl: `http://x/payments/upload/${token}` },
+        payload: { orderId: order.id, orderNumber: order.orderNumber, totalPrice: 154378 },
       })
 
       const [row] = await rowsFor(order.id, 'order.transfer')
       expect(row).toBeDefined()
       expect(row.recipient).toBe(CUSTOMER_PHONE)
+      // The persisted row identifies the payment only — no token, no link.
+      expect(row.payload).toMatchObject({ orderId: order.id, paymentId: order.payment!.id })
+      expect(JSON.stringify(row.payload)).not.toMatch(/uploadToken|uploadUrl/)
 
       const body = await sendRow(row)
       expect(body.message_template_id).toBe(TPL.QONTAK_INVOICE_TEMPLATE_ID)
@@ -195,9 +210,21 @@ describe('WA lifecycle (real DB, stubbed Qontak)', () => {
           { key: 'filename', value: 'qris-mas-sular.jpeg' },
         ],
       })
-      // CTA carries the RAW upload token, never the order id, never a full URL.
-      expect(body.parameters.buttons).toEqual([{ index: '0', type: 'url', value: token }])
+      // CTA carries the RAW upload token minted for THIS send, never the order id,
+      // never a full URL.
+      const minted = lastBoundToken!
+      expect(minted).toMatch(/^[0-9a-f]{64}$/)
+      expect(body.parameters.buttons).toEqual([{ index: '0', type: 'url', value: minted }])
       expect(body.parameters.buttons![0].value).not.toBe(order.id)
+      expect(body.parameters.buttons![0].value).not.toContain('http')
+      // Only its SHA-256 hash is stored, for this order's payment, unused, 72h lifetime.
+      const stored = await world.prisma.paymentUploadToken.findUnique({ where: { token: world.uploadTokens.hash(minted) } })
+      expect(stored).toMatchObject({ paymentId: order.payment!.id, usedAt: null })
+      expect(stored!.expiresAt.getTime()).toBeGreaterThan(Date.now())
+      expect(await world.prisma.paymentUploadToken.count({ where: { token: minted } })).toBe(0)
+      // The outbox row was not rewritten with the token.
+      const [after] = await rowsFor(order.id, 'order.transfer')
+      expect(JSON.stringify(after)).not.toContain(minted)
     })
 
     it('legacy QRIS shares the invoice template without the image header', async () => {

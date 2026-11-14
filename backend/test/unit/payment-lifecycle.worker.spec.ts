@@ -111,7 +111,7 @@ describe('PaymentLifecycleWorker — expiry', () => {
 });
 
 describe('PaymentLifecycleWorker — reminders', () => {
-  it('first reminder: claims the slot, mints a fresh token, emits a payment.reminder event', async () => {
+  it('first reminder: claims the slot and emits a payment.reminder event that carries no upload token or link (S1)', async () => {
     const { worker, tx, uploadTokens, metrics } = build();
 
     const result = await worker.sendReminder(payment() as any, 'first');
@@ -121,22 +121,23 @@ describe('PaymentLifecycleWorker — reminders', () => {
       where: { id: 'pay-1', status: { in: ['PENDING', 'WAITING_VERIFICATION'] }, firstReminderAt: null },
       data: { firstReminderAt: expect.any(Date) },
     });
-    expect(uploadTokens.issue).toHaveBeenCalledWith(tx, 'pay-1'); // fresh token reissue
+    // S1: no token at reminder time — a link, when delivered, is minted by the sender.
+    expect(uploadTokens.issue).not.toHaveBeenCalled();
     expect(tx.outboxEvent.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         eventName: 'payment.reminder',
         routingKey: 'payment.reminder',
-        payload: expect.objectContaining({
+        payload: {
           paymentId: 'pay-1',
           orderId: 'order-1',
           stage: 'first',
           paymentMethod: 'BANK_TRANSFER',
           amount: 50000,
-          uploadUrl: 'https://app/payments/upload/raw',
-        }),
+        },
         metadata: expect.objectContaining({ source: 'payment.lifecycle.reminder' }),
       }),
     });
+    expect(JSON.stringify(tx.outboxEvent.create.mock.calls)).not.toMatch(/uploadUrl|uploadToken|\/payment\/|\/payments\/upload\//);
     expect(metrics.reminder).toHaveBeenCalledWith('first');
   });
 

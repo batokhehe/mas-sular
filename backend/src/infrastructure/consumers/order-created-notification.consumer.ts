@@ -182,15 +182,15 @@ export class OrderCreatedNotificationConsumer implements OnApplicationBootstrap,
    */
   private customerTemplateFor(
     method: PaymentMethod,
-    uploadToken: string | null,
+    paymentId: string | null,
   ): 'order.transfer' | 'order.cod' | null {
     if (method === PaymentMethod.COD) return 'order.cod';
     if (method === PaymentMethod.GATEWAY) {
       this.logger.log(`order.created: GATEWAY order — no transfer instruction message (hosted payment page)`);
       return null;
     }
-    if (!uploadToken) {
-      this.logger.warn(`order.created: ${method} order has no upload token; skipping the customer invoice message`);
+    if (!paymentId) {
+      this.logger.warn(`order.created: ${method} order has no payment; skipping the customer invoice message`);
       return null;
     }
     return 'order.transfer';
@@ -214,8 +214,9 @@ export class OrderCreatedNotificationConsumer implements OnApplicationBootstrap,
       include: {
         user: { select: { email: true, name: true, phone: true } },
         address: { select: { phone: true } },
-        // Payment state for the internal alert's "Pembayaran" line.
-        payment: { select: { status: true } },
+        // Payment state for the internal alert's "Pembayaran" line; the id
+        // identifies the payment the sender mints the upload link for (S1).
+        payment: { select: { id: true, status: true } },
       },
     });
     if (!order || !order.user) {
@@ -227,8 +228,12 @@ export class OrderCreatedNotificationConsumer implements OnApplicationBootstrap,
     // onboarding/checkout); fall back to User.phone (usually null for OAuth users).
     const phone = order.address?.phone ?? order.user.phone ?? null;
 
-    // Channel = WHATSAPP; template chosen by payment method. The raw upload token is
-    // the last path segment of the emitted uploadUrl — never the stored hash.
+    // Channel = WHATSAPP; template chosen by payment method.
+    //
+    // S1: the row stores ONLY the payment id. The upload token is minted by the
+    // sender right before delivery and is never persisted; an `uploadUrl` still
+    // present on a pre-S1 order.created message (retry queue, DLQ redrive) is
+    // deliberately ignored and never copied into NotificationOutbox.
     //
     // 61AG.3.28: the selection used to be `isCod ? cod : transfer`, which sent
     // GATEWAY orders down the bank-transfer invoice. That template needs an
@@ -238,9 +243,8 @@ export class OrderCreatedNotificationConsumer implements OnApplicationBootstrap,
     // returns paymentInstruction and the customer is redirected to
     // /payment/gateway/:paymentId), so a bank-transfer instruction message is not
     // merely unsendable there — it would be wrong.
-    const uploadUrl = event.payload?.uploadUrl as string | undefined;
-    const uploadToken = uploadUrl ? (uploadUrl.split('/').pop() ?? null) : null;
-    const customerTemplate = this.customerTemplateFor(order.paymentMethod, uploadToken);
+    const paymentId = order.payment?.id ?? null;
+    const customerTemplate = this.customerTemplateFor(order.paymentMethod, paymentId);
 
     try {
       await this.prisma.$transaction(async (tx) => {
@@ -258,7 +262,7 @@ export class OrderCreatedNotificationConsumer implements OnApplicationBootstrap,
                 customerPhone: phone,
                 customerEmail: order.user!.email,
                 paymentMethod: order.paymentMethod,
-                uploadToken,
+                paymentId,
               },
               sourceMessageId: messageId,
             },

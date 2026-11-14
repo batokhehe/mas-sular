@@ -8,6 +8,7 @@ import { TemplateRenderer } from '../notifications/template-renderer';
 import { RedriveService } from './redrive.service';
 import { extractRelated } from './queue-center.util';
 import { num } from '../../common/utils/number.util';
+import { redactCapabilitySecrets, redactErrorText, redactRenderedText } from '../../common/logging/redact';
 
 const CACHE_KEY = 'admin:notification-center';
 const CACHE_TTL_MS = 30_000;
@@ -119,7 +120,7 @@ export class NotificationCenterService {
       byChannel: byChannel.map((r) => ({ key: r.channel, count: r._count._all })),
       trend,
       byHour,
-      failures: failures.map((f) => ({ ...f, createdAt: f.createdAt.toISOString() })),
+      failures: failures.map((f) => ({ ...f, lastError: redactErrorText(f.lastError), createdAt: f.createdAt.toISOString() })),
       generatedAt: now.toISOString(),
     };
   }
@@ -254,7 +255,7 @@ export class NotificationCenterService {
       attempts: r.attempts,
       sentAt: iso(r.sentAt),
       deliverySec: r.sentAt ? Math.round((r.sentAt.getTime() - r.createdAt.getTime()) / 1000) : null,
-      lastError: r.lastError,
+      lastError: redactErrorText(r.lastError),
       providerMessageId: r.providerMessageId,
       related: extractRelated(r.payload),
     }));
@@ -320,7 +321,7 @@ export class NotificationCenterService {
   /** Display subject via the existing renderer (null when the template is WhatsApp-only/unknown). */
   private subjectOf(template: string, payload: unknown): string | null {
     try {
-      return this.renderer.render(template, (payload ?? {}) as Record<string, unknown>).subject;
+      return redactRenderedText(this.renderer.render(template, (payload ?? {}) as Record<string, unknown>).subject, payload);
     } catch {
       return null;
     }
@@ -333,13 +334,18 @@ export class NotificationCenterService {
     if (!row) throw new NotFoundException('Notification not found');
     let rendered: { subject: string; body: string } | null = null;
     try {
-      rendered = this.renderer.render(row.template, (row.payload ?? {}) as Record<string, unknown>);
+      // Rendered from the stored payload (the real link), then scrubbed for display.
+      const raw = this.renderer.render(row.template, (row.payload ?? {}) as Record<string, unknown>);
+      rendered = { subject: redactRenderedText(raw.subject, row.payload), body: redactRenderedText(raw.body, row.payload) };
     } catch {
       rendered = null;
     }
     return {
       notification: {
         ...row,
+        // S1: never return the payment-upload token/link (the stored row is untouched).
+        payload: redactCapabilitySecrets(row.payload),
+        lastError: redactErrorText(row.lastError),
         createdAt: row.createdAt.toISOString(),
         sentAt: iso(row.sentAt),
         nextAttemptAt: iso(row.nextAttemptAt),
@@ -348,13 +354,13 @@ export class NotificationCenterService {
       },
       rendered,
       // Provider response surface: what the pipeline durably records per send.
-      providerResponse: { providerMessageId: row.providerMessageId, lastError: row.lastError },
+      providerResponse: { providerMessageId: row.providerMessageId, lastError: redactErrorText(row.lastError) },
       retryHistory: {
         attempts: row.attempts,
         nextAttemptAt: iso(row.nextAttemptAt),
         lockedBy: row.lockedBy,
         lockedUntil: iso(row.lockedUntil),
-        lastError: row.lastError,
+        lastError: redactErrorText(row.lastError),
         sentAt: iso(row.sentAt),
       },
       related: extractRelated(row.payload),

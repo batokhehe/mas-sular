@@ -101,6 +101,9 @@ export class OrdersService {
     private readonly prisma: PrismaService,
     private readonly shipping: ShippingService,
     private readonly idempotency: IdempotencyService,
+    // S1: checkout no longer mints upload tokens (the notification sender does,
+    // at send time). Kept in the signature so the existing positional
+    // construction across the checkout test suite stays valid.
     private readonly uploadTokens: PaymentUploadTokenService,
     // Optional so existing unit tests that construct OrdersService with 4 args keep
     // working; when absent (tests), coverage enforcement is skipped (legacy flow).
@@ -1464,15 +1467,10 @@ export class OrdersService {
         });
       }
 
-      // For non-COD methods, issue a single-use upload token in the SAME tx so the
-      // customer can submit a receipt via a link without logging in. The upload URL
-      // rides along in order.created so the notification can include it. COD has no
-      // receipt step, so no token is issued.
-      let uploadUrl: string | undefined;
-      if (paymentMethod === PaymentMethod.BANK_TRANSFER || paymentMethod === PaymentMethod.QRIS) {
-        const issued = await this.uploadTokens.issue(tx, createdOrder.payment!.id);
-        uploadUrl = issued.uploadUrl;
-      }
+      // S1: no upload token is minted here any more, and order.created carries no
+      // upload link. The customer's link for BANK_TRANSFER/QRIS is minted by the
+      // notification sender right before WhatsApp delivery (UploadLinkBinder), so
+      // the raw token never reaches OutboxEvent, RabbitMQ or NotificationOutbox.
 
       // Emit order.created via the transactional outbox, in the SAME transaction as
       // the order. It is the last statement so a superseded finalize (above) rolls
@@ -1491,7 +1489,6 @@ export class OrdersService {
             // (transfer total). Order.totalPrice is now business-only, so source this
             // from the payment to keep the customer-facing amount unchanged.
             totalPrice: createdOrder.payment!.amount,
-            ...(uploadUrl ? { uploadUrl } : {}),
           },
           metadata: { source: 'orders.checkout' },
         }),

@@ -10,6 +10,7 @@ import {
 } from './notification-provider';
 import { TemplateRegistry } from './template-registry';
 import { TemplateRenderer } from './template-renderer';
+import { scrubExactSecrets } from '../../common/logging/redact';
 
 const RESEND_ENDPOINT = 'https://api.resend.com/emails';
 
@@ -96,10 +97,10 @@ export class EmailNotificationProvider implements NotificationProvider {
       throw new TransientSendError(`email request failed: ${err instanceof Error ? err.message : String(err)}`);
     }
 
-    return this.classify(res);
+    return this.classify(res, (message.variables as { uploadToken?: string }).uploadToken);
   }
 
-  private async classify(res: ResendHttpResponse): Promise<NotificationSendResult> {
+  private async classify(res: ResendHttpResponse, uploadToken?: string): Promise<NotificationSendResult> {
     const text = await res.text().catch(() => '');
 
     if (res.status >= 200 && res.status < 300) {
@@ -108,7 +109,9 @@ export class EmailNotificationProvider implements NotificationProvider {
       return { providerMessageId: providerMessageId ?? '' };
     }
 
-    const reason = parseReason(text);
+    // S1: scrub a bound upload token from the FULL body before parseReason
+    // truncates it, so no partial token can survive into the error message.
+    const reason = parseReason(scrubExactSecrets(text, [uploadToken]));
 
     if (res.status === 429) {
       throw new TransientSendError(`rate limited: ${reason}`, parseRetryAfterMs(res.headers.get('retry-after')));

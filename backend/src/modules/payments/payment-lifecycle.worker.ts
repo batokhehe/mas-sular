@@ -34,6 +34,8 @@ export class PaymentLifecycleWorker implements OnApplicationBootstrap, OnModuleD
 
   constructor(
     private readonly prisma: PrismaService,
+    // S1: reminders no longer mint upload tokens (the notification sender does, at
+    // send time). Kept so positional construction (tests, integration world) stays valid.
     private readonly uploadTokens: PaymentUploadTokenService,
     private readonly cancellation: OrderCancellationService,
     private readonly metrics: PaymentLifecycleMetrics,
@@ -240,10 +242,10 @@ export class PaymentLifecycleWorker implements OnApplicationBootstrap, OnModuleD
             });
         if (cas.count !== 1) return false;
 
-        // Only the SHA-256 hash of a token is stored, so a prior token's raw secret
-        // cannot be recovered — always mint a fresh single-use token for the link.
-        const issued = await this.uploadTokens.issue(tx, payment.id);
-
+        // S1: no upload token is minted here and the event carries no upload link.
+        // A notification that needs the link gets a fresh token minted by the
+        // sender right before delivery, so the raw token is never persisted in
+        // OutboxEvent, RabbitMQ or NotificationOutbox.
         await tx.outboxEvent.create({
           data: buildOutboxEvent({
             aggregateType: 'payment',
@@ -257,7 +259,6 @@ export class PaymentLifecycleWorker implements OnApplicationBootstrap, OnModuleD
               stage,
               paymentMethod: payment.method,
               amount: payment.amount,
-              uploadUrl: issued.uploadUrl,
             },
             metadata: { source: 'payment.lifecycle.reminder' },
             occurredAt: new Date(this.nowMs()),

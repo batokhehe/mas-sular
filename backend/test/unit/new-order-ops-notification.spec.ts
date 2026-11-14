@@ -32,7 +32,7 @@ function order(over: Record<string, unknown> = {}) {
     shippingServiceName: 'Paxel Instant',
     user: { name: 'Budi', email: 'budi@test.com', phone: '628123456789' },
     address: { phone: '628123456789' },
-    payment: { status: 'PENDING' },
+    payment: { id: 'pay-1', status: 'PENDING' },
     ...over,
   };
 }

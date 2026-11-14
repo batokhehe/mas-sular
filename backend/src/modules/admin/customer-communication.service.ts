@@ -8,6 +8,7 @@ import { extractRelated } from '../../infrastructure/lifecycle/queue-center.util
 import { ManualTemplate, MANUAL_TEMPLATES } from '../../infrastructure/notifications/notification-message';
 import { TemplateRegistry } from '../../infrastructure/notifications/template-registry';
 import { TemplateRenderer } from '../../infrastructure/notifications/template-renderer';
+import { redactErrorText, redactRenderedText } from '../../common/logging/redact';
 
 const CONVERSATION_LIMIT = 200;
 const COMPLETED_STATUSES: OrderStatus[] = [OrderStatus.COMPLETED, OrderStatus.DELIVERED];
@@ -122,7 +123,7 @@ export class CustomerCommunicationService {
       template: r.template,
       recipient: r.recipient,
       attempts: r.attempts,
-      lastError: r.lastError,
+      lastError: redactErrorText(r.lastError),
       providerMessageId: r.providerMessageId,
       deliverySec: r.sentAt ? Math.round((r.sentAt.getTime() - r.createdAt.getTime()) / 1000) : null,
       subject: this.subjectOf(r.template, r.payload),
@@ -137,7 +138,7 @@ export class CustomerCommunicationService {
 
   private subjectOf(template: string, payload: unknown): string | null {
     try {
-      return this.renderer.render(template, (payload ?? {}) as Record<string, unknown>).subject;
+      return redactRenderedText(this.renderer.render(template, (payload ?? {}) as Record<string, unknown>).subject, payload);
     } catch {
       return null;
     }

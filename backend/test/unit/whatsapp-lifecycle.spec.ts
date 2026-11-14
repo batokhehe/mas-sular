@@ -22,6 +22,7 @@ import {
   loadNotificationDeliveryConfig,
 } from '../../src/infrastructure/notifications/notification-delivery.gate';
 import { TransientSendError } from '../../src/infrastructure/notifications/notification-provider';
+import { UploadLinkBinder } from '../../src/infrastructure/notifications/upload-link.binder';
 
 // ---------------------------------------------------------------- fixtures --
 
@@ -30,6 +31,7 @@ const ORDER_NO = 'BMS-20260904-XYZ';
 const CUSTOMER_PHONE = '628123456789';
 const ADMIN_PHONE = '628990000111';
 const UPLOAD_TOKEN = 'a'.repeat(64); // 256-bit hex, as PaymentUploadTokenService issues
+const PAYMENT_ID = 'pay-uuid-1';
 const QRIS_IMAGE_URL = 'https://ecommerce.baksomassular.com/qris-mas-sular.jpeg';
 
 const TPL = {
@@ -99,7 +101,14 @@ async function capture(row: NotificationOutbox, reg = registry()) {
     { getActiveAccount: async () => ACCOUNT } as never,
     reg,
   );
-  const message = await builder.build(row);
+  const built = await builder.build(row);
+  // S1: as the sender does — bind the upload link right before delivery, with the
+  // real binder; only the token minting is stubbed (it returns the fixture token).
+  const binder = new UploadLinkBinder(
+    { payment: { findUnique: async () => ({ id: PAYMENT_ID }) } } as never,
+    { issue: async () => ({ rawToken: UPLOAD_TOKEN, uploadUrl: `https://x/payment/${UPLOAD_TOKEN}`, expiresAt: new Date() }) } as never,
+  );
+  const message = await binder.bind(built);
   const sent: Record<string, unknown>[] = [];
   const provider = new QontakWhatsAppProvider(
     { baseUrl: 'https://qontak.invalid', apiToken: 't', channelIntegrationId: 'c', qrisImageUrl: QRIS_IMAGE_URL, timeoutMs: 1000, maxRetry: 1 } as never,
@@ -143,7 +152,7 @@ function consumer(orderOver: Record<string, unknown> = {}, cfgOver: Record<strin
         shippingServiceName: 'Paxel Instant',
         user: { name: 'Budi', email: 'budi@test.com', phone: CUSTOMER_PHONE },
         address: { phone: CUSTOMER_PHONE },
-        payment: { status: 'PENDING' },
+        payment: { id: PAYMENT_ID, status: 'PENDING' },
         ...orderOver,
       }),
     },
@@ -159,7 +168,7 @@ function consumer(orderOver: Record<string, unknown> = {}, cfgOver: Record<strin
 const runCreated = (h: ReturnType<typeof consumer>, payload: Record<string, unknown> = {}) =>
   h.c.process('msg-1', {
     name: 'order.created',
-    payload: { orderId: ORDER_ID, uploadUrl: `http://localhost:3000/payments/upload/${UPLOAD_TOKEN}`, ...payload },
+    payload: { orderId: ORDER_ID, ...payload }, // S1: order.created carries no upload link
   });
 
 const rowFor = (created: Record<string, unknown>[], t: string) => created.find((r) => r.template === t);
@@ -169,6 +178,16 @@ describe('WA — order created', () => {
     const h = consumer();
     await runCreated(h);
     expect(rowFor(h.created, 'order.transfer')).toBeDefined();
+  });
+
+  it('S1: the invoice row stores the payment id only — never an upload token or link, even from a legacy event', async () => {
+    const h = consumer();
+    // A pre-S1 order.created still in a retry queue / DLQ carries uploadUrl.
+    await runCreated(h, { uploadUrl: `http://localhost:3000/payments/upload/${UPLOAD_TOKEN}` });
+    const row = rowFor(h.created, 'order.transfer')!;
+    expect(row.payload).toMatchObject({ orderId: ORDER_ID, paymentId: PAYMENT_ID });
+    expect(JSON.stringify(h.created)).not.toContain(UPLOAD_TOKEN);
+    expect(JSON.stringify(h.created)).not.toMatch(/uploadToken|uploadUrl/);
   });
 
   it('WA-003 the invoice is addressed to the customer, not the admin', async () => {
@@ -181,7 +200,7 @@ describe('WA — order created', () => {
   it('WA-002 the invoice resolves QONTAK_INVOICE_TEMPLATE_ID', async () => {
     const { body } = await capture(outbox({
       template: 'order.transfer',
-      payload: { orderNumber: ORDER_NO, totalPrice: 154_378, customerName: 'Budi', customerPhone: CUSTOMER_PHONE, uploadToken: UPLOAD_TOKEN, paymentMethod: 'BANK_TRANSFER' },
+      payload: { orderNumber: ORDER_NO, totalPrice: 154_378, customerName: 'Budi', customerPhone: CUSTOMER_PHONE, paymentId: PAYMENT_ID, paymentMethod: 'BANK_TRANSFER' },
     }));
     expect(body.message_template_id).toBe(TPL.invoice);
     expect(body.message_template_id).not.toBe(TPL.order); // never the admin template
@@ -190,7 +209,7 @@ describe('WA — order created', () => {
   it('WA-004 the invoice carries exactly 6 parameters in the contracted order', async () => {
     const { body } = await capture(outbox({
       template: 'order.transfer',
-      payload: { orderNumber: ORDER_NO, totalPrice: 154_378, customerName: 'Budi', customerPhone: CUSTOMER_PHONE, uploadToken: UPLOAD_TOKEN, paymentMethod: 'BANK_TRANSFER' },
+      payload: { orderNumber: ORDER_NO, totalPrice: 154_378, customerName: 'Budi', customerPhone: CUSTOMER_PHONE, paymentId: PAYMENT_ID, paymentMethod: 'BANK_TRANSFER' },
     }));
     const p = params(body);
     expect(p).toHaveLength(6);
@@ -217,7 +236,7 @@ describe('WA — order created', () => {
   it('WA-005 the invoice CTA carries the RAW upload token, not an order id', async () => {
     const { body } = await capture(outbox({
       template: 'order.transfer',
-      payload: { orderNumber: ORDER_NO, totalPrice: 1, customerName: 'Budi', customerPhone: CUSTOMER_PHONE, uploadToken: UPLOAD_TOKEN, paymentMethod: 'BANK_TRANSFER' },
+      payload: { orderNumber: ORDER_NO, totalPrice: 1, customerName: 'Budi', customerPhone: CUSTOMER_PHONE, paymentId: PAYMENT_ID, paymentMethod: 'BANK_TRANSFER' },
     }));
     expect(buttons(body)).toEqual([{ index: '0', type: 'url', value: UPLOAD_TOKEN }]);
     expect(buttons(body)![0].value).not.toBe(ORDER_ID);
@@ -227,7 +246,7 @@ describe('WA — order created', () => {
   it('WA-025 legacy QRIS shares the invoice template but gets no image header', async () => {
     const { body } = await capture(outbox({
       template: 'order.transfer',
-      payload: { orderNumber: ORDER_NO, totalPrice: 154_378, customerName: 'Budi', customerPhone: CUSTOMER_PHONE, uploadToken: UPLOAD_TOKEN, paymentMethod: 'QRIS' },
+      payload: { orderNumber: ORDER_NO, totalPrice: 154_378, customerName: 'Budi', customerPhone: CUSTOMER_PHONE, paymentId: PAYMENT_ID, paymentMethod: 'QRIS' },
     }));
     expect(body.message_template_id).toBe(TPL.invoice);
     expect(header(body)).toBeUndefined();

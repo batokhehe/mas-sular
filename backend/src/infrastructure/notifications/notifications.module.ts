@@ -18,9 +18,12 @@ import { QONTAK_CONFIG, assertQontakConfigured, loadQontakConfig } from './qonta
 import { QontakWhatsAppProvider } from './qontak-whatsapp.provider';
 import { TemplateRegistry } from './template-registry';
 import { TemplateRenderer } from './template-renderer';
+import { PaymentUploadModule } from '../../modules/payments/payment-upload.module';
+import { UploadLinkBinder } from './upload-link.binder';
 
 @Module({
-  imports: [PaymentAccountsModule],
+  // PaymentUploadModule: the sender mints the payment-upload token at send time (S1).
+  imports: [PaymentAccountsModule, PaymentUploadModule],
   providers: [
     { provide: NOTIFICATION_SENDER_CONFIG, useFactory: () => loadNotificationSenderConfig() },
     { provide: QONTAK_CONFIG, useFactory: () => loadQontakConfig() },
@@ -35,6 +38,7 @@ import { TemplateRenderer } from './template-renderer';
     QontakWhatsAppProvider,
     NotificationProviderFactory,
     NotificationMessageBuilder,
+    UploadLinkBinder,
     NotificationSenderWorker,
   ],
   exports: [NotificationMetrics],

@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { NotificationChannel } from '@prisma/client';
 import { maskPhone } from '../../common/utils/phone.util';
+import { scrubExactSecrets } from '../../common/logging/redact';
 import { NotificationMessage } from './notification-message';
 import {
   NotificationProvider,
@@ -198,7 +199,11 @@ export class QontakWhatsAppProvider implements NotificationProvider {
       return { kind: 'ok', providerMessageId: providerMessageId ?? '' };
     }
 
-    const reason = sanitize(text);
+    // S1: a provider error body may echo the request, including the button's raw
+    // upload token. Strip that exact value before it reaches a log line or an
+    // error message (which the sender persists as lastError). Scrub the FULL body
+    // before truncating, so a token straddling the cut cannot survive as a prefix.
+    const reason = sanitize(scrubExactSecrets(text, [(message.variables as { uploadToken?: string }).uploadToken]));
     if (res.status === 429) {
       this.logger.warn({ ...base, outcome: 'retry', errorClass: 'rate_limited', reason });
       return { kind: 'transient', error: new TransientSendError(`rate limited: ${reason}`, parseRetryAfterMs(res.headers.get('retry-after'))) };
