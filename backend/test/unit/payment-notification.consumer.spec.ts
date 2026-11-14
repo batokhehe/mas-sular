@@ -65,11 +65,11 @@ describe('PaymentNotificationConsumer', () => {
     });
   });
 
-  it('payment.reminder → enqueues a payment.reminder NotificationOutbox to the customer with the upload link', async () => {
+  it('payment.reminder → enqueues a payment.reminder NotificationOutbox to the customer, identifying the payment only (S1)', async () => {
     const { consumer, prisma } = build();
     const outcome = await consumer.process('evt-r', {
       name: 'payment.reminder',
-      payload: { paymentId: 'pay-1', orderId: 'order-1', stage: 'first', paymentMethod: 'BANK_TRANSFER', amount: 50000, uploadUrl: 'https://app/payments/upload/raw' },
+      payload: { paymentId: 'pay-1', orderId: 'order-1', stage: 'first', paymentMethod: 'BANK_TRANSFER', amount: 50000 },
     })
     expect(outcome).toBe('enqueued')
     expect(prisma.__tx.notificationOutbox.create).toHaveBeenCalledWith({
@@ -77,9 +77,24 @@ describe('PaymentNotificationConsumer', () => {
         template: 'payment.reminder',
         recipient: 'jane@example.com',
         sourceMessageId: 'evt-r',
-        payload: expect.objectContaining({ uploadUrl: 'https://app/payments/upload/raw', stage: 'first', paymentMethod: 'BANK_TRANSFER' }),
+        payload: expect.objectContaining({ paymentId: 'pay-1', stage: 'first', paymentMethod: 'BANK_TRANSFER' }),
       }),
     })
+    const payload = prisma.__tx.notificationOutbox.create.mock.calls[0][0].data.payload as Record<string, unknown>;
+    expect(payload).not.toHaveProperty('uploadUrl');
+    expect(payload).not.toHaveProperty('uploadToken');
+  });
+
+  it('S1: a legacy payment.reminder carrying uploadUrl never copies the link into NotificationOutbox', async () => {
+    const { consumer, prisma } = build();
+    const legacyToken = 'e'.repeat(64);
+    await consumer.process('evt-r', {
+      name: 'payment.reminder',
+      payload: { paymentId: 'pay-1', orderId: 'order-1', stage: 'second', paymentMethod: 'QRIS', amount: 1, uploadUrl: `https://app/payment/${legacyToken}` },
+    });
+    const persisted = JSON.stringify(prisma.__tx.notificationOutbox.create.mock.calls);
+    expect(persisted).not.toContain(legacyToken);
+    expect(persisted).not.toMatch(/uploadToken|uploadUrl/);
   });
 
   it('payment.expired → enqueues a payment.expired NotificationOutbox', async () => {

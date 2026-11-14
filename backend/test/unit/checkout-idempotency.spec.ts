@@ -134,8 +134,8 @@ describe('Checkout idempotency orchestration', () => {
         eventVersion: 1,
         exchange: 'orders',
         routingKey: 'order.created',
-        // Phase 4A: the default method is BANK_TRANSFER, so a receipt-upload link rides along.
-        payload: { orderId: 'order-1', orderNumber: 'BMS-20260611-12345', totalPrice: 30000, uploadUrl: 'https://app/payments/upload/raw' },
+        // S1: no receipt-upload link rides along any more (minted at send time).
+        payload: { orderId: 'order-1', orderNumber: 'BMS-20260611-12345', totalPrice: 30000 },
       }),
     });
     expect(outcome).toEqual({ kind: 'result', statusCode: 201, replayed: false, body: CREATED_ORDER });

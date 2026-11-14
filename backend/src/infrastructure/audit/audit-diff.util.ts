@@ -14,8 +14,9 @@ const IGNORED_KEYS = new Set(['updatedAt', 'createdAt', 'lastLogin', 'deletedAt'
 const isIgnored = (key: string): boolean => IGNORED_KEYS.has(key) || /(At|Timestamp)$/.test(key);
 
 // Secrets are stripped from snapshots BEFORE persisting (never stored).
-// `invoiceUrl` (P2 #14) carries the customer invoice capability token.
-const SENSITIVE_KEYS = new Set(['password', 'passwordHash', 'token', 'tokenHash', 'secret', 'apiKey', 'authorization', 'refreshToken', 'accessToken', 'webhookPayload', 'invoiceUrl']);
+// `invoiceUrl` (P2 #14) carries the customer invoice capability token;
+// `uploadToken` / `uploadUrl` (S1) carry the payment-upload capability token.
+const SENSITIVE_KEYS = new Set(['password', 'passwordHash', 'token', 'tokenHash', 'secret', 'apiKey', 'authorization', 'refreshToken', 'accessToken', 'webhookPayload', 'invoiceUrl', 'uploadToken', 'uploadUrl']);
 
 /**
  * Prisma Decimal columns (Outlet/Address latitude+longitude, Product.rating) are

@@ -8,6 +8,7 @@ import {
   NotificationRecipient,
   NotificationTemplate,
   NotificationVariables,
+  UploadLinkRef,
 } from './notification-message';
 import { TemplateRegistry } from './template-registry';
 
@@ -53,6 +54,7 @@ export class NotificationMessageBuilder {
     }
 
     let variables: NotificationVariables;
+    let uploadLinkFor: UploadLinkRef | undefined;
     if (template === 'shipment.status') {
       variables = {
         template: 'shipment.status',
@@ -93,10 +95,15 @@ export class NotificationMessageBuilder {
       };
     } else if (template === 'order.transfer') {
       const account = await this.accounts.getActiveAccount(); // → ConfigurationError if none active
-      const uploadToken = String(p.uploadToken ?? '');
-      if (!uploadToken) {
-        throw new ConfigurationError(`transfer notification ${row.id} is missing uploadToken`);
+      // S1: the upload token is NOT read from the row. The sender mints a fresh one
+      // right before delivery (UploadLinkBinder); the row only identifies the payment.
+      // A legacy `uploadToken` still stored on a pre-S1 row is deliberately ignored.
+      const paymentId = typeof p.paymentId === 'string' && p.paymentId ? p.paymentId : undefined;
+      const orderId = typeof p.orderId === 'string' && p.orderId ? p.orderId : undefined;
+      if (!paymentId && !orderId) {
+        throw new ConfigurationError(`transfer notification ${row.id} has no payment to issue an upload link for`);
       }
+      uploadLinkFor = { ...(paymentId ? { paymentId } : {}), ...(orderId ? { orderId } : {}) };
       // The unique code is already folded into totalPrice (the final transfer amount),
       // so the customer-facing message shows only the total — no separate code line.
       variables = {
@@ -104,7 +111,8 @@ export class NotificationMessageBuilder {
         customerName,
         orderNumber,
         totalPrice,
-        uploadToken,
+        uploadToken: '', // bound at send time, in memory only
+
         paymentMethod: String(p.paymentMethod ?? ''),
         bankName: account.bankName,
         bankCode: account.bankCode,
@@ -144,6 +152,7 @@ export class NotificationMessageBuilder {
         providerTemplateId: descriptor.providerTemplateId,
         attempt: row.attempts,
       },
+      ...(uploadLinkFor ? { uploadLinkFor } : {}),
     };
   }
 }

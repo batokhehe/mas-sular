@@ -8,6 +8,7 @@ import { RabbitConnectionManager } from '../outbox/rabbit-connection.manager';
 import { RedriveService } from './redrive.service';
 import { extractRelated, queueHealth } from './queue-center.util';
 import { num } from '../../common/utils/number.util';
+import { redactCapabilitySecrets, redactErrorText } from '../../common/logging/redact';
 
 const CACHE_KEY = 'admin:queue-center';
 const CACHE_TTL_MS = 30_000;
@@ -262,12 +263,12 @@ export class QueueCenterService {
         notificationCount: notifCount,
         outbox: outboxRows.map((r) => ({
           id: r.id, eventName: r.eventName, aggregateType: r.aggregateType, aggregateId: r.aggregateId,
-          attempts: r.attempts, lastError: r.lastError, createdAt: r.createdAt.toISOString(),
+          attempts: r.attempts, lastError: redactErrorText(r.lastError), createdAt: r.createdAt.toISOString(),
           ageMs: now.getTime() - r.createdAt.getTime(), related: extractRelated(r.payload),
         })),
         notifications: notifRows.map((r) => ({
           id: r.id, channel: r.channel, template: r.template, recipient: r.recipient,
-          attempts: r.attempts, lastError: r.lastError, createdAt: r.createdAt.toISOString(),
+          attempts: r.attempts, lastError: redactErrorText(r.lastError), createdAt: r.createdAt.toISOString(),
           ageMs: now.getTime() - r.createdAt.getTime(), related: extractRelated(r.payload),
         })),
       };
@@ -315,8 +316,9 @@ export class QueueCenterService {
       id: r.id, createdAt: r.createdAt.toISOString(), eventName: r.eventName, eventVersion: r.eventVersion,
       aggregateType: r.aggregateType, aggregateId: r.aggregateId, exchange: r.exchange, routingKey: r.routingKey,
       status: r.status, attempts: r.attempts, maxAttempts: r.maxAttempts,
-      nextAttemptAt: iso(r.nextAttemptAt), publishedAt: iso(r.publishedAt), lastError: r.lastError,
-      payload: r.payload, metadata: r.metadata, related: extractRelated(r.payload),
+      nextAttemptAt: iso(r.nextAttemptAt), publishedAt: iso(r.publishedAt), lastError: redactErrorText(r.lastError),
+      // S1: never return the payment-upload token/link (the stored row is untouched).
+      payload: redactCapabilitySecrets(r.payload), metadata: redactCapabilitySecrets(r.metadata), related: extractRelated(r.payload),
     }));
     return paginate(items, total, page, limit);
   }
@@ -350,9 +352,10 @@ export class QueueCenterService {
     const items = rows.map((r) => ({
       id: r.id, createdAt: r.createdAt.toISOString(), channel: r.channel, template: r.template,
       recipient: r.recipient, status: r.status, attempts: r.attempts,
-      nextAttemptAt: iso(r.nextAttemptAt), sentAt: iso(r.sentAt), lastError: r.lastError,
+      nextAttemptAt: iso(r.nextAttemptAt), sentAt: iso(r.sentAt), lastError: redactErrorText(r.lastError),
       providerMessageId: r.providerMessageId, sourceMessageId: r.sourceMessageId,
-      payload: r.payload, related: extractRelated(r.payload),
+      // S1: never return the payment-upload token/link (the stored row is untouched).
+      payload: redactCapabilitySecrets(r.payload), related: extractRelated(r.payload),
     }));
     return paginate(items, total, page, limit);
   }

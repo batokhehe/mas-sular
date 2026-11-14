@@ -12,6 +12,26 @@ import { NotificationProviderFactory } from './notification-provider.factory';
 import { NOTIFICATION_SENDER_CONFIG, NotificationSenderConfig } from './notification.config';
 import { NotificationMetrics } from './notification.metrics';
 import { PermanentSendError, TransientSendError } from './notification-provider';
+import { UploadLinkBinder } from './upload-link.binder';
+import { scrubExactSecrets } from '../../common/logging/redact';
+
+/**
+ * Remove a bound upload token from an error's message in place (same instance,
+ * same class, same retryAfterMs), or from a non-Error's string form. No token,
+ * or a message that does not contain it, leaves the error untouched.
+ */
+function scrubBoundToken(err: unknown, token: string | undefined): unknown {
+  if (!token) return err;
+  if (err instanceof Error) {
+    const clean = scrubExactSecrets(err.message, [token]);
+    if (clean !== err.message) {
+      err.message = clean;
+      if (typeof err.stack === 'string') err.stack = scrubExactSecrets(err.stack, [token]);
+    }
+    return err;
+  }
+  return scrubExactSecrets(String(err), [token]);
+}
 
 /**
  * Drains PENDING NotificationOutbox rows and delivers them via a provider, using
@@ -49,6 +69,11 @@ export class NotificationSenderWorker implements OnApplicationBootstrap, OnModul
     // loudly here rather than quietly re-enable unrestricted delivery.
     private readonly gate: NotificationDeliveryGate,
     @Optional() private readonly logs?: LogService,
+    // S1: mints the payment-upload token at send time. Provided by
+    // NotificationsModule; typed optional only so positional test construction
+    // keeps working. A message that needs a link and finds no binder fails
+    // CLOSED (permanent) rather than going out without its upload button.
+    private readonly uploadLinks?: UploadLinkBinder,
   ) {}
 
   /**
@@ -173,6 +198,9 @@ export class NotificationSenderWorker implements OnApplicationBootstrap, OnModul
   }
 
   async sendRow(row: NotificationOutbox): Promise<void> {
+    // S1: the raw upload token bound for THIS attempt (if any), kept only so it
+    // can be scrubbed from any error text before lastError is persisted or logged.
+    let boundToken: string | undefined;
     try {
       // Builder owns business composition (active account, phone, template id);
       // factory resolves the provider by channel; provider is transport-only.
@@ -184,11 +212,25 @@ export class NotificationSenderWorker implements OnApplicationBootstrap, OnModul
       // covered by one guard and neither provider filters recipients itself.
       this.gate.assertDeliverable(message);
       const provider = this.factory.get(row.channel);
-      const result = await provider.send(message);
+      // S1: bind the payment-upload link only now — after the gate, immediately
+      // before delivery — so a blocked or unbuildable row never mints a token,
+      // and the raw token lives only in this in-memory message (never written back).
+      let outgoing = message;
+      if (message.uploadLinkFor) {
+        if (!this.uploadLinks) throw new ConfigurationError('upload link binder is not wired; refusing to send without the upload link');
+        outgoing = await this.uploadLinks.bind(message);
+        boundToken = (outgoing.variables as { uploadToken?: string }).uploadToken;
+      }
+      const result = await provider.send(outgoing);
       await this.markSent(row, result.providerMessageId);
       this.metrics.sent();
       this.resetBreaker();
-    } catch (err) {
+    } catch (caught) {
+      // S1: any provider (WhatsApp or email) may echo the request in its error
+      // body. Remove the bound token BEFORE the message is persisted (lastError)
+      // or logged below. The error keeps its class (and retryAfterMs), so the
+      // classification that follows is unchanged.
+      const err = scrubBoundToken(caught, boundToken);
       // ConfigurationError (no active account / unresolved template) and InvalidPhoneError
       // are non-retryable, same as a provider PermanentSendError.
       //

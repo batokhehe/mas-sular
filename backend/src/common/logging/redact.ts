@@ -115,6 +115,116 @@ export function redactSensitiveQuery<T>(query: T): T {
   return out as T;
 }
 
+// ---------------------------------------------------------------------------
+// S1 containment: payment-upload capability secrets in admin read APIs.
+//
+// The order.created / payment.reminder outbox events and their NotificationOutbox
+// rows still carry the raw upload token (`uploadToken`) or the full link
+// (`uploadUrl`) because the sender needs it at delivery time. Admin APIs that
+// show those payloads (Queue Center, Notification Center) must never return the
+// secret, so they pass every payload and rendered text through these helpers.
+// They return NEW values: the stored rows and the delivery path are untouched.
+// ---------------------------------------------------------------------------
+
+/** Payload keys whose VALUE is a payment-upload capability secret. */
+export const CAPABILITY_SECRET_KEYS: ReadonlySet<string> = new Set(['uploadToken', 'uploadUrl']);
+
+export const REDACTED = '[REDACTED]';
+
+/**
+ * The upload link's token segment in free text: the storefront link
+ * (`/payment/<token>`) and the API path (`/payments/upload/<token>`). Tokens are
+ * 64 hex chars; 32+ keeps `/payment/gateway/...` and other routes untouched.
+ */
+const UPLOAD_LINK_TOKEN = /(\/payment\/|\/payments\/upload\/)[0-9a-fA-F]{32,}/g;
+
+/**
+ * Deep-copy a JSON-like value, replacing the value of every capability-secret
+ * key (at any depth, including inside arrays) with `[REDACTED]`, and scrubbing
+ * upload-link token segments out of every other string. The input is not
+ * mutated.
+ */
+export function redactCapabilitySecrets<T>(value: T): T {
+  return redactNode(value) as T;
+}
+
+function redactNode(value: unknown): unknown {
+  if (typeof value === 'string') return redactUploadLinks(value);
+  if (Array.isArray(value)) return value.map(redactNode);
+  if (value === null || typeof value !== 'object' || value instanceof Date) return value;
+  const out: Record<string, unknown> = {};
+  for (const [key, v] of Object.entries(value as Record<string, unknown>)) {
+    out[key] = CAPABILITY_SECRET_KEYS.has(key) && v !== null && v !== undefined ? REDACTED : redactNode(v);
+  }
+  return out;
+}
+
+/**
+ * Replace every occurrence of the given exact secret values in free text (e.g. a
+ * provider error body that echoes the request). Only the secrets themselves are
+ * removed, so the rest of the diagnostic survives. Empty/short values are
+ * ignored (they cannot be capability secrets and would over-redact).
+ */
+export function scrubExactSecrets(text: string, secrets: ReadonlyArray<string | null | undefined>): string {
+  let out = text;
+  for (const secret of secrets) {
+    if (typeof secret === 'string' && secret.length >= 16) out = out.split(secret).join(REDACTED);
+  }
+  return out;
+}
+
+/**
+ * Null-safe display redaction for a stored error text (`lastError`) in admin
+ * responses: scrubs upload-link token segments, keeps the rest of the message.
+ */
+export function redactErrorText(text: string | null | undefined): string | null {
+  if (text === null || text === undefined) return null;
+  return redactUploadLinks(text);
+}
+
+/** Replace upload-link token segments in free text (rendered bodies, URLs). */
+export function redactUploadLinks(text: string): string {
+  return text.replace(UPLOAD_LINK_TOKEN, `$1${REDACTED}`);
+}
+
+/**
+ * Every capability-secret string held by a payload (at any depth), plus the
+ * token segment of any link, so text rendered FROM that payload can be scrubbed
+ * by exact value as well as by shape.
+ */
+export function collectCapabilitySecrets(payload: unknown): string[] {
+  const found = new Set<string>();
+  const walk = (node: unknown): void => {
+    if (Array.isArray(node)) return node.forEach(walk);
+    if (node === null || typeof node !== 'object') return;
+    for (const [key, v] of Object.entries(node as Record<string, unknown>)) {
+      if (CAPABILITY_SECRET_KEYS.has(key) && typeof v === 'string' && v.length > 0) {
+        found.add(v);
+        const last = v.split('/').pop();
+        if (last && last !== v) found.add(last);
+      } else {
+        walk(v);
+      }
+    }
+  };
+  walk(payload);
+  // Longest first, so a full URL is replaced before its own token segment.
+  return [...found].sort((a, b) => b.length - a.length);
+}
+
+/**
+ * Scrub text rendered from a payload: every exact capability value the payload
+ * holds, then any remaining upload-link token by shape.
+ */
+export function redactRenderedText(text: string, payload: unknown): string {
+  let out = text;
+  for (const secret of collectCapabilitySecrets(payload)) {
+    // Very short values cannot be secrets worth matching and would over-redact.
+    if (secret.length >= 8) out = out.split(secret).join(REDACTED);
+  }
+  return redactUploadLinks(out);
+}
+
 // Correlation ids we accept from clients: UUID-like/safe token, bounded length.
 // Anything else (huge strings, log-injection attempts) is replaced server-side.
 const REQUEST_ID_SHAPE = /^[A-Za-z0-9._-]{8,64}$/;

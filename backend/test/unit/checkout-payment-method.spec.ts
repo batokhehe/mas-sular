@@ -114,13 +114,18 @@ describe('Checkout — upload token issuance', () => {
     expect(uploadTokens.issue).not.toHaveBeenCalled();
   });
 
+  // S1: checkout no longer mints the token — the notification sender does, right
+  // before WhatsApp delivery — so neither the token nor a link reaches OutboxEvent.
   it.each([PaymentMethod.BANK_TRANSFER, PaymentMethod.QRIS])(
-    '%s: issues a token and includes the uploadUrl in order.created',
+    '%s: issues NO token and order.created carries no upload link (S1)',
     async (method) => {
       const { service, prisma, uploadTokens } = build();
       await service.checkout(USER, dto({ payment_method: method }));
-      expect(uploadTokens.issue).toHaveBeenCalledTimes(1);
-      expect(orderCreatedPayload(prisma).uploadUrl).toBe('https://app/payments/upload/raw-secret');
+      expect(uploadTokens.issue).not.toHaveBeenCalled();
+      const payload = orderCreatedPayload(prisma);
+      expect(payload).not.toHaveProperty('uploadUrl');
+      expect(payload).not.toHaveProperty('uploadToken');
+      expect(JSON.stringify(prisma.__tx.outboxEvent.create.mock.calls)).not.toMatch(/raw-secret|\/payment\/|\/payments\/upload\//);
     },
   );
 });

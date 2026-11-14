@@ -50,6 +50,11 @@ export type NotificationVariables =
       orderNumber: string;
       // totalPrice is the final transfer amount (unique code already folded in).
       totalPrice: number;
+      /**
+       * Raw payment-upload token for the WhatsApp button. NEVER persisted (S1):
+       * the builder leaves it empty and sets `uploadLinkFor`; the sender mints a
+       * fresh token right before provider delivery and fills this in memory only.
+       */
       uploadToken: string;
       /**
        * Payment method from the outbox payload, e.g. "BANK_TRANSFER" / "QRIS".
@@ -123,6 +128,17 @@ export type NotificationVariables =
       subject?: string;
     };
 
+/**
+ * Which payment a message needs an upload link for. Only identifiers: the token
+ * itself is minted at send time (UploadLinkBinder) and never stored anywhere.
+ * `orderId` alone is enough for rows enqueued before S1 phase 2 (Payment.orderId
+ * is unique).
+ */
+export interface UploadLinkRef {
+  paymentId?: string;
+  orderId?: string;
+}
+
 /** The ONE contract shared by every provider. Presentation is mapped inside each provider. */
 export interface NotificationMessage {
   channel: NotificationChannel;
@@ -130,4 +146,6 @@ export interface NotificationMessage {
   recipient: NotificationRecipient;
   variables: NotificationVariables;
   metadata: NotificationMetadata;
+  /** Set when the message must carry a payment-upload link (bound by the sender). */
+  uploadLinkFor?: UploadLinkRef;
 }

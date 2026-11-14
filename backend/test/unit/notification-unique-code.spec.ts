@@ -24,7 +24,8 @@ function transferRow(uniqueCode: number | null) {
       totalPrice: 135123,
       customerName: 'Jane',
       customerPhone: '6281234567890',
-      uploadToken: 'raw-token',
+      // S1: rows identify the payment; the upload token is bound at send time.
+      paymentId: 'pay-1',
       // Even if a code is present on the payload, the notification must not surface it.
       uniqueCode,
     },

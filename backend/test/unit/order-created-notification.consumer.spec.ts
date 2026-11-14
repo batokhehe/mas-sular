@@ -14,11 +14,16 @@ const ORDER = {
   paymentMethod: 'BANK_TRANSFER',
   user: { email: 'jane@example.com', name: 'Jane', phone: null },
   address: { phone: '08123456789' },
+  payment: { id: 'pay-1', status: 'PENDING' },
 };
+// S1: order.created carries no upload link any more.
 const EVENT = {
   name: 'order.created',
-  payload: { orderId: 'order-1', orderNumber: 'BMS-1', totalPrice: 30000, uploadUrl: 'https://app/payment/rawtoken' },
+  payload: { orderId: 'order-1', orderNumber: 'BMS-1', totalPrice: 30000 },
 };
+// A pre-S1 message (retry queue / DLQ redrive) still carrying the link.
+const LEGACY_TOKEN = 'f'.repeat(64);
+const LEGACY_EVENT = { name: 'order.created', payload: { ...EVENT.payload, uploadUrl: `https://app/payment/${LEGACY_TOKEN}` } };
 
 function p2002() {
   return new Prisma.PrismaClientKnownRequestError('Unique constraint failed', { code: 'P2002', clientVersion: '6.19.3' });
@@ -83,6 +88,30 @@ describe('OrderCreatedNotificationConsumer', () => {
       expect(prisma.__tx.processedEvent.create).toHaveBeenCalledWith({
         data: { consumer: 'order.notifications', messageId: 'evt-1', eventName: 'order.created' },
       });
+    });
+
+    it('S1: the transfer row identifies the payment only — no upload token or link is stored', async () => {
+      const { consumer, prisma } = build();
+      await consumer.process('evt-1', EVENT);
+      const data = prisma.__tx.notificationOutbox.create.mock.calls[0][0].data;
+      expect(data.payload).toMatchObject({ orderId: 'order-1', paymentId: 'pay-1', paymentMethod: 'BANK_TRANSFER' });
+      expect(Object.keys(data.payload)).not.toEqual(expect.arrayContaining(['uploadToken']));
+      expect(Object.keys(data.payload)).not.toEqual(expect.arrayContaining(['uploadUrl']));
+    });
+
+    it('S1: a legacy event carrying uploadUrl never copies the token into NotificationOutbox', async () => {
+      const { consumer, prisma } = build();
+      expect(await consumer.process('evt-1', LEGACY_EVENT)).toBe('enqueued');
+      const persisted = JSON.stringify(prisma.__tx.notificationOutbox.create.mock.calls);
+      expect(persisted).not.toContain(LEGACY_TOKEN);
+      expect(persisted).not.toMatch(/uploadToken|uploadUrl/);
+    });
+
+    it('S1: BANK_TRANSFER without a payment row skips the customer invoice (never sends it link-less)', async () => {
+      const { consumer, prisma } = build(buildPrisma({ order: { ...ORDER, payment: null } }));
+      await consumer.process('evt-1', EVENT);
+      const templates = prisma.__tx.notificationOutbox.create.mock.calls.map((c: [{ data: { template: string } }]) => c[0].data.template);
+      expect(templates).not.toContain('order.transfer');
     });
 
     it('fast-path duplicate → no work', async () => {

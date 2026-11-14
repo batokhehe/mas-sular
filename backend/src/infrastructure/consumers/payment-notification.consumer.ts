@@ -226,7 +226,9 @@ export class PaymentNotificationConsumer implements OnApplicationBootstrap, OnMo
               amount: (event.payload?.amount as number | undefined) ?? null,
               // Present for payment.reminder; null/ignored for other events.
               paymentMethod: (event.payload?.paymentMethod as string | undefined) ?? null,
-              uploadUrl: (event.payload?.uploadUrl as string | undefined) ?? null,
+              // S1: identifies the payment only. No upload link/token is stored; an
+              // `uploadUrl` on a pre-S1 payment.reminder message is deliberately not copied.
+              paymentId: (event.payload?.paymentId as string | undefined) ?? null,
               stage: (event.payload?.stage as string | undefined) ?? null,
             },
             sourceMessageId: messageId,
