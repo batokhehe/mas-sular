@@ -20,7 +20,20 @@ export interface MidtransReconciliationConfig {
    */
   minAgeMs: number;
   healthLogIntervalMs: number;
+  /**
+   * C1-a.1: first retry delay for a payment BLOCKED by an inventory coverage
+   * conflict (it has an active `payment.settlement_inventory_conflict` incident).
+   * Doubles per recorded occurrence up to `blockedRetryMaxMs`. Optional so existing
+   * literal configs stay valid; the worker falls back to the defaults below.
+   */
+  blockedRetryBaseMs?: number;
+  /** C1-a.1: cap for the blocked-payment retry delay. */
+  blockedRetryMaxMs?: number;
 }
+
+/** C1-a.1 defaults: retry a blocked payment after 15 min, backing off to every 6 h. */
+export const DEFAULT_BLOCKED_RETRY_BASE_MS = 15 * 60_000;
+export const DEFAULT_BLOCKED_RETRY_MAX_MS = 6 * 60 * 60_000;
 
 export function loadMidtransReconciliationConfig(
   env: NodeJS.ProcessEnv = process.env,
@@ -32,5 +45,7 @@ export function loadMidtransReconciliationConfig(
     batchSize: positiveInt(env.MIDTRANS_RECONCILIATION_BATCH_SIZE, 50),
     minAgeMs: positiveInt(env.MIDTRANS_RECONCILIATION_MIN_AGE_MS, 2 * 60_000),
     healthLogIntervalMs: positiveInt(env.MIDTRANS_RECONCILIATION_HEALTH_LOG_MS, 5 * 60_000),
+    blockedRetryBaseMs: positiveInt(env.MIDTRANS_RECONCILIATION_BLOCKED_RETRY_BASE_MS, DEFAULT_BLOCKED_RETRY_BASE_MS),
+    blockedRetryMaxMs: positiveInt(env.MIDTRANS_RECONCILIATION_BLOCKED_RETRY_MAX_MS, DEFAULT_BLOCKED_RETRY_MAX_MS),
   };
 }

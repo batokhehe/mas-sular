@@ -20,6 +20,24 @@ const SWEEP_TTL_MS = 30_000;
 const HOUR_MS = 60 * 60 * 1000;
 const ACTIVE: IncidentStatus[] = [IncidentStatus.OPEN, IncidentStatus.ACKNOWLEDGED];
 
+/** C1-a: payment-scoped incident types recorded by business flows (not the sweep). */
+export type PaymentIncidentType = 'payment.captured_not_settled' | 'payment.settlement_inventory_conflict';
+
+export interface PaymentIncidentInput {
+  type: PaymentIncidentType;
+  paymentId: string;
+  orderId?: string | null;
+  severity: IncidentSeverity;
+  title: string;
+  description: string;
+  source: string;
+  module?: string | null;
+  /** Correlators only (provider/order refs, reason). Never secrets, tokens or credentials. */
+  metadata?: Record<string, unknown>;
+}
+
+export type PaymentIncidentResult = { id: string; outcome: 'CREATED' | 'UPDATED' };
+
 export interface ListIncidentsQuery {
   page?: number;
   limit?: number;
@@ -136,6 +154,103 @@ export class IncidentCenterService {
       throw new ConflictException('Incident is already resolved');
     }
     return this.prisma.incident.findUniqueOrThrow({ where: { id } });
+  }
+
+  // ---------------- Payment exceptions (C1-a) ----------------
+
+  /**
+   * Durable, idempotent record of a payment that needs a human: money captured by
+   * the gateway that could not be settled. Deduplicated by (type, paymentId) while
+   * an incident is ACTIVE (OPEN / ACKNOWLEDGED): a repeat bumps count/lastSeen and
+   * refreshes the metadata instead of inserting a duplicate. Once RESOLVED, a new
+   * occurrence opens a NEW incident (the resolved one keeps its history).
+   *
+   * Concurrency: there is no unique index on Incident (and no migration in this
+   * phase), so concurrent writers for the same key are serialized with a
+   * transaction-scoped Postgres advisory lock on `type:paymentId`; the second
+   * writer waits, then sees the first one's committed row and updates it. The lock
+   * is released automatically at commit/rollback.
+   *
+   * Scoped to these payment types only: the sweep's per-type dedup in
+   * upsertIncident is deliberately left unchanged.
+   *
+   * Runs in its OWN transaction — callers invoke it after the failed settlement
+   * transaction has already rolled back. Errors propagate so callers can keep the
+   * triggering notification retryable.
+   */
+  async recordPaymentException(input: PaymentIncidentInput): Promise<PaymentIncidentResult> {
+    const lockKey = `incident:${input.type}:${input.paymentId}`;
+    const metadata = { ...(input.metadata ?? {}), paymentId: input.paymentId, orderId: input.orderId ?? null } as Prisma.InputJsonValue;
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
+
+      const now = new Date();
+      const existing = await tx.incident.findFirst({
+        where: { type: input.type, paymentId: input.paymentId, status: { in: ACTIVE } },
+        orderBy: { lastSeen: 'desc' },
+        select: { id: true, severity: true },
+      });
+      if (existing) {
+        const escalate = severityRank(input.severity) > severityRank(existing.severity);
+        // C1-a.1 (R3-a): conditional on the incident STILL being active. resolve()
+        // does not take this advisory lock, so an operator may resolve the incident
+        // between the lookup above and this write; a plain update-by-id would then
+        // count the new occurrence on a RESOLVED incident and it would be lost. In
+        // READ COMMITTED the predicate is re-checked after any concurrent resolve
+        // commits, so a zero count means "resolved meanwhile": leave that incident
+        // untouched and fall through to create a new active one.
+        const bumped = await tx.incident.updateMany({
+          where: { id: existing.id, status: { in: ACTIVE } },
+          data: {
+            count: { increment: 1 },
+            lastSeen: now,
+            ...(escalate ? { severity: input.severity } : {}),
+            description: input.description,
+            metadata,
+          },
+        });
+        if (bumped.count === 1) return { id: existing.id, outcome: 'UPDATED' as const };
+      }
+
+      const created = await tx.incident.create({
+        data: {
+          type: input.type,
+          severity: input.severity,
+          title: input.title,
+          description: input.description,
+          source: input.source,
+          module: input.module ?? null,
+          paymentId: input.paymentId,
+          orderId: input.orderId ?? null,
+          firstSeen: now,
+          lastSeen: now,
+          metadata,
+        },
+        select: { id: true },
+      });
+      return { id: created.id, outcome: 'CREATED' as const };
+    }, { timeout: 10000 });
+  }
+
+  /**
+   * C1-a.1: ACTIVE (OPEN / ACKNOWLEDGED) payment-exception incidents of one type,
+   * with the occurrence count and last occurrence time — the durable retry state a
+   * caller can derive a backoff from. Read-only. Bounded by `limit`, most recent
+   * first. RESOLVED incidents are never returned: resolving is the operator's
+   * "retry now" signal.
+   */
+  async listActivePaymentExceptions(
+    type: PaymentIncidentType,
+    limit = 1000,
+  ): Promise<Array<{ paymentId: string; count: number; lastSeen: Date }>> {
+    const rows = await this.prisma.incident.findMany({
+      where: { type, status: { in: ACTIVE }, paymentId: { not: null } },
+      orderBy: { lastSeen: 'desc' },
+      take: limit,
+      select: { paymentId: true, count: true, lastSeen: true },
+    });
+    return rows.flatMap((r) => (r.paymentId ? [{ paymentId: r.paymentId, count: r.count, lastSeen: r.lastSeen }] : []));
   }
 
   // ---------------- Detection sweep (30s-throttled via the cache) ----------------

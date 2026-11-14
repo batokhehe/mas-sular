@@ -6,7 +6,13 @@ import { TERMINAL_GATEWAY_STATUSES } from './domain/gateway-status.mapper';
 import { verifyMidtransStatusResponse } from './domain/midtrans-status-verification.util';
 import { GatewayStatusApplier } from './gateway-status-applier.service';
 import { MIDTRANS_CONFIG, MidtransConfig } from './midtrans.config';
-import { MIDTRANS_RECONCILIATION_CONFIG, MidtransReconciliationConfig } from './midtrans-reconciliation.config';
+import { IncidentCenterService } from '../../../infrastructure/logging/incident-center.service';
+import {
+  DEFAULT_BLOCKED_RETRY_BASE_MS,
+  DEFAULT_BLOCKED_RETRY_MAX_MS,
+  MIDTRANS_RECONCILIATION_CONFIG,
+  MidtransReconciliationConfig,
+} from './midtrans-reconciliation.config';
 import { PaymentProviderFactory } from './payment-provider.factory';
 import { MIDTRANS_PROVIDER } from './payment-webhook.service';
 
@@ -15,6 +21,26 @@ export interface ReconciliationTick {
   transitioned: number;
   unchanged: number;
   failed: number;
+  /** C1-a.1: blocked payments held back this tick because their retry backoff has not elapsed. */
+  deferred: number;
+}
+
+/** C1-a.1: the only incident type that defers reconciliation. */
+const BLOCKED_INCIDENT_TYPE = 'payment.settlement_inventory_conflict' as const;
+
+/**
+ * C1-a.1: retry delay after the `count`-th recorded occurrence of a blocked
+ * payment: base, 2·base, 4·base, … capped at max. Pure, for the tests.
+ */
+/** A short driver error code (e.g. Prisma `P1001`) when present; never the message. */
+function deferralErrorCode(err: unknown): string | null {
+  const code = (err as { code?: unknown } | null)?.code;
+  return typeof code === 'string' && code.length <= 32 ? code : null;
+}
+
+export function blockedRetryDelayMs(count: number, baseMs: number, maxMs: number): number {
+  const exponent = Math.min(Math.max(count, 1) - 1, 30); // 2^30 already exceeds any sane cap
+  return Math.min(baseMs * 2 ** exponent, maxMs);
 }
 
 /**
@@ -50,6 +76,9 @@ export class MidtransReconciliationWorker implements OnApplicationBootstrap, OnM
     @Inject(MIDTRANS_RECONCILIATION_CONFIG) private readonly config: MidtransReconciliationConfig,
     @Inject(MIDTRANS_CONFIG) private readonly gateway: MidtransConfig,
     @Optional() private readonly logs?: LogService,
+    // C1-a.1: source of the durable retry state for blocked payments. Optional so
+    // positional construction keeps working; absent → no deferral (old behaviour).
+    @Optional() private readonly incidents?: IncidentCenterService,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -103,7 +132,7 @@ export class MidtransReconciliationWorker implements OnApplicationBootstrap, OnM
             level: tick.failed > 0 ? 'WARN' : 'INFO',
             module: 'worker.midtrans-reconciliation',
             action: 'tick',
-            message: `midtrans reconciliation: transitioned=${tick.transitioned} unchanged=${tick.unchanged} failed=${tick.failed}`,
+            message: `midtrans reconciliation: transitioned=${tick.transitioned} unchanged=${tick.unchanged} failed=${tick.failed} deferred=${tick.deferred}`,
             metadata: { ...tick },
           });
         }
@@ -138,7 +167,7 @@ export class MidtransReconciliationWorker implements OnApplicationBootstrap, OnM
    *
    * Manual BANK_TRANSFER is excluded structurally by `provider = midtrans`.
    */
-  private findCandidates(cutoff: Date): Promise<PaymentGatewayTransaction[]> {
+  private findCandidates(cutoff: Date, deferredPaymentIds: string[] = []): Promise<PaymentGatewayTransaction[]> {
     return this.prisma.paymentGatewayTransaction.findMany({
       where: {
         provider: MIDTRANS_PROVIDER,
@@ -151,18 +180,70 @@ export class MidtransReconciliationWorker implements OnApplicationBootstrap, OnM
           deletedAt: null,
           status: { in: [PaymentStatus.PENDING, PaymentStatus.WAITING_VERIFICATION] },
         },
+        // C1-a.1: blocked payments still inside their backoff window are left out
+        // BEFORE `take`, so they can never occupy the batch ahead of newer charges.
+        ...(deferredPaymentIds.length > 0 ? { paymentId: { notIn: deferredPaymentIds } } : {}),
       },
       orderBy: { createdAt: 'asc' },
       take: this.config.batchSize,
     });
   }
 
+  /**
+   * C1-a.1: payments to hold back this tick. A gateway payment blocked by an
+   * inventory coverage conflict stays PENDING (settlement is refused, nothing is
+   * settled, refunded or re-reserved) and would otherwise be retried every tick,
+   * oldest first, crowding newer charges out of the batch. Its ACTIVE
+   * `payment.settlement_inventory_conflict` incident already records how often
+   * (`count`) and when last (`lastSeen`) it failed, so that is the backoff state:
+   * no schema change. Each retry that fails again bumps the incident, which pushes
+   * the next retry further out (base, 2·base, … up to max).
+   *
+   * Only this incident type defers; every other failure (Status API errors,
+   * verification failures, rolled-back transactions) is retried next tick as
+   * before. Resolving the incident clears the deferral immediately. If the lookup
+   * itself fails, nothing is deferred (fail open = the previous behaviour).
+   */
+  private async deferredPaymentIds(): Promise<string[]> {
+    if (!this.incidents) return [];
+    const base = this.config.blockedRetryBaseMs ?? DEFAULT_BLOCKED_RETRY_BASE_MS;
+    const max = this.config.blockedRetryMaxMs ?? DEFAULT_BLOCKED_RETRY_MAX_MS;
+    const now = this.nowMs();
+    try {
+      const blocked = await this.incidents.listActivePaymentExceptions(BLOCKED_INCIDENT_TYPE);
+      return blocked
+        .filter((b) => now - b.lastSeen.getTime() < blockedRetryDelayMs(b.count, base, max))
+        .map((b) => b.paymentId);
+    } catch (err) {
+      // Fail OPEN: no deferral this tick, i.e. the pre-C1-a.1 query. Logged once
+      // per tick (this lookup runs once per sweep), never per candidate. Error
+      // CLASS and driver code only — never the message, consistent with the rest
+      // of this worker; no payment, provider or credential data is involved here.
+      const context = {
+        incidentType: BLOCKED_INCIDENT_TYPE,
+        errorClass: err instanceof Error ? err.name : 'unknown',
+        errorCode: deferralErrorCode(err),
+        fallback: 'no_deferral',
+      };
+      this.logger.warn({ event: 'reconciliation.deferral_lookup_failed', ...context });
+      this.logs?.write({
+        level: 'WARN',
+        module: 'worker.midtrans-reconciliation',
+        action: 'deferral.lookup_failed',
+        message: 'blocked-payment backoff lookup failed; reconciling without deferral this tick',
+        metadata: context,
+      });
+      return [];
+    }
+  }
+
   /** One sweep. A failing candidate never aborts the batch. */
   async reconcile(): Promise<ReconciliationTick> {
     const cutoff = new Date(this.nowMs() - this.config.minAgeMs);
-    const candidates = await this.findCandidates(cutoff);
+    const deferred = await this.deferredPaymentIds();
+    const candidates = await this.findCandidates(cutoff, deferred);
 
-    const tick: ReconciliationTick = { scanned: candidates.length, transitioned: 0, unchanged: 0, failed: 0 };
+    const tick: ReconciliationTick = { scanned: candidates.length, transitioned: 0, unchanged: 0, failed: 0, deferred: deferred.length };
 
     for (const transaction of candidates) {
       if (this.stopped) break;

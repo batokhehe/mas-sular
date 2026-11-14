@@ -73,7 +73,11 @@ function settlementOver(currentStatus: PaymentStatus) {
     },
     $transaction: jest.fn(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx)),
   };
-  const inventory = { commitForOrder: jest.fn(async () => 1) };
+  const inventory = {
+    commitForOrder: jest.fn(async () => 1),
+    // C1-a B guard: full coverage in these scenarios.
+    assertCommittedCoverage: jest.fn(async () => ({ mode: 'COVERED', products: 1 })),
+  };
   // Typed args so the assertions can read the release-reason argument.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const cancellation = { cancelAndRestock: jest.fn(async (..._a: any[]) => ({ cancelled: true })) };

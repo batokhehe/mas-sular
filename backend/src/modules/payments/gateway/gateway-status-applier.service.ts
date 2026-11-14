@@ -1,6 +1,8 @@
 import { ConflictException, Injectable, Logger, Optional } from '@nestjs/common';
-import { PaymentGatewayTransaction, PaymentStatus } from '@prisma/client';
+import { IncidentSeverity, PaymentGatewayTransaction, PaymentStatus } from '@prisma/client';
 import { LogService } from '../../../infrastructure/logging/log.service';
+import { IncidentCenterService, PaymentIncidentType } from '../../../infrastructure/logging/incident-center.service';
+import { InventoryCoverageError } from '../../inventory/inventory-coverage.error';
 import { PaymentSettlementService, SettlementActor } from '../settlement/payment-settlement.service';
 import { StatusVerification } from './domain/midtrans-status-verification.util';
 
@@ -44,6 +46,10 @@ export class GatewayStatusApplier {
   constructor(
     private readonly settlement: PaymentSettlementService,
     @Optional() private readonly logs?: LogService,
+    // C1-a: durable incidents for captured-but-unsettled payments. Optional so
+    // positional construction in existing tests keeps working; IncidentCenterService
+    // is provided by the @Global LoggingModule, so Nest always injects it.
+    @Optional() private readonly incidents?: IncidentCenterService,
   ) {}
 
   async apply({ transaction, verified, source }: ApplyRequest): Promise<ApplyOutcome> {
@@ -88,12 +94,69 @@ export class GatewayStatusApplier {
       }
     } catch (err) {
       if (err instanceof ConflictException) {
+        // C1-a: when the provider says the money is captured but settlement was
+        // refused, persist a durable incident BEFORE acknowledging. The settlement
+        // transaction has already rolled back; the incident is its own transaction.
+        // If that write fails the error propagates, so the notification stays
+        // retryable instead of being acknowledged with nothing recorded.
+        if (verified.paymentStatus === PaymentStatus.PAID) {
+          await this.recordCapturedNotSettled(transaction, verified, source, err);
+        }
         // Terminal payment or cancelled order: a conclusion, not a failure. Retrying
         // can never change it, so callers must not treat this as retryable.
         return this.record(transaction, verified, source, 'illegal_transition', err.message);
       }
       throw err; // rolled back → nothing partial → caller may retry
     }
+  }
+
+  /**
+   * Captured-but-not-settled incident (C1-a). Dedup by (type, paymentId) lives in
+   * IncidentCenterService.recordPaymentException, so webhook retries and
+   * reconciliation passes bump one active incident instead of creating more.
+   * Metadata holds correlators only — never a raw provider body or a credential.
+   */
+  private async recordCapturedNotSettled(
+    transaction: PaymentGatewayTransaction,
+    verified: Extract<StatusVerification, { ok: true }>,
+    source: string,
+    err: ConflictException,
+  ): Promise<void> {
+    if (!this.incidents) return;
+
+    const coverage = err instanceof InventoryCoverageError ? err : null;
+    const current = await this.settlement.currentState(transaction.paymentId);
+    // Lost a race to a concurrent settle of the SAME payment (webhook vs
+    // reconciliation): the payment IS paid and settled once. Nothing to record.
+    if (!coverage && current?.status === PaymentStatus.PAID) return;
+
+    const type: PaymentIncidentType = coverage ? 'payment.settlement_inventory_conflict' : 'payment.captured_not_settled';
+    await this.incidents.recordPaymentException({
+      type,
+      paymentId: transaction.paymentId,
+      orderId: coverage?.orderId ?? current?.orderId ?? null,
+      severity: IncidentSeverity.HIGH,
+      title: coverage
+        ? 'Captured payment blocked: order stock no longer reserved'
+        : 'Captured payment could not be settled',
+      description: coverage
+        ? `${transaction.provider} reported ${verified.facts.transactionStatus} but the order's reservations do not cover the ordered quantities; the payment was left unsettled. Manual review required (no automatic refund or re-reservation).`
+        : `${transaction.provider} reported ${verified.facts.transactionStatus} but settlement was refused: ${err.message}. Manual review required (no automatic refund).`,
+      source,
+      module: 'payments.gateway',
+      metadata: {
+        provider: transaction.provider,
+        providerOrderId: transaction.providerOrderId ?? null,
+        providerTransactionId: verified.facts.transactionId ?? null,
+        providerStatus: verified.facts.transactionStatus,
+        gatewayTransactionId: transaction.id,
+        paymentStatus: current?.status ?? null,
+        reason: err.message,
+        source,
+        ...(coverage ? { shortfalls: coverage.shortfalls } : {}),
+      },
+    });
+    this.logger.warn(`payment ${transaction.paymentId}: ${type} incident recorded`);
   }
 
   /** Safe observability. Correlators only — never a raw response or a credential. */

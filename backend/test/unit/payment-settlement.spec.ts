@@ -413,7 +413,9 @@ describe('PaymentSettlementService — one state machine for both actors', () =>
     // there is exactly one public entry point.
     const surface = Object.getOwnPropertyNames(PaymentSettlementService.prototype)
       .filter((m) => m !== 'constructor' && !m.startsWith('_'));
-    expect(surface).toEqual(['settle', 'fail', 'expire', 'recordGatewayState', 'note', 'source']);
+    // C1-a: `currentState` is a read-only lookup (no transition) used by the gateway
+    // applier to tell a lost settle race from a genuine captured-not-settled case.
+    expect(surface).toEqual(['settle', 'fail', 'expire', 'currentState', 'recordGatewayState', 'note', 'source']);
   });
 
   it('builds payment.paid through the shared envelope builder, not by hand', () => {
@@ -525,6 +527,9 @@ describe('PaymentSettlementService — atomicity and rollback', () => {
         attempted.push('inventory.commit');
         return 2;
       }),
+      // C1-a B guard: full coverage here; coverage failures are exercised in
+      // c1a-settlement-coverage.spec.ts.
+      assertCommittedCoverage: jest.fn(async () => ({ mode: 'COVERED', products: 1 })),
     };
     const shipments = { createForOrderSafe: jest.fn(async () => undefined) };
 

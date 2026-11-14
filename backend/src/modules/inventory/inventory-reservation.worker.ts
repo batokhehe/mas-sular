@@ -4,7 +4,7 @@ import { PrismaService } from '../../database/prisma.service';
 import { LogService } from '../../infrastructure/logging/log.service';
 import { INVENTORY_RESERVATION_CONFIG, InventoryReservationConfig } from './inventory-reservation.config';
 import { InventoryReservationMetrics } from './inventory-reservation.metrics';
-import { InventoryReservationService } from './inventory-reservation.service';
+import { InventoryReservationService, PAYMENT_AWAITING_STATUSES } from './inventory-reservation.service';
 
 /**
  * Self-scheduled worker that releases EXPIRED reservations: reservations still
@@ -87,7 +87,16 @@ export class InventoryReservationWorker implements OnApplicationBootstrap, OnMod
   /** Sweep a batch of due reservations; CAS-expire each. Returns the count released. */
   async releaseExpired(): Promise<number> {
     const due = await this.prisma.inventoryReservation.findMany({
-      where: { status: ReservationStatus.RESERVED, expiresAt: { not: null, lte: new Date(this.nowMs()) } },
+      where: {
+        status: ReservationStatus.RESERVED,
+        expiresAt: { not: null, lte: new Date(this.nowMs()) },
+        // C1-a: skip reservations whose order is still payable (live PENDING /
+        // WAITING_VERIFICATION payment). expireReservation re-checks this under
+        // the payment row lock, which is the authoritative guard; this pre-filter
+        // keeps such rows from filling every batch and starving due reservations
+        // of terminal, orphan and legacy orders behind them.
+        NOT: { order: { payment: { is: { status: { in: PAYMENT_AWAITING_STATUSES }, deletedAt: null } } } },
+      },
       orderBy: { expiresAt: 'asc' },
       take: this.config.batchSize,
       select: { id: true },
