@@ -98,24 +98,38 @@ sudo install -d -m 700 /srv/backups/mas-sular
 ```
 Then escrow a copy of the key OFF the VPS (§17) **before** the first real backup.
 
+**Docker daemon pin (every command in this runbook).** All Docker commands here target
+the VPS's local daemon explicitly, so a context saved with `docker context use` (in
+your or root's `~/.docker/config.json`) can never redirect a backup, a drill or a
+restore to another daemon:
+- `docker -H unix:///var/run/docker.sock ...` for every direct Docker or Docker Compose
+  command (also inside the `$C` variable of §8.2);
+- `DOCKER_HOST=unix:///var/run/docker.sock` for the scripts, which call Docker
+  themselves. With sudo it goes **after** sudo, through `env` (`sudo env DOCKER_HOST=... VAR=... bash ...`):
+  sudo resets the environment, so the variable is silently dropped if it is placed in
+  front of sudo or exported before it;
+- `build --builder default` for every image build (§12), so a saved buildx builder
+  cannot send the build to another BuildKit.
+
 **Run it:**
 ```bash
-sudo BACKUP_DIR=/srv/backups/mas-sular BACKUP_KEY_FILE=/etc/mas-sular/backup.key \
+sudo env DOCKER_HOST=unix:///var/run/docker.sock BACKUP_DIR=/srv/backups/mas-sular BACKUP_KEY_FILE=/etc/mas-sular/backup.key \
      bash scripts/backup/backup.sh
 ```
 
 **Before every migration / release (mandatory):** the same command with a label, and
 do not proceed unless it exits 0:
 ```bash
-sudo BACKUP_LABEL=pre-migrate BACKUP_DIR=/srv/backups/mas-sular BACKUP_KEY_FILE=/etc/mas-sular/backup.key \
+sudo env DOCKER_HOST=unix:///var/run/docker.sock BACKUP_LABEL=pre-migrate BACKUP_DIR=/srv/backups/mas-sular BACKUP_KEY_FILE=/etc/mas-sular/backup.key \
      bash scripts/backup/backup.sh
 ```
 Also run it once **before the first real order**, and restore-drill it (§8).
 
 Optional overrides: `COMPOSE_FILE`, `ENV_FILE`, `POSTGRES_SERVICE`, `POSTGRES_CONTAINER`,
-`UPLOADS_VOLUME`, `BACKUP_LABEL`, `KEEP_POSTGRES`, `KEEP_UPLOADS`.
+`UPLOADS_VOLUME`, `BACKUP_LABEL`, `KEEP_POSTGRES`, `KEEP_UPLOADS` (each a whole number
+1–999; any other value, including `0`, aborts before anything runs).
 
-Retention preview (deletes nothing): `... bash scripts/backup/backup.sh --dry-run-retention`
+Retention preview (deletes nothing): `sudo env DOCKER_HOST=unix:///var/run/docker.sock BACKUP_DIR=/srv/backups/mas-sular BACKUP_KEY_FILE=/etc/mas-sular/backup.key bash scripts/backup/backup.sh --dry-run-retention`
 
 **What the script does, in order:**
 1. Atomic `mkdir` lock (no overlapping runs)
@@ -166,7 +180,7 @@ Tamper detection is **VERIFIED**: a single flipped byte fails decryption / the m
 | # | Scenario | Immediate action | Artifact | Target | Proven? |
 |---|---|---|---|---|---|
 | **A** | App running, data corrupted | Freeze writes; identify last good backup | postgres `.enc` | **Drill first (§8)**, then cut over (§8.2) | ⚠️ drill proven; cutover not drilled on a VPS |
-| **B** | Postgres container lost, volume intact | `docker compose up -d postgres` | none | existing volume | ✅ compose recreates |
+| **B** | Postgres container lost, volume intact | `docker -H unix:///var/run/docker.sock compose up -d postgres` | none | existing volume | ✅ compose recreates |
 | **C** | Postgres volume lost | §8.2 into a new volume | postgres `.enc` + key | new volume | ✅ restore mechanism **VERIFIED** |
 | **D** | Uploads volume lost | §9 | uploads `.enc` + key | new volume | ✅ **VERIFIED** |
 | **E** | Docker host restarted, disks intact | Containers restart (`unless-stopped`) | none | — | ✅ reboot simulation recovered |
@@ -186,16 +200,17 @@ network**, prints what came back, and removes the container. It never touches th
 application's containers or volumes.
 
 ```bash
-sudo BACKUP_KEY_FILE=/etc/mas-sular/backup.key bash scripts/backup/restore-drill.sh \
+sudo env DOCKER_HOST=unix:///var/run/docker.sock BACKUP_KEY_FILE=/etc/mas-sular/backup.key bash scripts/backup/restore-drill.sh \
   /srv/backups/mas-sular/mas-sular-postgres-<TS>.dump.enc \
   /srv/backups/mas-sular/manifest-<TS>.json
-# Expect: DRILL_TABLES=<n>  DRILL_MIGRATIONS_APPLIED=<number of migrations>  DRILL_ROWS_Order=...
-# Optional: DRILL_EXTRA_SQL='select max("createdAt") from "Order"'   (newest order in the backup)
+# Expect: DRILL_TABLES=<n>  DRILL_MIGRATIONS_APPLIED=<number of migrations>  DRILL_ROWS_Order=...  (counts only)
+# Optional, placed after `env` like the other variables: DRILL_EXTRA_SQL='select max("createdAt") from "Order"'
+#   (newest order timestamp). Only aggregates: never a query that returns customer rows or secrets.
 ```
 
 The restored database is plaintext customer data, so the drill is designed to keep it
 out of Docker volumes and off the disk. PGDATA is a **tmpfs** (RAM) inside the drill container, the container runs
-with `--rm`, and cleanup removes it with `docker rm -f -v`. Cleanup only targets the
+with `--rm`, and cleanup force-removes it together with its anonymous volumes. Cleanup only targets the
 container that carries this run's random `id.baksomassular.restore-drill` label. A
 pre-existing container with the same name makes the drill refuse to run. Cleanup also
 runs on failure and on INT/TERM/HUP; an interrupted drill exits 130/143/129.
@@ -238,14 +253,14 @@ reasoned about and tested offline: Docker creating no anonymous volume for the i
 and start-up fitting the CPU cap. The first real drill on each host must prove them:
 
 ```bash
-docker volume ls -q --filter dangling=true | sort > /tmp/drill-vols-before
-docker ps -aq --no-trunc | sort > /tmp/drill-ctrs-before
-# ... run the drill ...
-docker volume ls -q --filter dangling=true | sort > /tmp/drill-vols-after
-docker ps -aq --no-trunc | sort > /tmp/drill-ctrs-after
+docker -H unix:///var/run/docker.sock volume ls -q --filter dangling=true | sort > /tmp/drill-vols-before
+docker -H unix:///var/run/docker.sock ps -aq --no-trunc | sort > /tmp/drill-ctrs-before
+# ... run the drill (§8.1 command above, with its DOCKER_HOST pin) ...
+docker -H unix:///var/run/docker.sock volume ls -q --filter dangling=true | sort > /tmp/drill-vols-after
+docker -H unix:///var/run/docker.sock ps -aq --no-trunc | sort > /tmp/drill-ctrs-after
 comm -13 /tmp/drill-vols-before /tmp/drill-vols-after   # must print nothing (no new volume)
 comm -13 /tmp/drill-ctrs-before /tmp/drill-ctrs-after   # must print nothing (no leftover container)
-docker ps -aq --filter label=id.baksomassular.restore-drill   # must print nothing
+docker -H unix:///var/run/docker.sock ps -aq --filter label=id.baksomassular.restore-drill   # must print nothing
 ```
 
 If any of these prints something, do **not** delete it blindly. Record it, then treat a
@@ -259,7 +274,7 @@ approval. Until this check has passed once, treat the isolation as unproven.
 > state first if it still runs — you may need it for forensics.
 
 ```bash
-C="docker compose --env-file ./production.env -f docker-compose.production.yml"
+C="docker -H unix:///var/run/docker.sock compose --env-file ./production.env -f docker-compose.production.yml"
 
 # 1. Stop everything that writes. Keep postgres running.
 $C stop backend frontend admin
@@ -292,10 +307,10 @@ gpg --batch --quiet --pinentry-mode loopback --passphrase-file /etc/mas-sular/ba
 sha256sum /root/uploads.tar.gz && gzip -t /root/uploads.tar.gz && tar tzf /root/uploads.tar.gz >/dev/null
 
 # Restore into a NEW volume first, verify, then point the stack at it (or copy into the live one)
-docker volume create mas-sular_uploads_restore
-docker run --rm -v mas-sular_uploads_restore:/restore -v /root:/in:ro debian:12-slim \
+docker -H unix:///var/run/docker.sock volume create mas-sular_uploads_restore
+docker -H unix:///var/run/docker.sock run --rm -v mas-sular_uploads_restore:/restore -v /root:/in:ro debian:12-slim \
   tar xzf /in/uploads.tar.gz -C /restore --numeric-owner
-docker run --rm -u 1000:1000 -v mas-sular_uploads_restore:/app/uploads alpine \
+docker -H unix:///var/run/docker.sock run --rm -u 1000:1000 -v mas-sular_uploads_restore:/app/uploads alpine \
   sh -c 'touch /app/uploads/.t && rm /app/uploads/.t && echo WRITABLE'
 ```
 
@@ -306,7 +321,7 @@ docker run --rm -u 1000:1000 -v mas-sular_uploads_restore:/app/uploads alpine \
 ---
 
 ## 10. Redis — **do not restore**
-Recreate (`docker compose up -d redis`); the cache warms itself. `/health/ready` → `"redis":"ok"`.
+Recreate (`docker -H unix:///var/run/docker.sock compose up -d redis`); the cache warms itself. `/health/ready` → `"redis":"ok"`.
 
 ## 11. RabbitMQ — **rebuild, do not restore**
 Recreate; consumers re-assert topology; the relay drains `OutboxEvent`; `ProcessedEvent`
@@ -328,10 +343,10 @@ host + Docker
 1. Provision the host, install Docker (`systemctl enable docker`)
 2. Clone the repository at the **release tag**
 3. Restore `production.env` and the backup key from escrow
-4. `docker compose --env-file ./production.env -f docker-compose.production.yml up -d postgres`
+4. `docker -H unix:///var/run/docker.sock compose --env-file ./production.env -f docker-compose.production.yml up -d postgres`
 5. Copy the artifacts back from the off-server store; restore-drill (§8.1); restore (§8.2 step 3)
 6. Restore the uploads volume (§9)
-7. `... up -d --build` — `backend-migrate` runs before `backend`
+7. `docker -H unix:///var/run/docker.sock compose --env-file ./production.env -f docker-compose.production.yml build --builder default && docker -H unix:///var/run/docker.sock compose --env-file ./production.env -f docker-compose.production.yml up -d --no-build` — `backend-migrate` runs before `backend`. `--builder default` keeps the build on the pinned daemon's own BuildKit, so a saved buildx builder or a `BUILDX_BUILDER` variable cannot send the build context elsewhere.
 8. Reverse proxy / TLS; `/api/v1/health/ready`; §21
 
 ---
@@ -370,10 +385,13 @@ Nothing is scheduled until you install it. On the VPS (as root), daily at 02:15 
 
 ```bash
 cat > /etc/cron.d/mas-sular-backup <<'CRON'
-15 2 * * * root cd /opt/mas-sular && BACKUP_DIR=/srv/backups/mas-sular BACKUP_KEY_FILE=/etc/mas-sular/backup.key bash scripts/backup/backup.sh >> /var/log/mas-sular-backup.log 2>&1
+15 2 * * * root cd /opt/mas-sular && DOCKER_HOST=unix:///var/run/docker.sock BACKUP_DIR=/srv/backups/mas-sular BACKUP_KEY_FILE=/etc/mas-sular/backup.key bash scripts/backup/backup.sh >> /var/log/mas-sular-backup.log 2>&1
 CRON
 ```
-(`/opt/mas-sular` = the repository checkout.) Check `/var/log/mas-sular-backup.log`
+(`/opt/mas-sular` = the repository checkout of this stack. On the VPS shared with the
+isolated production stack, `deploy/prd/README.md` documents the staging checkout as
+`~/apps/mas-sular`: confirm which directory really holds this stack's `production.env`
+before installing the cron, and use that path in the `cd`.) Check `/var/log/mas-sular-backup.log`
 for `backup OK` daily until alerting exists (§19).
 
 ---

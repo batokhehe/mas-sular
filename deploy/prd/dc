@@ -1,27 +1,213 @@
 #!/usr/bin/env bash
-# Every PRODUCTION compose command goes through here. It pins the project to
-# mas-sular-prd and always applies the secret env files, so it can never address
-# the staging stack (project mas-sular) by accident.
+# The operator's entry point for PRODUCTION compose commands. It pins the project
+# to mas-sular-prd and the trusted env files (lib/preflight.sh, the same call
+# deploy.sh uses), so it can never address the staging stack by accident - and
+# it refuses to apply configuration that has not passed the preflight.
 #
 #   deploy/prd/dc ps
 #   deploy/prd/dc logs -f --tail=200 backend
 #   deploy/prd/dc exec postgres psql -U mas_sular_admin -d mas_sular
+#   deploy/prd/dc up -d --no-deps --force-recreate backend    (runs the preflight first)
+#
+# Command classes (see deploy/prd/README.md section 5):
+#   read-only    ps logs top images port stats events version ls, config --quiet
+#                -> run directly (config without --quiet would print secrets: refused)
+#   access       exec -> run directly (operator access inside a running container;
+#                does not create containers or apply configuration)
+#   stopping     stop kill pause down rm -> run directly (they cannot apply
+#                configuration, and incident response must not be blocked by a
+#                broken config); -v/--volumes and --rmi are refused
+#   restarting   start restart unpause -> rollback-policy preflight first
+#                (production config mandatory; staging compared when available)
+#   applying     up create run -> STRICT preflight first (deploy.sh --check),
+#                then every application image for the IMAGE_TAG in use must
+#                already exist; up/create always get --no-build
+#   anything else (build, pull, push, cp, watch, scale, ...) -> refused: use
+#                deploy/prd/deploy.sh
+# dc NEVER builds or pulls an application image: `up`/`create` always run with
+# --no-build, and before up/create/run every mas-sular-prd/<service>:<tag> image
+# must exist (compose `run` has no --no-build). A missing image, an unknown or
+# malformed IMAGE_TAG, or an image that cannot be verified aborts.
+# The preflight runs in THIS process immediately before the compose call; there
+# is no success marker or environment flag that could be reused or go stale.
+# Every subcommand has an option allow-list, matched token by token EXACTLY:
+# compose global options such as --env-file / -f / -p (which compose also
+# accepts after the subcommand) and value overrides such as run -e KEY=value are
+# refused. Positionals must be services of docker-compose.yml. A rejected
+# argument is never echoed (one might be a pasted credential); only the name of
+# a known compose option is shown.
+#
+# The Docker daemon is pinned to unix:///var/run/docker.sock (-H on every call);
+# DOCKER_HOST, DOCKER_CONTEXT, DOCKER_CONFIG, DOCKER_TLS_VERIFY, DOCKER_CERT_PATH,
+# COMPOSE_PROFILES, BUILDX_BUILDER and BUILDX_CONFIG in the environment are
+# refused, and a context saved with `docker context use` cannot redirect it.
+# This is an operator SAFETY control: anyone with access to the Docker socket
+# can still run docker directly.
 #
 # IMAGE_TAG comes from $PRD_CONF_DIR/release.env (written by deploy.sh); an
 # IMAGE_TAG in the shell environment wins over it.
-set -euo pipefail
+set +x
+set -Eeuo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export PRD_CONF_DIR="${PRD_CONF_DIR:-/etc/mas-sular-prd}"
 
-[[ -r "$PRD_CONF_DIR/compose.env" ]] || { echo "dc: $PRD_CONF_DIR/compose.env not readable" >&2; exit 1; }
+log()  { printf '\n==> %s\n' "$*"; }
+warn() { printf 'WARN: %s\n' "$*" >&2; }
+fail() { printf 'ABORT: dc: %s\n' "$*" >&2; exit 1; }
 
-args=(--env-file "$PRD_CONF_DIR/compose.env")
-if [[ -f "$PRD_CONF_DIR/release.env" ]]; then
-  args+=(--env-file "$PRD_CONF_DIR/release.env")
-elif [[ -z "${IMAGE_TAG:-}" ]]; then
-  # Nothing deployed yet: let read-only commands (ps, config) interpolate.
-  export IMAGE_TAG=undeployed
-fi
+# shellcheck source=lib/prd-root.sh
+. "$HERE/lib/prd-root.sh"
+# shellcheck source=lib/secret-reuse.sh
+. "$HERE/lib/secret-reuse.sh"
+# shellcheck source=lib/preflight.sh
+. "$HERE/lib/preflight.sh"
 
-exec docker compose -p mas-sular-prd "${args[@]}" -f "$HERE/docker-compose.yml" "$@"
+# Fixed production config root; a PRD_CONF_DIR naming any other directory is refused.
+prd_setup "$HERE/docker-compose.yml"
+
+refuse() { fail "$1 (see deploy/prd/README.md section 5)"; }
+
+# Option names that may appear in a refusal message: every option of the dc
+# allow-lists plus the compose options dc refuses on purpose. Any other token
+# (or anything attached to a name, e.g. -pVALUE) is never shown.
+DC_SHOWABLE_OPTIONS=(-a --all -q --quiet --services -f --follow -t --timestamps --no-color --no-log-prefix
+  --tail -n --since --until --protocol --index --no-stream --no-trunc --json --short -T -i -it -ti
+  -u --user -w --workdir --timeout -s --signal --remove-orphans --force --stop --no-deps -d --detach
+  --force-recreate --no-recreate --wait --no-build --wait-timeout --rm -e --env
+  --build --pull --env-file --file -p --project-name --profile --project-directory --entrypoint
+  -v --volumes --rmi --service-ports --publish --volume --name --label -l --scale --dry-run)
+
+# exact membership: _dc_in <word> <list...>
+_dc_in() {
+  local w="$1" x
+  shift
+  for x in "$@"; do [[ "$x" == "$w" ]] && return 0; done
+  return 1
+}
+
+# The option NAME of a rejected token if it is a known compose option, else nothing.
+_dc_tok_name() {
+  local name="${1%%=*}"
+  if _dc_in "$name" "${DC_SHOWABLE_OPTIONS[@]}"; then printf '%s' "$name"; else printf '(not shown)'; fi
+}
+
+# Value check for options that take one.
+_dc_value_ok() {
+  case "$1" in
+    -e|--env) [[ "$2" =~ ^BOOTSTRAP_[A-Z0-9_]+$ ]] ;;   # NAME only: the value comes from the shell
+    -u|--user|-w|--workdir) [[ "$2" =~ ^[A-Za-z0-9_./:-]+$ ]] ;;
+    *) [[ "$2" =~ ^[A-Za-z0-9_.:+-]+$ ]] ;;
+  esac
+}
+
+# _dc_check_args <flags without value> <flags with value> <services|command|port|none> args...
+#   Every option token must EQUAL an allow-listed name (or NAME=value for an
+#   option that takes a value); no substring or prefix matching.
+#   services: every positional must be a service of docker-compose.yml
+#   command:  the first positional is the service, everything after it is the
+#             container command (not parsed by compose)
+#   port:     exactly <service> <private port>
+#   none:     no positional allowed
+_dc_check_args() {
+  local -a noval=() withval=()
+  read -r -a noval <<<"$1"
+  read -r -a withval <<<"$2"
+  local pmode="$3" a name npos=0
+  shift 3
+  while (( $# )); do
+    a="$1"; shift
+    if [[ "$a" == -* ]]; then
+      [[ "$a" == -- ]] && refuse "'--' is not accepted by dc"
+      if (( ${#noval[@]} )) && _dc_in "$a" "${noval[@]}"; then continue; fi
+      name="${a%%=*}"
+      if (( ${#withval[@]} )) && _dc_in "$name" "${withval[@]}"; then
+        if [[ "$a" == *=* ]]; then
+          _dc_value_ok "$name" "${a#*=}" || refuse "option $name has an unsupported value (not shown)"
+        else
+          (( $# )) || refuse "option $name needs a value"
+          _dc_value_ok "$name" "$1" || refuse "option $name has an unsupported value (not shown)"
+          shift
+        fi
+        continue
+      fi
+      refuse "option $(_dc_tok_name "$a") is not allowed for dc $SUB"
+    fi
+    npos=$((npos + 1))
+    if [[ "$pmode" == port && "$npos" == 2 ]]; then
+      [[ "$a" =~ ^[0-9]{1,5}$ ]] || refuse "dc port needs <service> <private port> (argument not shown)"
+      continue
+    fi
+    [[ "$pmode" == none ]] && refuse "dc $SUB takes no service or argument"
+    [[ "$pmode" == port && "$npos" -gt 2 ]] && refuse "dc port takes exactly <service> <private port>"
+    _dc_in "$a" "${PRD_SERVICES[@]}" || refuse "unknown service for dc $SUB (not shown); services: ${PRD_SERVICES[*]}"
+    [[ "$pmode" == command ]] && return 0
+  done
+  [[ "$pmode" == command ]] && refuse "dc $SUB needs a service name"
+  [[ "$pmode" == port && "$npos" != 2 ]] && refuse "dc port takes exactly <service> <private port>"
+  return 0
+}
+
+(( $# >= 1 )) || refuse "a compose command is required, e.g. deploy/prd/dc ps"
+SUB="$1"
+shift
+
+case "$SUB" in
+  # ---- read-only
+  ps)      CLASS=readonly; _dc_check_args "-a --all -q --quiet --services" "" services "$@" ;;
+  logs)    CLASS=readonly; _dc_check_args "-f --follow -t --timestamps --no-color --no-log-prefix" "--tail -n --since --until" services "$@" ;;
+  top)     CLASS=readonly; _dc_check_args "" "" services "$@" ;;
+  images)  CLASS=readonly; _dc_check_args "-q --quiet" "" services "$@" ;;
+  port)    CLASS=readonly; _dc_check_args "" "--protocol --index" port "$@" ;;
+  stats)   CLASS=readonly; _dc_check_args "--no-stream -a --all --no-trunc" "" services "$@" ;;
+  events)  CLASS=readonly; _dc_check_args "--json" "" services "$@" ;;
+  version) CLASS=readonly; _dc_check_args "--short" "" none "$@" ;;
+  ls)      CLASS=readonly; _dc_check_args "-a --all -q --quiet" "" none "$@" ;;
+  config)
+    CLASS=readonly
+    _dc_check_args "-q --quiet" "" none "$@"
+    [[ " $* " == *" -q "* || " $* " == *" --quiet "* ]] \
+      || refuse "dc config without --quiet would print every secret; use: deploy/prd/dc config --quiet"
+    ;;
+  # ---- operator access
+  exec)    CLASS=access; _dc_check_args "-T -i -t -it -ti" "-u --user -w --workdir --index" command "$@" ;;
+  # ---- stopping
+  stop)    CLASS=stopping; _dc_check_args "" "-t --timeout" services "$@" ;;
+  kill)    CLASS=stopping; _dc_check_args "" "-s --signal" services "$@" ;;
+  pause)   CLASS=stopping; _dc_check_args "" "" services "$@" ;;
+  down)    CLASS=stopping; _dc_check_args "--remove-orphans" "-t --timeout" services "$@" ;;
+  rm)      CLASS=stopping; _dc_check_args "-f --force -s --stop" "" services "$@" ;;
+  # ---- restarting existing containers
+  start)   CLASS=restarting; _dc_check_args "" "" services "$@" ;;
+  restart) CLASS=restarting; _dc_check_args "--no-deps" "-t --timeout" services "$@" ;;
+  unpause) CLASS=restarting; _dc_check_args "" "" services "$@" ;;
+  # ---- applying configuration
+  up)      CLASS=applying; _dc_check_args "-d --detach --no-deps --force-recreate --no-recreate --remove-orphans --wait --no-build" "--wait-timeout -t --timeout" services "$@" ;;
+  create)  CLASS=applying; _dc_check_args "--force-recreate --no-recreate --no-build --remove-orphans" "" services "$@" ;;
+  run)     CLASS=applying; _dc_check_args "--rm --no-deps -T -d --detach" "-e --env -u --user -w --workdir" command "$@" ;;
+  *)
+    case "$SUB" in
+      build|pull|push|cp|watch|scale|attach|wait|commit|export|publish|alpha|viz|bridge)
+        refuse "dc $SUB is not available - images are built and deployed only by deploy/prd/deploy.sh" ;;
+      *)
+        refuse "unknown or unsupported command (not shown)" ;;
+    esac
+    ;;
+esac
+
+case "$CLASS" in
+  restarting)
+    prd_validate_config_root
+    preflight_rollback
+    ;;
+  applying)
+    prd_validate_config_root
+    preflight
+    # No implicit build or pull: every application image must already exist.
+    prd_require_images
+    # up/create: --no-build ALWAYS (compose `run` has no such option; the image
+    # check above is what stops it from building).
+    case "$SUB" in up|create) set -- --no-build "$@" ;; esac
+    ;;
+esac
+
+prd_compose_exec "$SUB" "$@"
