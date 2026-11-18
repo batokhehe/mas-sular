@@ -39,6 +39,17 @@ BACKUP_KEY_FILE="${BACKUP_KEY_FILE:?BACKUP_KEY_FILE must be set (must live OUTSI
 # pre-migration runs count alike). 14 daily = two weeks of restore points.
 KEEP_POSTGRES="${KEEP_POSTGRES:-14}"
 KEEP_UPLOADS="${KEEP_UPLOADS:-14}"
+# Both end up in bash arithmetic, which EVALUATES its operands: a value such as
+# `BASH_VERSINFO[$(cmd)0]` would run cmd. Plain decimal digits only (1-999),
+# checked as text before any arithmetic, lock or docker call; the value is not shown.
+for _keep_var in KEEP_POSTGRES KEEP_UPLOADS; do
+  if [[ ! "${!_keep_var}" =~ ^[0-9]{1,3}$ ]] || (( 10#${!_keep_var} < 1 )); then
+    echo "ERROR: $_keep_var must be a whole number from 1 to 999 (value not shown)" >&2
+    exit 1
+  fi
+  printf -v "$_keep_var" '%d' "$((10#${!_keep_var}))"
+done
+unset _keep_var
 
 DRY_RUN_RETENTION=0
 [[ "${1:-}" == "--dry-run-retention" ]] && DRY_RUN_RETENTION=1
