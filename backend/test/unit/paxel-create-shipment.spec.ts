@@ -139,6 +139,22 @@ const bodyOf = (call: Call) => JSON.parse(call.init.body as string);
 // =================================================================== payload ==
 
 describe('Paxel create — request', () => {
+  it('is untouched by the JNE 30-character address limit: long addresses are sent in full', async () => {
+    const longOrigin = 'Jl. Gudang Pusat Mas Sular No. 99, Kawasan Industri';
+    const longDestination = 'Jl. Raya Bandung Selatan No. 123, Blok A';
+    const base = input();
+    const { provider, calls } = build();
+    await provider.createShipment(
+      input({
+        origin: { ...base.origin, addressDetail: longOrigin },
+        destination: { ...base.destination, addressDetail: longDestination },
+      }),
+    );
+    const body = bodyOf(calls[0]);
+    expect(body.origin.address).toBe(longOrigin);
+    expect(body.destination.address).toBe(longDestination);
+  });
+
   it('POSTs the documented endpoint with key, signature and JSON content type', async () => {
     const { provider, calls } = build();
     await provider.createShipment(input());
