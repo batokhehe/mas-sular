@@ -9,12 +9,14 @@ import {
   JNE_BOOKING_PICKUP_SERVICE,
   JNE_BOOKING_SERVICE_CODE,
   JNE_PICKUP_CASHLESS_FIELDS,
+  JNE_ADDRESS_MAX_LENGTH,
   JNE_ORDER_ID_MAX_LENGTH,
   JNE_SPECIAL_INSTRUCTION,
   JnePickupCashlessSource,
   parseJnePickupCashlessResponse,
   serializeJnePickupCashless,
   toJneOrderId,
+  truncateJneAddress,
 } from '../../src/modules/shipment/infrastructure/providers/jne-pickup-cashless';
 import { PermanentError } from '../../src/modules/shipping/domain/shipping-errors';
 import { JnePickupConfig } from '../../src/modules/shipping/shipping.config';
@@ -208,7 +210,8 @@ describe('field mapping', () => {
     expect(fields).toMatchObject({
       RECEIVER_NAME: 'Budi Santoso',
       RECEIVER_ADDR1: 'Jl. Veteran No. 65',
-      RECEIVER_ADDR2: 'Kel. Kebon Pisang, Kec. Sumur Bandung',
+      // 'Kel. Kebon Pisang, Kec. Sumur Bandung' (37) cut to JNE's 30-character limit.
+      RECEIVER_ADDR2: 'Kel. Kebon Pisang, Kec. Sumur ',
       RECEIVER_CITY: 'Kota Bandung',
       RECEIVER_ZIP: '40112',
       RECEIVER_REGION: 'Jawa Barat',
@@ -393,13 +396,14 @@ describe('serialization — application/x-www-form-urlencoded', () => {
       receiver: {
         ...SOURCE.receiver,
         name: 'Siti "Ani" Rahmawati',
-        addressDetail: 'Jl. Merdeka No. 12/B, RT 01/RW 02 & Gg. Mawar #3 (belakang masjid) 100% <depan>',
+        // Within JNE's 30-character address limit, so nothing is truncated.
+        addressDetail: 'No. 12/B & Gg. #3 100% <dpn>',
       },
     });
     const body = serializeJnePickupCashless(credentials, tricky);
     // Encoded on the wire...
     expect(body).toContain('SERVICE_CODE=REG&');
-    expect(body).toContain('%3Cdepan%3E'); // `<` / `>` are percent-encoded
+    expect(body).toContain('%3Cdpn%3E'); // `<` / `>` are percent-encoded
     expect(body).not.toContain('JTR');
     expect(body).not.toContain('& Gg.');
     expect(body).not.toContain('#3');
@@ -407,7 +411,7 @@ describe('serialization — application/x-www-form-urlencoded', () => {
     const decoded = Object.fromEntries(new URLSearchParams(body));
     expect(decoded.SERVICE_CODE).toBe('REG');
     expect(decoded.RECEIVER_NAME).toBe('Siti "Ani" Rahmawati');
-    expect(decoded.RECEIVER_ADDR1).toBe('Jl. Merdeka No. 12/B, RT 01/RW 02 & Gg. Mawar #3 (belakang masjid) 100% <depan>');
+    expect(decoded.RECEIVER_ADDR1).toBe('No. 12/B & Gg. #3 100% <dpn>');
     expect(decoded.username).toBe('user-test');
   });
 
@@ -661,5 +665,118 @@ describe('toJneOrderId — the business rule', () => {
     expect(() => toJneOrderId('BMS-20260916-F5YMXSND-EXTRA')).toThrow(/23 characters exceeds JNE's limit of 20/);
     // Exactly 20 after the rule is accepted.
     expect(toJneOrderId('ABCDEFGHIJKLMNOPQRSTU')).toHaveLength(20);
+  });
+});
+
+describe('address truncation — JNE accepts at most 30 characters per address line', () => {
+  const LONG = 'Jl. Raya Bandung Selatan No. 123, Blok A';
+  const FIRST_30 = 'Jl. Raya Bandung Selatan No. 1';
+
+  describe('truncateJneAddress', () => {
+    it('the limit is 30', () => {
+      expect(JNE_ADDRESS_MAX_LENGTH).toBe(30);
+      expect(FIRST_30).toHaveLength(30);
+    });
+
+    it('shorter than 30: unchanged', () => {
+      expect(truncateJneAddress('Jl. Veteran No. 65')).toBe('Jl. Veteran No. 65');
+    });
+
+    it('exactly 30: unchanged', () => {
+      const exact = 'A'.repeat(30);
+      expect(truncateJneAddress(exact)).toBe(exact);
+    });
+
+    it('longer than 30: the first 30 characters, no ellipsis', () => {
+      expect(truncateJneAddress(LONG)).toBe(FIRST_30);
+      expect(truncateJneAddress('B'.repeat(31))).toBe('B'.repeat(30));
+      expect(truncateJneAddress(LONG)).not.toContain('...');
+    });
+
+    it('empty stays empty', () => {
+      expect(truncateJneAddress('')).toBe('');
+    });
+
+    it('does not modify the value it is given', () => {
+      const original = LONG;
+      truncateJneAddress(original);
+      expect(original).toBe('Jl. Raya Bandung Selatan No. 123, Blok A');
+    });
+
+    it('Indonesian / non-ASCII text is cut on whole characters, never into broken UTF-8', () => {
+      const accented = 'Jl. Pâsir Kaliki Ño. 7, Kelurahan Cicendo Utara';
+      const cut = truncateJneAddress(accented);
+      expect(Array.from(cut)).toHaveLength(30);
+      expect(accented.startsWith(cut)).toBe(true);
+      // A character outside the BMP (two UTF-16 units) at position 30 is kept whole,
+      // never split into a lone surrogate.
+      const astral = `${'x'.repeat(29)}\u{1F600}${'y'.repeat(5)}`;
+      const astralCut = truncateJneAddress(astral);
+      expect(astralCut).toBe(`${'x'.repeat(29)}\u{1F600}`);
+      expect(Buffer.from(astralCut, 'utf8').toString('utf8')).toBe(astralCut);
+    });
+  });
+
+  describe('outbound /pickupcashless payload', () => {
+    const longPickup: Required<JnePickupConfig> = {
+      ...PICKUP,
+      pickupAddress: 'Jl. Gudang Pusat Mas Sular No. 99, Kawasan Industri',
+      shipperAddr1: 'Jl. Gudang Pusat Mas Sular No. 99, Kawasan Industri',
+      shipperAddr2: 'Kel. Sukaluyu, Kec. Cibeunying Kaler',
+    };
+    const longReceiver = {
+      ...SOURCE.receiver,
+      addressDetail: LONG,
+      village: 'Kebon Pisang Selatan',
+      district: 'Sumur Bandung Utara',
+    };
+
+    it('SHIPPER_ADDR1/2 and RECEIVER_ADDR1/2 are cut to their first 30 characters', () => {
+      const fields = build({ receiver: longReceiver }, longPickup);
+      expect(fields.RECEIVER_ADDR1).toBe(FIRST_30);
+      expect(fields.RECEIVER_ADDR2).toBe('Kel. Kebon Pisang Selatan, Kec');
+      expect(fields.SHIPPER_ADDR1).toBe('Jl. Gudang Pusat Mas Sular No.');
+      expect(fields.SHIPPER_ADDR2).toBe('Kel. Sukaluyu, Kec. Cibeunying');
+    });
+
+    it('addresses within the limit are sent unchanged', () => {
+      const fields = build({ receiver: { ...SOURCE.receiver, village: 'Braga', district: 'Sumur Bandung' } });
+      expect(fields.RECEIVER_ADDR1).toBe('Jl. Veteran No. 65');
+      expect(fields.RECEIVER_ADDR2).toBe('Kel. Braga, Kec. Sumur Bandung');
+      expect(fields.SHIPPER_ADDR1).toBe(PICKUP.shipperAddr1);
+      expect(fields.SHIPPER_ADDR2).toBe(PICKUP.shipperAddr2);
+    });
+
+    it('unrelated fields are not truncated', () => {
+      const longName = 'Raden Ayu Siti Nurhaliza Kusumawardhani Putri';
+      const longCity = 'Kota Administrasi Jakarta Selatan';
+      const fields = build({ receiver: { ...longReceiver, name: longName, city: longCity } }, longPickup);
+      expect(fields.RECEIVER_NAME).toBe(longName);
+      expect(fields.RECEIVER_CONTACT).toBe(longName);
+      expect(fields.RECEIVER_CITY).toBe(longCity);
+      expect(fields.PICKUP_ADDRESS).toBe(longPickup.pickupAddress);
+      expect(fields.GOODS_DESC).toBe('Baso Urat Jumbo x2, Es Teh Manis x1');
+    });
+
+    it('a missing receiver address is still refused, never sent empty', () => {
+      expect(refusal(() => build({ receiver: { ...SOURCE.receiver, addressDetail: undefined } }))).toContain('RECEIVER_ADDR1');
+      expect(refusal(() => build({ receiver: { ...SOURCE.receiver, addressDetail: '   ' } }))).toContain('RECEIVER_ADDR1');
+    });
+
+    it('the source address and the pickup configuration are never mutated', () => {
+      const receiver = { ...longReceiver };
+      const receiverBefore = { ...receiver };
+      const pickupBefore = { ...longPickup };
+      build({ receiver }, longPickup);
+      expect(receiver).toEqual(receiverBefore);
+      expect(receiver.addressDetail).toBe(LONG);
+      expect(longPickup).toEqual(pickupBefore);
+    });
+
+    it('the serialized form body carries the truncated value', () => {
+      const body = serializeJnePickupCashless({ username: 'u', apiKey: 'k' }, build({ receiver: longReceiver }));
+      expect(new URLSearchParams(body).get('RECEIVER_ADDR1')).toBe(FIRST_30);
+      expect(body).not.toContain('Blok');
+    });
   });
 });

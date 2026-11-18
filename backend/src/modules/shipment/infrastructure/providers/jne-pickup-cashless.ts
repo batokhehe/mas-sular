@@ -208,6 +208,21 @@ export function buildReceiverAddr2(receiver: JnePickupCashlessSource['receiver']
     .join(', ');
 }
 
+/** JNE's maximum length for the SHIPPER_ADDR* / RECEIVER_ADDR* fields. */
+export const JNE_ADDRESS_MAX_LENGTH = 30;
+
+/**
+ * An address line as JNE accepts it: at most JNE_ADDRESS_MAX_LENGTH characters.
+ * Longer values keep their first 30 characters - no ellipsis. Counted in Unicode
+ * code points, so a character outside the BMP is never split into a broken
+ * surrogate half. Applied ONLY while building the outbound /pickupcashless payload:
+ * the stored order/customer address is never changed.
+ */
+export function truncateJneAddress(value: string): string {
+  const chars = Array.from(value);
+  return chars.length <= JNE_ADDRESS_MAX_LENGTH ? value : chars.slice(0, JNE_ADDRESS_MAX_LENGTH).join('');
+}
+
 /** JNE's documented ORDER_ID limit. */
 export const JNE_ORDER_ID_MAX_LENGTH = 20;
 
@@ -333,8 +348,9 @@ export function buildJnePickupCashlessFields(
     // Business rule (toJneOrderId): hyphens removed, last character removed, <= 20.
     ORDER_ID: jneOrderId,
     SHIPPER_NAME: p.shipperName,
-    SHIPPER_ADDR1: p.shipperAddr1,
-    SHIPPER_ADDR2: p.shipperAddr2,
+    // JNE limits address lines to 30 characters (truncateJneAddress).
+    SHIPPER_ADDR1: truncateJneAddress(p.shipperAddr1),
+    SHIPPER_ADDR2: truncateJneAddress(p.shipperAddr2),
     SHIPPER_CITY: p.shipperCity,
     SHIPPER_ZIP: p.shipperZip,
     SHIPPER_REGION: p.shipperRegion,
@@ -343,8 +359,8 @@ export function buildJnePickupCashlessFields(
     SHIPPER_CONTACT: p.shipperContact,
     SHIPPER_PHONE: p.shipperPhone,
     RECEIVER_NAME: receiver.name.trim(),
-    RECEIVER_ADDR1: receiverAddr1,
-    RECEIVER_ADDR2: receiverAddr2,
+    RECEIVER_ADDR1: truncateJneAddress(receiverAddr1),
+    RECEIVER_ADDR2: truncateJneAddress(receiverAddr2),
     RECEIVER_CITY: (receiver.city as string).trim(),
     RECEIVER_ZIP: receiver.postalCode.trim(),
     RECEIVER_REGION: (receiver.province as string).trim(),
