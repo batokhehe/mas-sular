@@ -840,13 +840,26 @@ export class OrdersService {
     return { products, toppings, subtotal, totalItems };
   }
 
-  private assertStock(items: NormalizedCheckoutItem[], products: Product[]) {
+  /**
+   * Early per-product stock check against the "Stok Produk" inventory (best single
+   * active outlet's stock - reserved; see stock-availability.ts). The master
+   * Product.stock is NOT the source of truth. The authoritative check is still the
+   * FOR UPDATE read in reserveForOrder at order creation.
+   *
+   * Only the legacy wiring without an inventory service (no InventoryModule - never
+   * the case in the application, which registers it globally) falls back to the
+   * Product.stock it also decrements.
+   */
+  private async assertStock(items: NormalizedCheckoutItem[], products: Product[]) {
+    const available = this.inventory
+      ? await this.inventory.availableByProduct(products.map((p) => p.id))
+      : new Map(products.map((p) => [p.id, p.stock] as const));
     for (const product of products) {
       const requestedQty = items
         .filter((item) => item.productId === product.id)
         .reduce((sum, item) => sum + item.quantity, 0);
 
-      if (requestedQty > product.stock) {
+      if (requestedQty > (available.get(product.id) ?? 0)) {
         throw new BadRequestException(`Insufficient stock for ${product.name}`);
       }
     }
@@ -958,7 +971,7 @@ export class OrdersService {
     const address = await this.assertAddress(userId, dto.address_id);
     const items = this.normalizeItems(dto.items);
     const { products, subtotal, totalItems } = await this.getCartPricing(items);
-    this.assertStock(items, products);
+    await this.assertStock(items, products);
 
     // Coverage gate only (DISABLED / PICKUP_ONLY throw); it no longer sets the fee.
     const coverage = await this.resolveCoverage(address);
@@ -1134,7 +1147,7 @@ export class OrdersService {
     await this.assertGatewayChannelReady(dto.payment_method, dto.payment_channel);
     const items = this.normalizeItems(dto.items);
     const { products, toppings } = await this.getCartPricing(items);
-    this.assertStock(items, products);
+    await this.assertStock(items, products);
     const summary = await this.computeSummary(userId, dto);
 
     const order = await this.persistOrderWithRetry({ userId, dto, items, products, toppings, summary, idempotencyRecordId, fenceToken });

@@ -995,6 +995,13 @@ model InventoryReservation {
   productVariantId String?
   outletId         String?
   reservedQty      Int
+  /// Whether THIS reservation placed a hold on the ProductInventory row
+  /// (productId, outletId): reserveForOrder incremented that row's `reserved` in the
+  /// same transaction, and commit / release / expiry move that row's counters.
+  /// false = legacy reservation (before the "Stok Produk" rule): it never held
+  /// ProductInventory stock, so its lifecycle settles against Product.stock and must
+  /// never touch a ProductInventory row - even one that exists today.
+  inventoryHoldApplied Boolean                   @default(false)
   committedQty     Int                           @default(0)
   releasedQty      Int                           @default(0)
   status           ReservationStatus             @default(RESERVED)

@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import Image from 'next/image'
 import { useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { Menu, ShoppingCart } from 'lucide-react'
@@ -15,6 +16,7 @@ import {
 import { AuthMenu } from '@/components/auth/auth-menu'
 import { StorefrontNavigation, STOREFRONT_LINKS, isActivePath } from './navigation'
 import { useCartStore, cartCount } from '@/lib/stores/cart-store'
+import { BRAND_HEADER_LOGO, BRAND_NAME } from '@/lib/brand/brand-assets'
 import { cn } from '@/lib/utils'
 
 export function StorefrontHeader() {
@@ -26,10 +28,18 @@ export function StorefrontHeader() {
     <header className="sticky top-0 z-40 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-4">
         {/* Brand */}
-        <Link href="/" className="flex items-center gap-2">
-          <span className="flex size-9 items-center justify-center rounded-xl bg-primary text-sm font-bold text-primary-foreground">
-            BMS
-          </span>
+        <Link href="/" className="flex shrink-0 items-center gap-2" aria-label={`${BRAND_NAME} - Beranda`}>
+          {/* The supplied logo (transparent). Fixed height inside the h-16 header, width
+              from its own aspect ratio; explicit width/height reserve the space (no
+              layout shift). In dark mode a light chip keeps the red logo legible. */}
+          <Image
+            src={BRAND_HEADER_LOGO.src}
+            alt={BRAND_NAME}
+            width={BRAND_HEADER_LOGO.width}
+            height={BRAND_HEADER_LOGO.height}
+            priority
+            className="h-11 w-auto object-contain sm:h-12 dark:rounded-lg dark:bg-white/90 dark:p-0.5"
+          />
           <span className="hidden text-lg font-bold tracking-tight sm:inline-block">Bakso Mas Sular</span>
         </Link>
 

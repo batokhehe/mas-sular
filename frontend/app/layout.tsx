@@ -4,6 +4,7 @@ import { SiteAnalytics } from '@/components/analytics'
 import { ThemeProvider } from '@/components/theme-provider'
 import { Providers } from '@/app/providers'
 import { Toaster } from 'sonner'
+import { brandIconsMetadata } from '@/lib/brand/brand-assets'
 import './globals.css'
 
 const plusJakarta = Plus_Jakarta_Sans({ 
@@ -20,6 +21,8 @@ export const metadata: Metadata = {
   title: 'Bakso Mas Sular - Bakso Premium Khas Indonesia',
   description: 'Pesan bakso premium khas Indonesia secara online. Bakso urat, bakso mercon, dan bakso keju segar diantar sampai ke rumah Anda.',
   keywords: ['bakso', 'meatball', 'indonesian food', 'baso urat', 'delivery'],
+  // Favicon + app icons: the supplied Mas Sular logo (public/brand, see brand-assets.ts).
+  icons: brandIconsMetadata(),
   openGraph: {
     title: 'Bakso Mas Sular - Bakso Premium Khas Indonesia',
     description: 'Pesan bakso premium khas Indonesia secara online.',

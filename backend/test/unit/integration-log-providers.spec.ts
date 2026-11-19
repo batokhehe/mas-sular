@@ -3,7 +3,7 @@ import { JneShipmentProvider } from '../../src/modules/shipment/infrastructure/p
 import { PaxelShipmentProvider } from '../../src/modules/shipment/infrastructure/providers/paxel-shipment.provider';
 import { JneProvider } from '../../src/modules/shipping/infrastructure/providers/jne.provider';
 import { MidtransPaymentProvider } from '../../src/modules/payments/gateway/infrastructure/providers/midtrans-payment.provider';
-import { PermanentError, TransientError } from '../../src/modules/shipping/domain/shipping-errors';
+import { AmbiguousBookingError, PermanentError, TransientError } from '../../src/modules/shipping/domain/shipping-errors';
 import { ShippingConfig } from '../../src/modules/shipping/shipping.config';
 import { ShippingHttpResponse } from '../../src/modules/shipping/infrastructure/http/shipping-http-client';
 import { CreateShipmentInput } from '../../src/modules/shipment/domain/shipment-provider.interface';
@@ -270,17 +270,18 @@ describe('JNE PICKUP_CASHLESS — booking against the confirmed response', () =>
     const { provider, http, rec } = buildJne();
     http.mockRejectedValue(Object.assign(new Error('The operation was aborted'), { name: 'AbortError' }));
 
-    await expect(provider.createShipment(INPUT)).rejects.toBeInstanceOf(TransientError);
+    // The request may have reached JNE: an AMBIGUOUS outcome (reconcile before any retry).
+    await expect(provider.createShipment(INPUT)).rejects.toBeInstanceOf(AmbiguousBookingError);
 
     expect(http).toHaveBeenCalledTimes(1); // config says maxRetry 2
     expect(rec.entries).toHaveLength(1); // the attempt only - there is no body to interpret
     expect(rec.entries[0]).toMatchObject({ applicationOutcome: IntegrationOutcome.TIMEOUT, operation: 'PICKUP_CASHLESS' });
   });
 
-  it('a 5xx during booking: one attempt, TransientError, no outcome record', async () => {
+  it('a 5xx during booking: one attempt, AmbiguousBookingError (reconcile first), no outcome record', async () => {
     const { provider, http, rec } = buildJne();
     http.mockResolvedValue(res(502, 'bad gateway'));
-    await expect(provider.createShipment(INPUT)).rejects.toBeInstanceOf(TransientError);
+    await expect(provider.createShipment(INPUT)).rejects.toBeInstanceOf(AmbiguousBookingError);
     expect(http).toHaveBeenCalledTimes(1);
     expect(rec.entries).toHaveLength(1);
   });
@@ -530,5 +531,57 @@ describe('Midtrans keeps charge / status / cancel / expire', () => {
     expect(rejected).toMatchObject({ operation: 'status', errorClass: 'rejected', paymentId: 'pay-77' });
     // Same logical call as the HTTP attempt.
     expect(rejected?.operationId).toBe(rec.entries[0].operationId);
+  });
+});
+
+describe('JNE PICKUP_CASHLESS — definitive vs ambiguous booking outcomes (retry safety)', () => {
+  it('HTTP 413 (gateway policy refusal) is DEFINITIVE: PermanentError, never ambiguous', async () => {
+    const { provider, http } = buildJne();
+    http.mockResolvedValue(res(413, 'Message size not conform our policy'));
+    const error = await provider.createShipment(INPUT).catch((err: Error) => err);
+    expect(error).toBeInstanceOf(PermanentError);
+    expect(error).not.toBeInstanceOf(AmbiguousBookingError);
+    expect(http).toHaveBeenCalledTimes(1);
+  });
+
+  it('HTTP 429 (refused at the gateway) stays a TransientError, not ambiguous', async () => {
+    const { provider, http } = buildJne();
+    http.mockResolvedValue(res(429, 'too many requests'));
+    const error = await provider.createShipment(INPUT).catch((err: Error) => err);
+    expect(error).toBeInstanceOf(TransientError);
+    expect(error).not.toBeInstanceOf(AmbiguousBookingError);
+  });
+
+  it('a network failure during booking is AMBIGUOUS', async () => {
+    const { provider, http } = buildJne();
+    http.mockRejectedValue(new Error('socket hang up'));
+    await expect(provider.createShipment(INPUT)).rejects.toBeInstanceOf(AmbiguousBookingError);
+    expect(http).toHaveBeenCalledTimes(1);
+  });
+
+  it('an unconfirmed 200 ("success" without cnote_no) is AMBIGUOUS, not a refusal', async () => {
+    const { provider, http } = buildJne();
+    http.mockResolvedValue(res(200, '{"detail":[{"status":"success"}]}'));
+    await expect(provider.createShipment(INPUT)).rejects.toBeInstanceOf(AmbiguousBookingError);
+  });
+
+  it("JNE's own refusal (status false + error) stays DEFINITIVE", async () => {
+    const { provider, http } = buildJne();
+    http.mockResolvedValue(res(200, JNE_TOP_LEVEL_REJECTION));
+    const error = await provider.createShipment(INPUT).catch((err: Error) => err);
+    expect(error).toBeInstanceOf(PermanentError);
+    expect(error).not.toBeInstanceOf(AmbiguousBookingError);
+  });
+
+  it('a receiver address with line breaks is sent as one line of at most 30 characters', async () => {
+    const { provider, http } = buildJne();
+    http.mockResolvedValue(res(200, JNE_SUCCESS));
+    const multiline = 'Jl. Contoh Raya No 12\r\nRT 01 RW 02 dekat masjid besar\nBlok C';
+    await provider.createShipment({ ...INPUT, destination: { ...INPUT.destination, addressDetail: multiline } });
+    const body = String(http.mock.calls[0][1].body);
+    expect(body).not.toMatch(/%0[AD]/i);
+    const addr1 = new URLSearchParams(body).get('RECEIVER_ADDR1')!;
+    expect(addr1).toBe('Jl. Contoh Raya No 12 RT 01 RW');
+    expect(Array.from(addr1)).toHaveLength(30);
   });
 });

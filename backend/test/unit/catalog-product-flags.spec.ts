@@ -62,7 +62,7 @@ it('both flag filters can be combined, and each is parsed independently', async 
 describe('PrismaCatalogRepository.listProducts', () => {
   const build = () => {
     const findMany = jest.fn().mockResolvedValue([]);
-    return { findMany, repo: new PrismaCatalogRepository({ product: { findMany } } as never) };
+    return { findMany, repo: new PrismaCatalogRepository({ product: { findMany }, productInventory: { findMany: jest.fn().mockResolvedValue([]) } } as never) };
   };
 
   it.each(FLAGS)('$param=true keeps every public visibility rule and adds only $column', async ({ param, column }) => {
@@ -72,7 +72,7 @@ describe('PrismaCatalogRepository.listProducts', () => {
     expect(args.where).toMatchObject({ status: ProductStatus.ACTIVE, deletedAt: null, [column]: true });
     const other = FLAGS.find((f) => f.column !== column)!.column;
     expect(args.where[other]).toBeUndefined(); // one flag never filters on the other
-    expect(args.omit).toEqual({ sku: true }); // P2 #5 unchanged
+    expect(args.omit).toEqual({ sku: true, stock: true }); // P2 #5 unchanged; master stock never public
   });
 
   it('without the params no flag condition is added (unfiltered listing unchanged)', async () => {

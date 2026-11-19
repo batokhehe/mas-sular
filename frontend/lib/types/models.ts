@@ -93,7 +93,12 @@ export interface Product {
    */
   sequence: number
   status: ProductStatus
-  stock: number
+  /**
+   * What one order can still get of this product, from the "Stok Produk" inventory
+   * (best single active outlet's stock - reserved). The catalog API does NOT send
+   * the master product stock: it is not the availability source of truth.
+   */
+  availableStock: number
   categoryId: string
   category?: Category // included by the catalog list/detail endpoints
 }

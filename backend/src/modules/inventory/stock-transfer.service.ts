@@ -66,21 +66,51 @@ export class StockTransferService {
     }));
   }
 
+  /**
+   * Set the absolute stock of one product at one outlet ("Stok Produk").
+   *
+   * One transaction, under the same ProductInventory row lock (FOR UPDATE) that
+   * reserveForOrder / commit / release / expiry and transfer completion take, so an
+   * adjustment can never interleave with a concurrent reservation or another
+   * adjustment and act on a stale `reserved`:
+   * - The row is ensured first with INSERT ... ON CONFLICT DO NOTHING (createMany
+   *   skipDuplicates), so two concurrent first-time adjustments cannot abort each
+   *   other on the unique key; then it is locked and re-read.
+   * - Stock may NEVER be set below the quantity currently reserved (held for
+   *   unpaid / unverified orders): that would make `available` negative and break
+   *   the holds' settlement (production finding 2026-11-18, product 9aa8c8db).
+   * - `available` is recomputed from the locked row.
+   */
   async adjustStock(dto: AdjustStockDto, adminId: string) {
-    const existing = await this.prisma.productInventory.findUnique({
-      where: { productId_outletId: { productId: dto.productId, outletId: dto.outletId } },
-    });
-    const reserved = existing?.reserved ?? 0;
-    const updated = await this.prisma.productInventory.upsert({
-      where: { productId_outletId: { productId: dto.productId, outletId: dto.outletId } },
-      update: { stock: dto.stock, available: dto.stock - reserved },
-      create: { productId: dto.productId, outletId: dto.outletId, stock: dto.stock, reserved: 0, available: dto.stock },
+    const key = { productId: dto.productId, outletId: dto.outletId };
+    const { updated, previousStock } = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.productInventory.createMany({
+        data: [{ ...key, stock: 0, reserved: 0, available: 0 }],
+        skipDuplicates: true,
+      });
+      const rows = await tx.$queryRaw<Array<{ id: string; stock: number; reserved: number }>>(
+        Prisma.sql`SELECT id, stock, reserved FROM "ProductInventory"
+                   WHERE "productId" = ${dto.productId} AND "outletId" = ${dto.outletId} FOR UPDATE`,
+      );
+      const row = rows[0];
+      if (!row) throw new NotFoundException('Product inventory row not found');
+      if (dto.stock < row.reserved) {
+        throw new BadRequestException(
+          `Stock cannot be set below the reserved quantity: ${row.reserved} unit(s) are held for pending orders (requested ${dto.stock}).`,
+        );
+      }
+      const result = await tx.productInventory.update({
+        where: { id: row.id },
+        data: { stock: dto.stock, available: dto.stock - row.reserved },
+      });
+      // A row this call created had no previous stock (same audit shape as before).
+      return { updated: result, previousStock: created.count === 1 ? null : row.stock };
     });
     await this.audit('inventory.adjust', 'ProductInventory', updated.id, adminId, {
       productId: dto.productId,
       outletId: dto.outletId,
       newStock: dto.stock,
-      previousStock: existing?.stock ?? null,
+      previousStock,
       note: dto.note ?? null,
     });
     return updated;

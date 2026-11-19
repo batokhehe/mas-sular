@@ -4,6 +4,7 @@ import { PrismaService } from '../../../database/prisma.service';
 import { ListProductsQueryDto } from '../application/dto/catalog.dto';
 import { CatalogRepository } from '../domain/catalog.repository';
 import { PRODUCT_SEQUENCE_ORDER_BY } from '../product-sequence';
+import { loadAvailableStock } from '../../inventory/stock-availability';
 
 @Injectable()
 export class PrismaCatalogRepository implements CatalogRepository {
@@ -24,7 +25,7 @@ export class PrismaCatalogRepository implements CatalogRepository {
               ? { reviewCount: 'desc' as const }
               : PRODUCT_SEQUENCE_ORDER_BY;
 
-    return this.prisma.product.findMany({
+    const products = await this.prisma.product.findMany({
       where: {
         status: ProductStatus.ACTIVE,
         deletedAt: null,
@@ -41,10 +42,18 @@ export class PrismaCatalogRepository implements CatalogRepository {
       },
       include: { category: true },
       // P2 #5: SKU is internal (the courier item code) and never shown to customers,
-      // so the public catalog does not send it at all.
-      omit: { sku: true },
+      // so the public catalog does not send it at all. The master `stock` is not
+      // sent either: customers see `availableStock` from Stok Produk instead.
+      omit: { sku: true, stock: true },
       orderBy,
     });
+    return this.withAvailableStock(products);
+  }
+
+  /** Adds `availableStock` (Stok Produk, see stock-availability.ts) to each product. */
+  private async withAvailableStock<T extends { id: string }>(products: T[]): Promise<Array<T & { availableStock: number }>> {
+    const available = await loadAvailableStock(this.prisma, products.map((p) => p.id));
+    return products.map((p) => ({ ...p, availableStock: available.get(p.id) ?? 0 }));
   }
 
   async getProduct(idOrSlug: string) {
@@ -56,10 +65,11 @@ export class PrismaCatalogRepository implements CatalogRepository {
       // P2 gallery, ordered, detail ONLY (listProducts never loads images). One
       // batched query alongside the product - no N+1.
       include: { category: true, images: { orderBy: { sortOrder: 'asc' }, select: { id: true, url: true, sortOrder: true } } },
-      omit: { sku: true }, // P2 #5: internal only - see listProducts
+      omit: { sku: true, stock: true }, // P2 #5 + Stok Produk rule - see listProducts
     });
     if (!product) throw new NotFoundException('Product not found');
-    return product;
+    const [withStock] = await this.withAvailableStock([product]);
+    return withStock;
   }
 
   listCategories() {

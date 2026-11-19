@@ -1,0 +1,58 @@
+name: Inventory integration
+
+# Real-PostgreSQL checks ci.yml does not run: stock reservation concurrency, settlement
+# coverage, Stok Produk adjustments and reservation hold ownership. Each suite boots its
+# own Testcontainers PostgreSQL 16 (+ RabbitMQ), applies every migration with
+# `prisma migrate deploy`, and throws everything away with the job - never a shared or
+# production database. Scoped to the files these suites protect.
+on:
+  pull_request:
+    paths:
+      - 'backend/src/modules/inventory/**'
+      - 'backend/src/modules/payments/settlement/**'
+      - 'backend/src/modules/orders/order-cancellation.service.ts'
+      - 'backend/prisma/schema.prisma'
+      - 'backend/prisma/migrations/**'
+      - 'backend/test/integration/world.ts'
+      - 'backend/test/integration/inventory-concurrency.int-spec.ts'
+      - 'backend/test/integration/c1a-settlement-coverage.int-spec.ts'
+      - 'backend/test/integration/stock-adjust-concurrency.int-spec.ts'
+      - 'backend/test/integration/reservation-hold-ownership.int-spec.ts'
+      - '.github/workflows/inventory-integration.yml'
+  push:
+    branches-ignore: [main]
+    paths:
+      - 'backend/src/modules/inventory/**'
+      - 'backend/src/modules/payments/settlement/**'
+      - 'backend/src/modules/orders/order-cancellation.service.ts'
+      - 'backend/prisma/schema.prisma'
+      - 'backend/prisma/migrations/**'
+      - 'backend/test/integration/world.ts'
+      - 'backend/test/integration/inventory-concurrency.int-spec.ts'
+      - 'backend/test/integration/c1a-settlement-coverage.int-spec.ts'
+      - 'backend/test/integration/stock-adjust-concurrency.int-spec.ts'
+      - 'backend/test/integration/reservation-hold-ownership.int-spec.ts'
+      - '.github/workflows/inventory-integration.yml'
+  workflow_dispatch:
+
+jobs:
+  postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v5   # version comes from packageManager in package.json
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter backend prisma:generate
+      # The suites run sequentially (maxWorkers=1); each file stops its own containers.
+      - run: >-
+          pnpm exec jest --config test/integration/jest.integration.config.js --verbose
+          test/integration/inventory-concurrency.int-spec.ts
+          test/integration/c1a-settlement-coverage.int-spec.ts
+          test/integration/stock-adjust-concurrency.int-spec.ts
+          test/integration/reservation-hold-ownership.int-spec.ts
+        working-directory: backend

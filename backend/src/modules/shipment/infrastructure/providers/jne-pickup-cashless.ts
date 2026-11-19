@@ -223,6 +223,30 @@ export function truncateJneAddress(value: string): string {
   return chars.length <= JNE_ADDRESS_MAX_LENGTH ? value : chars.slice(0, JNE_ADDRESS_MAX_LENGTH).join('');
 }
 
+/** C0/C1 control characters plus Unicode line/paragraph separators. */
+const JNE_CONTROL_CHARACTERS = /[\u0000-\u001F\u007F-\u009F\u2028\u2029]/g;
+
+/**
+ * One line of text as JNE's gateway accepts it: every control character (CR, LF,
+ * tab, ...) becomes a space. Evidence (2026-11-18): every /pickupcashless request
+ * whose RECEIVER_ADDR1 carried a line break from the multi-line address-detail
+ * field was refused with HTTP 413 "Message size not conform our policy" - at
+ * body sizes JNE accepted for other orders - and no request without one was.
+ */
+export function stripJneControlCharacters(value: string): string {
+  return value.replace(JNE_CONTROL_CHARACTERS, ' ');
+}
+
+/**
+ * An address line ready for JNE: line breaks and other control characters become
+ * single spaces, runs of whitespace collapse, then the 30-character limit applies
+ * (so the limit counts meaningful characters). Outbound payload only - the stored
+ * order/customer address is never changed.
+ */
+export function toJneAddressLine(value: string): string {
+  return truncateJneAddress(stripJneControlCharacters(value).replace(/\s+/g, ' ').trim());
+}
+
 /** JNE's documented ORDER_ID limit. */
 export const JNE_ORDER_ID_MAX_LENGTH = 20;
 
@@ -348,9 +372,9 @@ export function buildJnePickupCashlessFields(
     // Business rule (toJneOrderId): hyphens removed, last character removed, <= 20.
     ORDER_ID: jneOrderId,
     SHIPPER_NAME: p.shipperName,
-    // JNE limits address lines to 30 characters (truncateJneAddress).
-    SHIPPER_ADDR1: truncateJneAddress(p.shipperAddr1),
-    SHIPPER_ADDR2: truncateJneAddress(p.shipperAddr2),
+    // JNE limits address lines to 30 characters and refuses line breaks (toJneAddressLine).
+    SHIPPER_ADDR1: toJneAddressLine(p.shipperAddr1),
+    SHIPPER_ADDR2: toJneAddressLine(p.shipperAddr2),
     SHIPPER_CITY: p.shipperCity,
     SHIPPER_ZIP: p.shipperZip,
     SHIPPER_REGION: p.shipperRegion,
@@ -359,8 +383,8 @@ export function buildJnePickupCashlessFields(
     SHIPPER_CONTACT: p.shipperContact,
     SHIPPER_PHONE: p.shipperPhone,
     RECEIVER_NAME: receiver.name.trim(),
-    RECEIVER_ADDR1: truncateJneAddress(receiverAddr1),
-    RECEIVER_ADDR2: truncateJneAddress(receiverAddr2),
+    RECEIVER_ADDR1: toJneAddressLine(receiverAddr1),
+    RECEIVER_ADDR2: toJneAddressLine(receiverAddr2),
     RECEIVER_CITY: (receiver.city as string).trim(),
     RECEIVER_ZIP: receiver.postalCode.trim(),
     RECEIVER_REGION: (receiver.province as string).trim(),
@@ -406,7 +430,8 @@ export function serializeJnePickupCashless(
     if (typeof value !== 'string') {
       throw new PermanentError(`JNE booking refused before sending: ${key} has no value`, JNE);
     }
-    form.append(key, value);
+    // Defense in depth: no field may carry a line break to JNE (see stripJneControlCharacters).
+    form.append(key, stripJneControlCharacters(value));
   }
   return form.toString();
 }

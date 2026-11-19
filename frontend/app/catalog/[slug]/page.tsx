@@ -19,11 +19,13 @@ import { Badge } from '@/components/ui/badge'
 import { formatIDR } from '@/lib/utils/format'
 import { Checkbox } from '@/components/ui/checkbox'
 import { useCartStore, toppingsTotal } from '@/lib/stores/cart-store'
+import { clampQty, remainingAddable } from '@/lib/cart/stock-limits'
 
 export default function ProductDetailPage() {
   const params = useParams<{ slug: string }>()
   const slug = params?.slug
   const add = useCartStore((s) => s.add)
+  const lines = useCartStore((s) => s.lines)
   const [qty, setQty] = useState(1)
   const [toppingIds, setToppingIds] = useState<string[]>([])
 
@@ -41,7 +43,15 @@ export default function ProductDetailPage() {
     ? Math.round((1 - product.price / product.originalPrice) * 100)
     : 0
   const spicy = product?.spicyLevel ?? 0
-  const outOfStock = (product?.stock ?? 0) <= 0
+  // Availability is the catalog's availableStock (Stok Produk), minus what the cart
+  // already holds of this product. The backend re-validates at checkout.
+  const availableStock = product?.availableStock ?? 0
+  const outOfStock = availableStock <= 0
+  const maxAddable = product ? remainingAddable(lines, product.id, availableStock) : 0
+  const cartFull = !outOfStock && maxAddable <= 0
+  // The quantity shown and added never exceeds what can still be added (stock or the
+  // cart may change after it was chosen) - derived, not synced through an effect.
+  const effectiveQty = Math.max(1, clampQty(qty, maxAddable))
 
   // Toppings are global in the catalog (no per-product eligibility exists in the
   // schema). Only what GET /catalog/toppings returns - active ones - can be chosen;
@@ -118,7 +128,7 @@ export default function ProductDetailPage() {
 
                 <dl className="grid grid-cols-2 gap-2 text-sm">
                   <dt className="text-muted-foreground">Stok</dt>
-                  <dd>{product.stock > 0 ? `${product.stock} tersedia` : 'Stok Habis'}</dd>
+                  <dd>{availableStock > 0 ? `${availableStock} tersedia` : 'Stok Habis'}</dd>
                 </dl>
 
                 <div>
@@ -160,19 +170,19 @@ export default function ProductDetailPage() {
                       variant="ghost"
                       size="icon"
                       className="size-9 rounded-full"
-                      disabled={outOfStock}
-                      onClick={() => setQty((q) => Math.max(1, q - 1))}
+                      disabled={outOfStock || cartFull || effectiveQty <= 1}
+                      onClick={() => setQty(Math.max(1, effectiveQty - 1))}
                       aria-label="Kurangi jumlah"
                     >
                       <Minus className="size-4" />
                     </Button>
-                    <span className="w-8 text-center font-semibold">{qty}</span>
+                    <span className="w-8 text-center font-semibold">{effectiveQty}</span>
                     <Button
                       variant="ghost"
                       size="icon"
                       className="size-9 rounded-full"
-                      disabled={outOfStock}
-                      onClick={() => setQty((q) => q + 1)}
+                      disabled={outOfStock || cartFull || effectiveQty >= maxAddable}
+                      onClick={() => setQty(clampQty(effectiveQty + 1, maxAddable))}
                       aria-label="Tambah jumlah"
                     >
                       <Plus className="size-4" />
@@ -180,14 +190,20 @@ export default function ProductDetailPage() {
                   </div>
                   <Button
                     className="flex-1 rounded-full sm:flex-none"
-                    disabled={outOfStock}
+                    disabled={outOfStock || cartFull}
                     onClick={() => {
-                      add(product, qty, chosenToppings)
+                      const allowed = clampQty(effectiveQty, maxAddable)
+                      if (allowed <= 0) return
+                      add(product, allowed, chosenToppings)
                       toast.success('Ditambahkan ke keranjang')
                     }}
                   >
                     <ShoppingCart className="mr-2 size-4" />
-                    {outOfStock ? 'Stok Habis' : `Tambah ke Keranjang · ${formatIDR(unitPrice * qty)}`}
+                    {outOfStock
+                      ? 'Stok Habis'
+                      : cartFull
+                        ? 'Stok di keranjang penuh'
+                        : `Tambah ke Keranjang · ${formatIDR(unitPrice * effectiveQty)}`}
                   </Button>
                 </div>
               </div>

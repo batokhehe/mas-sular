@@ -20,3 +20,11 @@ export class TransientError extends ShippingProviderError {}
 
 /** Non-retryable failure — a 4xx from the courier (bad request, auth, not found). */
 export class PermanentError extends ShippingProviderError {}
+
+/**
+ * A booking request that REACHED (or may have reached) the courier without a
+ * confirmed answer: timeout, network failure, 5xx, or a response that is not the
+ * confirmed contract. The courier may have created the booking, so it must be
+ * reconciled with the courier before anyone books again - never retried blindly.
+ */
+export class AmbiguousBookingError extends ShippingProviderError {}

@@ -65,28 +65,74 @@ function svc(prisma = buildPrisma()) {
   return { service: new InventoryReservationService(prisma as any), prisma };
 }
 
+/**
+ * Stateful "Stok Produk" (ProductInventory) store for the reservation tests: one
+ * row per product at outlet-1. findUnique resolves the row, the FOR UPDATE read
+ * returns its CURRENT stock/reserved (so a second checkout sees the first's hold),
+ * and update applies the reserved increment. `lockOrder` records each FOR UPDATE.
+ */
+function piStore(stockByProduct: Record<string, { stock: number; reserved?: number }>) {
+  const rows = new Map(
+    Object.entries(stockByProduct).map(([productId, v]) => [`pi-${productId}`, { productId, stock: v.stock, reserved: v.reserved ?? 0 }]),
+  );
+  const lockOrder: string[] = [];
+  return {
+    rows,
+    lockOrder,
+    productInventory: {
+      findUnique: jest.fn(async ({ where }: { where: { productId_outletId: { productId: string; outletId: string } } }) => {
+        const id = `pi-${where.productId_outletId.productId}`;
+        return where.productId_outletId.outletId === 'outlet-1' && rows.has(id) ? { id } : null;
+      }),
+      update: jest.fn(async ({ where, data }: { where: { id: string }; data: { reserved?: { increment: number } } }) => {
+        const row = rows.get(where.id)!;
+        if (data.reserved?.increment) row.reserved += data.reserved.increment;
+        return {};
+      }),
+      create: jest.fn(),
+    },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    $queryRaw: jest.fn(async (sql: any) => {
+      if (!/ProductInventory/i.test(sqlText(sql))) throw new Error(`unexpected raw query: ${sqlText(sql)}`);
+      const id = sql.values[0] as string;
+      lockOrder.push(rows.get(id)?.productId ?? id);
+      const row = rows.get(id);
+      return row ? [{ stock: row.stock, reserved: row.reserved }] : [];
+    }),
+  };
+}
+
+function stokProdukTx(stockByProduct: Record<string, { stock: number; reserved?: number }>) {
+  const store = piStore(stockByProduct);
+  const tx = buildTx({
+    productInventory: store.productInventory,
+    $queryRaw: store.$queryRaw,
+    inventoryReservation: { create: jest.fn().mockResolvedValue({ id: 'res-x' }) },
+    inventoryReservationHistory: { create: jest.fn() },
+  });
+  return { tx, store };
+}
+
 const items = [{ productId: 'p1', quantity: 2 }];
 
 describe('InventoryReservationService', () => {
-  it('reserves stock when available (creates reservation + history, locks the row)', async () => {
-    const tx = buildTx();
+  it('reserves Stok Produk stock when available (creates reservation + history, locks the row)', async () => {
+    const { tx, store } = stokProdukTx({ p1: { stock: 10 } });
     const { service } = svc();
     await service.reserveForOrder(tx as never, { orderId: 'o1', items, paymentMethod: PaymentMethod.BANK_TRANSFER });
 
-    expect(tx.$queryRaw).toHaveBeenCalled(); // FOR UPDATE lock
+    expect(store.lockOrder).toEqual(['p1']); // FOR UPDATE on the ProductInventory row
+    expect(store.rows.get('pi-p1')!.reserved).toBe(2);
     expect(tx.inventoryReservation.create).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ orderId: 'o1', productId: 'p1', reservedQty: 2, status: ReservationStatus.RESERVED }) }),
+      expect.objectContaining({ data: expect.objectContaining({ orderId: 'o1', productId: 'p1', outletId: 'outlet-1', reservedQty: 2, status: ReservationStatus.RESERVED }) }),
     );
     expect(tx.inventoryReservationHistory.create).toHaveBeenCalled();
+    expect(tx.product.update).not.toHaveBeenCalled(); // master Product.stock never touched
   });
 
-  it('prevents overselling: throws when available < requested', async () => {
-    // stock 10, already reserved 9 → available 1 < 2 requested.
-    const tx = buildTx({
-      $queryRaw: rawMock({ stock: 10, reserved: 9 }),
-      inventoryReservation: { create: jest.fn() },
-      inventoryReservationHistory: { create: jest.fn() },
-    });
+  it('prevents overselling: throws when Stok Produk available < requested', async () => {
+    // stock 10, already reserved 9 -> available 1 < 2 requested.
+    const { tx } = stokProdukTx({ p1: { stock: 10, reserved: 9 } });
     const { service } = svc();
     await expect(
       service.reserveForOrder(tx as never, { orderId: 'o1', items, paymentMethod: PaymentMethod.QRIS }),
@@ -94,19 +140,42 @@ describe('InventoryReservationService', () => {
     expect(tx.inventoryReservation.create).not.toHaveBeenCalled();
   });
 
-  it('serializes concurrent checkouts: second reservation sees the first and is rejected', async () => {
-    // Same product row (stock 3). First reserve sees 0 reserved → ok. Second sees 2 → available 1 < 2 → reject.
-    const tx = buildTx({
-      // The second read must SEE the first reservation — that is the whole point,
-      // and reading it through a snapshot instead is what BF-017 was.
-      $queryRaw: rawMock({ stock: 3, reserved: [0, 2] }),
-      inventoryReservation: { create: jest.fn().mockResolvedValue({ id: 'r' }) },
-    });
+  it('serializes concurrent checkouts: second reservation sees the first hold and is rejected', async () => {
+    // Stok Produk stock 3. First reserves 2 (reserved 0 -> 2). Second sees available 1 < 2 -> reject.
+    const { tx, store } = stokProdukTx({ p1: { stock: 3 } });
     const { service } = svc();
     await service.reserveForOrder(tx as never, { orderId: 'oA', items, paymentMethod: PaymentMethod.QRIS });
     await expect(
       service.reserveForOrder(tx as never, { orderId: 'oB', items, paymentMethod: PaymentMethod.QRIS }),
     ).rejects.toBeInstanceOf(BadRequestException);
+    expect(store.rows.get('pi-p1')!.reserved).toBe(2); // never oversold
+  });
+
+  it('refuses a product with no Stok Produk row, even if the master stock is positive', async () => {
+    const { tx } = stokProdukTx({}); // no ProductInventory row at all
+    const { service } = svc(); // master product stock is 10 in buildPrisma
+    await expect(
+      service.reserveForOrder(tx as never, { orderId: 'o1', items, paymentMethod: PaymentMethod.QRIS }),
+    ).rejects.toThrow('Insufficient available stock');
+    expect(tx.inventoryReservation.create).not.toHaveBeenCalled();
+  });
+
+  it('reserves from Stok Produk even when the master Product.stock is 0', async () => {
+    const { tx, store } = stokProdukTx({ p1: { stock: 5 } });
+    const prisma = buildPrisma(tx);
+    prisma.product.findUnique = jest.fn().mockResolvedValue({ stock: 0 });
+    const { service } = svc(prisma);
+    await service.reserveForOrder(tx as never, { orderId: 'o1', items, paymentMethod: PaymentMethod.QRIS });
+    expect(store.rows.get('pi-p1')!.reserved).toBe(2);
+  });
+
+  it('refuses when there is no active outlet to reserve at', async () => {
+    const { tx } = stokProdukTx({ p1: { stock: 5 } });
+    tx.outlet.findFirst = jest.fn().mockResolvedValue(null);
+    const { service } = svc();
+    await expect(
+      service.reserveForOrder(tx as never, { orderId: 'o1', items, paymentMethod: PaymentMethod.QRIS }),
+    ).rejects.toThrow('Insufficient available stock');
   });
 
   it('commits reservations: CAS-transitions RESERVED → COMMITTED, deducts Product.stock', async () => {
@@ -201,7 +270,7 @@ describe('InventoryReservationService', () => {
     const tx = buildTx({
       inventoryReservation: {
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-        findUnique: jest.fn().mockResolvedValue({ reservedQty: 3, productId: 'p1', outletId: 'outlet-1' }),
+        findUnique: jest.fn().mockResolvedValue({ id: 'res-1', reservedQty: 3, productId: 'p1', outletId: 'outlet-1', inventoryHoldApplied: true }),
         update: jest.fn().mockResolvedValue({}),
       },
       productInventory: {
@@ -226,6 +295,76 @@ describe('InventoryReservationService', () => {
     expect(tx.inventoryReservation.update).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: 'res-1' }, data: { releasedQty: 3 } }),
     );
+  });
+
+  it('expireReservation of a LEGACY reservation never touches a Stok Produk row that exists TODAY (production drift 11699095)', async () => {
+    const tx = buildTx({
+      inventoryReservation: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        // Same outlet and product as an existing ProductInventory row, but this
+        // reservation was created before the row existed: it never placed a hold.
+        findUnique: jest.fn().mockResolvedValue({ id: 'res-legacy', reservedQty: 1, productId: 'p1', outletId: 'outlet-1', inventoryHoldApplied: false }),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      productInventory: {
+        findUnique: jest.fn().mockResolvedValue({ id: 'pi-1' }), // the row DOES exist now
+        update: jest.fn().mockResolvedValue({}),
+      },
+      $queryRaw: jest.fn().mockResolvedValue([]), // payment lock: orphan -> proceeds
+      inventoryReservationHistory: { create: jest.fn() },
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const prisma: any = { $transaction: jest.fn().mockImplementation((cb: (t: unknown) => Promise<unknown>) => cb(tx)), __tx: tx };
+    const service = new InventoryReservationService(prisma);
+
+    expect(await service.expireReservation('res-legacy')).toBe(true);
+    expect(tx.productInventory.update).not.toHaveBeenCalled(); // no hold was placed, none is freed
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1); // only the payment lock; no inventory row lock
+  });
+
+  it('commit of a HELD reservation whose Stok Produk row is gone moves nothing - never falls back to Product.stock', async () => {
+    const tx = buildTx({
+      inventoryReservation: {
+        findMany: jest.fn().mockResolvedValue([{ id: 'r1', productId: 'p1', outletId: 'outlet-1', reservedQty: 2, status: ReservationStatus.RESERVED, inventoryHoldApplied: true }]),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      $queryRaw: jest.fn().mockResolvedValue([]), // the ProductInventory row no longer exists
+    });
+    const { service } = svc();
+    expect(await service.commitForOrder(tx as never, 'o1')).toBe(1);
+    expect(tx.productInventory.update).not.toHaveBeenCalled();
+    expect(tx.product.update).not.toHaveBeenCalled();
+  });
+
+  it('release of a RESERVED legacy reservation frees nothing, even when a Stok Produk row exists today', async () => {
+    const tx = buildTx({
+      inventoryReservation: {
+        findMany: jest.fn().mockResolvedValue([{ id: 'r1', productId: 'p1', outletId: 'outlet-1', reservedQty: 1, committedQty: 0, status: ReservationStatus.RESERVED, inventoryHoldApplied: false }]),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      productInventory: { findUnique: jest.fn().mockResolvedValue({ id: 'pi-1' }), update: jest.fn() },
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'pi-1', stock: 10, reserved: 0 }]),
+    });
+    const { service } = svc();
+    await service.releaseForOrder(tx as never, 'o1');
+    expect(tx.$queryRaw).not.toHaveBeenCalled(); // no hold -> no row lock at all
+    expect(tx.productInventory.update).not.toHaveBeenCalled();
+    expect(tx.product.update).not.toHaveBeenCalled();
+  });
+
+  it('release of a COMMITTED held reservation restocks the Stok Produk row, not Product.stock', async () => {
+    const tx = buildTx({
+      inventoryReservation: {
+        findMany: jest.fn().mockResolvedValue([{ id: 'r1', productId: 'p1', outletId: 'outlet-1', reservedQty: 2, committedQty: 2, status: ReservationStatus.COMMITTED, inventoryHoldApplied: true }]),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      productInventory: { findUnique: jest.fn(), update: jest.fn().mockResolvedValue({}) },
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'pi-1', stock: 8, reserved: 1 }]),
+    });
+    const { service } = svc();
+    await service.releaseForOrder(tx as never, 'o1');
+    expect(tx.productInventory.update).toHaveBeenCalledWith({ where: { id: 'pi-1' }, data: { stock: { increment: 2 }, available: 9 } });
+    expect(tx.product.update).not.toHaveBeenCalled();
   });
 
   it('expireReservation leaves ProductInventory untouched for legacy reservations (no outlet)', async () => {
@@ -265,9 +404,17 @@ describe('InventoryReservationService', () => {
     expect(tx.productInventory.update).not.toHaveBeenCalled();
   });
 
-  it('computes available stock = Product.stock − active reserved', async () => {
-    const { service } = svc(); // product stock 10, reserved 3
+  it('computes available stock from Stok Produk only (best active outlet stock - reserved), never Product.stock', async () => {
+    const prisma = buildPrisma() as ReturnType<typeof buildPrisma> & { productInventory?: unknown };
+    prisma.productInventory = {
+      findMany: jest.fn().mockResolvedValue([
+        { productId: 'p1', stock: 10, reserved: 3 },
+        { productId: 'p1', stock: 4, reserved: 0 },
+      ]),
+    };
+    const { service } = svc(prisma as never); // master product stock is 10
     expect(await service.availableFor('p1')).toBe(7);
+    expect(await service.availableFor('p-missing')).toBe(0);
   });
 
   it('reserves against ProductInventory when an outlet is allocated (multi-outlet)', async () => {
@@ -295,23 +442,11 @@ describe('InventoryReservationService', () => {
 
   // --- H1 regression: deterministic FOR UPDATE lock ordering (deadlock prevention). ---
   describe('H1 — deterministic lock ordering', () => {
-    // Legacy path locks `Product` rows via $queryRaw; capture the productId of each
-    // FOR UPDATE in call order (Prisma.sql exposes interpolated values).
+    // Every reservation locks its ProductInventory row FOR UPDATE; capture the
+    // product of each lock in call order.
     function capturingTx() {
-      const lockOrder: string[] = [];
-      const tx = buildTx({
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        $queryRaw: jest.fn().mockImplementation(async (sql: any) => {
-          // Record the PRODUCT lock only: the held-quantity read is also keyed by
-          // productId, and counting it would double every entry.
-          if (/InventoryReservation/i.test(sqlText(sql))) return [];
-          lockOrder.push(sql.values[0] as string);
-          return [{ stock: 100 }];
-        }),
-        inventoryReservation: { create: jest.fn().mockResolvedValue({ id: 'res-x' }) },
-        inventoryReservationHistory: { create: jest.fn() },
-      });
-      return { tx, lockOrder };
+      const { tx, store } = stokProdukTx({ p1: { stock: 100 }, p2: { stock: 100 } });
+      return { tx, lockOrder: store.lockOrder };
     }
 
     it('locks in identical ascending-productId order for [p1,p2] and reversed [p2,p1]', async () => {
@@ -356,15 +491,8 @@ describe('InventoryReservationService', () => {
     });
 
     it('rollback behavior unchanged: still throws on insufficient stock (caller tx rolls back)', async () => {
-      // p1 has stock, p2 is exhausted → throws after locking in sorted order.
-      const tx = buildTx({
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        $queryRaw: jest.fn().mockImplementation(async (sql: any) =>
-          /InventoryReservation/i.test(sqlText(sql)) ? [] : [{ stock: sql.values[0] === 'p2' ? 0 : 100 }],
-        ),
-        inventoryReservation: { create: jest.fn().mockResolvedValue({ id: 'res-x' }) },
-        inventoryReservationHistory: { create: jest.fn() },
-      });
+      // p1 has stock, p2 is exhausted -> throws after locking in sorted order.
+      const { tx } = stokProdukTx({ p1: { stock: 100 }, p2: { stock: 0 } });
       const { service } = svc();
       await expect(
         service.reserveForOrder(tx as never, {
