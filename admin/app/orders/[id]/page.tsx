@@ -138,6 +138,13 @@ export default function OrderDetailPage() {
               <ActionButton icon={RefreshCw} onClick={() => runWithFeedback({ loading: 'Membuat pengiriman...', success: 'Percobaan ulang pengiriman selesai', action: () => retryM.mutateAsync() })} disabled={retryM.isPending}>Coba Ulang Pengiriman</ActionButton>
             </PermissionGate>
           ) : null}
+          {order.shipment?.status === 'UNKNOWN' && !order.shipment.trackingNumber ? (
+            // Ambiguous courier answer: the booking may exist at the courier. Retry is
+            // withheld until an operator has reconciled it (see the shipment runbook).
+            <p className="w-full text-xs text-amber-700">
+              Hasil booking kurir tidak pasti. Cek ke kurir terlebih dahulu: jika sudah ada AWB, catat AWB tersebut; jika tidak ada, ubah status pengiriman menjadi Gagal agar dapat dicoba ulang.
+            </p>
+          ) : null}
           {actions?.cancelOrder ? (
             <PermissionGate permissions={ROUTE_PERMISSIONS.orderUpdate}>
               <ActionButton icon={XCircle} onClick={() => runWithFeedback({ confirm: () => confirmReject({ title: 'Batalkan pesanan?', text: 'Membatalkan pesanan dan mengembalikan stok yang direservasi.' }), loading: ADMIN_LOADING_MESSAGES.statusUpdate, success: ADMIN_SUCCESS_MESSAGES.orderStatusUpdated, action: () => cancelM.mutateAsync() })} disabled={cancelM.isPending}>Batalkan Pesanan</ActionButton>

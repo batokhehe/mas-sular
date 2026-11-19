@@ -12,7 +12,7 @@ import {
   serializeJnePickupCashless,
 } from './jne-pickup-cashless';
 import { ShipmentStatus } from '@prisma/client';
-import { PermanentError } from '../../../shipping/domain/shipping-errors';
+import { AmbiguousBookingError, PermanentError, TransientError } from '../../../shipping/domain/shipping-errors';
 import {
   defaultShippingHttpClient,
   executeShippingRequest,
@@ -154,10 +154,22 @@ export class JneShipmentProvider implements ShipmentProvider {
     const fields = await this.buildPickupCashlessFields(input);
 
     const startedAt = Date.now();
-    const { status, text, operationId } = await this.sendPickupCashless(fields, {
-      orderId: input.orderId,
-      correlationId: input.orderNumber,
-    });
+    let response: { status: number; text: string; operationId: string };
+    try {
+      response = await this.sendPickupCashless(fields, {
+        orderId: input.orderId,
+        correlationId: input.orderNumber,
+      });
+    } catch (err) {
+      // Timeout, network failure or 5xx: the request may have reached JNE and been
+      // booked. Only a 429 (refused at the gateway) and a 4xx PermanentError are
+      // definitive. Never let an ambiguous outcome become a blind retry.
+      if (err instanceof TransientError && !isRateLimited(err)) {
+        throw new AmbiguousBookingError(`JNE booking outcome unknown - reconcile with JNE before retrying: ${err.message}`, this.name);
+      }
+      throw err;
+    }
+    const { status, text, operationId } = response;
     const result = parseJnePickupCashlessResponse(text);
     this.recordPickupOutcome(result, { operationId, status, text, startedAt, orderId: input.orderId, orderNumber: input.orderNumber });
 
@@ -174,7 +186,12 @@ export class JneShipmentProvider implements ShipmentProvider {
     if (result.kind === 'provider_error') {
       throw new PermanentError(`JNE rejected the pickup: ${this.safeReason(result.reason)}`, this.name);
     }
-    throw new PermanentError(`JNE /pickupcashless returned an unexpected response: ${result.problem}`, this.name);
+    // A 2xx that is not the confirmed contract (e.g. "success" without a cnote_no):
+    // JNE may have accepted the pickup, so this is not a refusal either.
+    throw new AmbiguousBookingError(
+      `JNE booking outcome unknown - reconcile with JNE before retrying: /pickupcashless returned an unexpected response: ${result.problem}`,
+      this.name,
+    );
   }
 
   /** JNE's own words, with the integration-log policy applied and a bounded length. */
@@ -355,4 +372,9 @@ function safeParse<T>(text: string): T | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** A 429 is refused at JNE's gateway before any booking: definitive, not ambiguous. */
+function isRateLimited(err: TransientError): boolean {
+  return /^provider 429:/.test(err.message);
 }

@@ -78,6 +78,11 @@ export interface ShipmentMetadata {
   /** Failure diagnostics written by createForOrderSafe. */
   error?: string;
   failedAt?: string;
+  /**
+   * The last booking attempt got an ambiguous courier answer (the courier may hold
+   * the booking); the shipment is UNKNOWN until an operator reconciles it.
+   */
+  reconciliationRequired?: boolean;
   /** Written by the tracking pollers only (see TrackingObservation). */
   tracking?: TrackingMetadata;
 }

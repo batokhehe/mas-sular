@@ -13,6 +13,7 @@ import { trackingCacheKey } from './shipment-sync.service';
 import { readPickupDatetime, readShipmentMetadata, withPickupDatetime } from './shipment-metadata';
 import { PaxelPickupScheduler } from './paxel-pickup-scheduler';
 import { buildOutboxEvent } from '../../infrastructure/outbox/outbox-event.builder';
+import { AmbiguousBookingError } from '../shipping/domain/shipping-errors';
 
 /** Region names only; ids mean nothing to a courier. */
 const ADDRESS_REGION_NAMES = {
@@ -51,6 +52,14 @@ export const AWAITING_PICKUP_SCHEDULE = 'Awaiting admin-selected pickup schedule
  * manual admin flow to complete.
  */
 export const AWAITING_MANUAL_FULFILMENT = 'Awaiting manual courier booking (admin enters the airwaybill)';
+
+/**
+ * Outcome for a booking whose courier answer was ambiguous (timeout, 5xx,
+ * unconfirmed response): the courier may already hold the booking. The shipment is
+ * parked as UNKNOWN - which no booking claim accepts - until an operator has
+ * reconciled with the courier and either records the airwaybill or marks it FAILED.
+ */
+export const RECONCILIATION_REQUIRED = 'Courier booking outcome unknown: reconcile with the courier before retrying';
 
 export interface ShipmentOutcome {
   ok: boolean;
@@ -140,6 +149,13 @@ export class ShipmentService {
     // Idempotent: already booked.
     if (shipment.trackingNumber) {
       return { ok: true, status: shipment.status, trackingNumber: shipment.trackingNumber };
+    }
+
+    // A previous attempt may have been booked by the courier (ambiguous answer).
+    // Never book again until an operator has reconciled it. The CAS claim below
+    // refuses UNKNOWN as well; this only gives the caller the precise reason.
+    if (shipment.status === ShipmentStatus.UNKNOWN) {
+      return { ok: false, status: shipment.status, error: RECONCILIATION_REQUIRED };
     }
 
     const providerName = order.shippingProvider ?? shipment.provider;
@@ -439,7 +455,10 @@ export class ShipmentService {
       return await this.createForOrder(orderId);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      this.logger.error({ event: 'shipment.create_failed', orderId, error: message });
+      // Ambiguous courier answer: park as UNKNOWN (never claimable, so neither a retry
+      // nor the reconciliation worker can book twice) instead of FAILED (retryable).
+      const ambiguous = err instanceof AmbiguousBookingError;
+      this.logger.error({ event: ambiguous ? 'shipment.create_ambiguous' : 'shipment.create_failed', orderId, error: message });
       // Merge, never replace: metadata also carries the admin-selected pickup
       // time, and overwriting it here would strand the shipment - the schedule
       // would be gone and every retry would refuse for want of a pickup slot.
@@ -450,16 +469,19 @@ export class ShipmentService {
         .updateMany({
           where: { orderId, trackingNumber: null },
           data: {
-            status: ShipmentStatus.FAILED,
+            status: ambiguous ? ShipmentStatus.UNKNOWN : ShipmentStatus.FAILED,
             metadata: this.json({
               ...readShipmentMetadata(existing?.metadata),
               error: message,
               failedAt: new Date().toISOString(),
+              reconciliationRequired: ambiguous ? true : undefined,
             }),
           },
         })
         .catch(() => undefined);
-      return { ok: false, status: ShipmentStatus.FAILED, error: message };
+      return ambiguous
+        ? { ok: false, status: ShipmentStatus.UNKNOWN, error: `${RECONCILIATION_REQUIRED} (${message})` }
+        : { ok: false, status: ShipmentStatus.FAILED, error: message };
     }
   }
 
