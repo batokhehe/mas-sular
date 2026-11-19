@@ -26,7 +26,7 @@ export default function ProductDetailPage() {
   const slug = params?.slug
   const add = useCartStore((s) => s.add)
   const lines = useCartStore((s) => s.lines)
-  const [qty, setQty] = useState(1)
+  const [chosenQty, setQty] = useState(1)
   const [toppingIds, setToppingIds] = useState<string[]>([])
 
   const { data: product, isLoading, isError, refetch } = useQuery({
@@ -51,7 +51,7 @@ export default function ProductDetailPage() {
   const cartFull = !outOfStock && maxAddable <= 0
   // The quantity shown and added never exceeds what can still be added (stock or the
   // cart may change after it was chosen) - derived, not synced through an effect.
-  const effectiveQty = Math.max(1, clampQty(qty, maxAddable))
+  const qty = Math.max(1, clampQty(chosenQty, maxAddable))
 
   // Toppings are global in the catalog (no per-product eligibility exists in the
   // schema). Only what GET /catalog/toppings returns - active ones - can be chosen;
@@ -170,19 +170,19 @@ export default function ProductDetailPage() {
                       variant="ghost"
                       size="icon"
                       className="size-9 rounded-full"
-                      disabled={outOfStock || cartFull || effectiveQty <= 1}
-                      onClick={() => setQty(Math.max(1, effectiveQty - 1))}
+                      disabled={outOfStock || cartFull || qty <= 1}
+                      onClick={() => setQty(Math.max(1, qty - 1))}
                       aria-label="Kurangi jumlah"
                     >
                       <Minus className="size-4" />
                     </Button>
-                    <span className="w-8 text-center font-semibold">{effectiveQty}</span>
+                    <span className="w-8 text-center font-semibold">{qty}</span>
                     <Button
                       variant="ghost"
                       size="icon"
                       className="size-9 rounded-full"
-                      disabled={outOfStock || cartFull || effectiveQty >= maxAddable}
-                      onClick={() => setQty(clampQty(effectiveQty + 1, maxAddable))}
+                      disabled={outOfStock || cartFull || qty >= maxAddable}
+                      onClick={() => setQty(clampQty(qty + 1, maxAddable))}
                       aria-label="Tambah jumlah"
                     >
                       <Plus className="size-4" />
@@ -192,9 +192,9 @@ export default function ProductDetailPage() {
                     className="flex-1 rounded-full sm:flex-none"
                     disabled={outOfStock || cartFull}
                     onClick={() => {
-                      const allowed = clampQty(effectiveQty, maxAddable)
-                      if (allowed <= 0) return
-                      add(product, allowed, chosenToppings)
+                      // qty is already clamped to maxAddable; nothing can be added at 0.
+                      if (maxAddable <= 0) return
+                      add(product, qty, chosenToppings)
                       toast.success('Ditambahkan ke keranjang')
                     }}
                   >
@@ -203,7 +203,7 @@ export default function ProductDetailPage() {
                       ? 'Stok Habis'
                       : cartFull
                         ? 'Stok di keranjang penuh'
-                        : `Tambah ke Keranjang · ${formatIDR(unitPrice * effectiveQty)}`}
+                        : `Tambah ke Keranjang · ${formatIDR(unitPrice * qty)}`}
                   </Button>
                 </div>
               </div>
