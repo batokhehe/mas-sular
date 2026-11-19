@@ -10,6 +10,8 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Separator } from '@/components/ui/separator'
 import { formatIDR } from '@/lib/utils/format'
 import { useCartStore, selectedLines, selectedSubtotal, lineUnitPrice, lineTotal } from '@/lib/stores/cart-store'
+import { useProducts } from '@/lib/query/hooks'
+import { canIncrease, stockIssues } from '@/lib/cart/stock-limits'
 
 export default function CartPage() {
   const lines = useCartStore((s) => s.lines)
@@ -22,6 +24,14 @@ export default function CartPage() {
   const selectedCount = selectedLines(lines).length
   const allSelected = lines.length > 0 && selectedCount === lines.length
   const subtotal = selectedSubtotal(lines)
+
+  // Live availability (catalog availableStock = Stok Produk), refreshed on visit so a
+  // cart built earlier is checked against current stock. The backend re-validates.
+  const productsQuery = useProducts()
+  const availability = new Map((productsQuery.data ?? []).map((p) => [p.id, p.availableStock] as const))
+  const issues = stockIssues(lines, availability)
+  const issueFor = (productId: string) => issues.find((i) => i.productId === productId)
+  const selectedIssues = stockIssues(selectedLines(lines), availability)
 
   if (lines.length === 0) {
     return (
@@ -92,6 +102,13 @@ export default function CartPage() {
                         </p>
                       )}
                       <p className="text-sm text-muted-foreground">{formatIDR(lineUnitPrice(line))} / item</p>
+                      {issueFor(line.productId) ? (
+                        <p role="alert" className="text-xs font-medium text-destructive">
+                          {issueFor(line.productId)!.available > 0
+                            ? `Stok tersisa ${issueFor(line.productId)!.available}. Kurangi jumlah untuk melanjutkan.`
+                            : 'Stok habis. Hapus item ini untuk melanjutkan.'}
+                        </p>
+                      ) : null}
                     </div>
                     <Button
                       variant="ghost"
@@ -120,6 +137,7 @@ export default function CartPage() {
                         size="icon"
                         className="size-8 rounded-full"
                         onClick={() => setQty(line.lineId, line.qty + 1)}
+                        disabled={!canIncrease(lines, line.productId, availability.get(line.productId))}
                         aria-label="Tambah jumlah"
                       >
                         <Plus className="size-3.5" />
@@ -149,8 +167,23 @@ export default function CartPage() {
                 Ongkos kirim dan diskon dihitung saat checkout.
               </p>
               <Separator />
+              {selectedIssues.length > 0 ? (
+                <p role="alert" className="text-center text-sm font-medium text-destructive">
+                  Sesuaikan jumlah item yang melebihi stok untuk checkout.
+                </p>
+              ) : null}
               {selectedCount > 0 ? (
-                <Button asChild size="lg" className="w-full rounded-full">
+                <Button
+                  asChild
+                  size="lg"
+                  className="w-full rounded-full aria-disabled:pointer-events-none aria-disabled:opacity-50"
+                  // Slot merges these onto the link: a stale cart above current Stok Produk
+                  // must fix quantities first (the backend would refuse the order anyway).
+                  aria-disabled={selectedIssues.length > 0 || undefined}
+                  onClick={(event: React.MouseEvent) => {
+                    if (selectedIssues.length > 0) event.preventDefault()
+                  }}
+                >
                   <Link href="/checkout">
                     Lanjut ke Checkout
                     <ChevronRight className="ml-1 size-4" />

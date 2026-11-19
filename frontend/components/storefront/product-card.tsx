@@ -8,11 +8,15 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { formatIDR } from '@/lib/utils/format'
 import { useCartStore } from '@/lib/stores/cart-store'
+import { remainingAddable } from '@/lib/cart/stock-limits'
 import type { Product } from '@/lib/types/models'
 
 export function ProductCard({ product }: { product: Product }) {
   const add = useCartStore((s) => s.add)
-  const outOfStock = product.stock <= 0
+  const lines = useCartStore((s) => s.lines)
+  const outOfStock = product.availableStock <= 0
+  // Nothing left to add once the cart already holds every available unit.
+  const canAdd = remainingAddable(lines, product.id, product.availableStock) > 0
 
   // All derived from real Product fields — no fabricated values.
   const discount =
@@ -80,13 +84,13 @@ export function ProductCard({ product }: { product: Product }) {
         <Button
           size="sm"
           className="mt-auto w-full"
-          disabled={outOfStock}
+          disabled={!canAdd}
           onClick={() => {
             add(product)
             toast.success('Ditambahkan ke keranjang')
           }}
         >
-          {outOfStock ? 'Stok Habis' : 'Tambah ke Keranjang'}
+          {outOfStock ? 'Stok Habis' : canAdd ? 'Tambah ke Keranjang' : 'Stok di keranjang penuh'}
         </Button>
       </div>
     </Card>
