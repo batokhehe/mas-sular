@@ -1,5 +1,6 @@
 import { api, apiBaseUrl, csrfHeaders } from './api';
 import type { ServiceFeeRuleSnapshot } from './orders/service-fee-view';
+import { buildAdminOrdersQuery, type AdminOrdersQueryParams } from './orders/order-list-query';
 
 /** Standard paginated envelope returned by admin list endpoints. */
 export type Paginated<T> = {
@@ -438,12 +439,8 @@ export function fetchAdminDashboard() {
   return api<AdminDashboard>('/admin/dashboard');
 }
 
-export function fetchAdminOrders(params: PageParams & { status?: string; paymentStatus?: string } = {}) {
-  const q = new URLSearchParams();
-  if (params.status) q.set('status', params.status);
-  if (params.paymentStatus) q.set('paymentStatus', params.paymentStatus);
-  appendPage(q, params);
-  const query = q.toString();
+export function fetchAdminOrders(params: AdminOrdersQueryParams = {}) {
+  const query = buildAdminOrdersQuery(params);
   return api<Paginated<AdminOrder>>(`/admin/orders${query ? `?${query}` : ''}`);
 }
 

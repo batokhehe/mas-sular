@@ -1,7 +1,10 @@
-import { IsEnum, IsIn, IsInt, IsObject, IsOptional, IsString, IsUrl, Min } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsEnum, IsIn, IsInt, IsObject, IsOptional, IsString, IsUrl, MaxLength, Min } from 'class-validator';
 import { OrderStatus, PaymentStatus, ShipmentStatus } from '@prisma/client';
 import { PaginationQueryDto } from '../../../../common/pagination/pagination';
 import { SHIPPING_LIST_ACTIVE_SCOPE } from '../../shipping-list-scope';
+
+export const ADMIN_ORDER_SEARCH_MAX_LENGTH = 100;
 
 export class ListAdminOrdersQueryDto extends PaginationQueryDto {
   @IsOptional()
@@ -11,6 +14,20 @@ export class ListAdminOrdersQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsEnum(PaymentStatus)
   paymentStatus?: PaymentStatus;
+
+  /**
+   * Free-text search over order number, customer name and customer email
+   * (case-insensitive, partial). Trimmed; blank means "no search".
+   */
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (typeof value !== 'string') return value;
+    const trimmed = value.trim();
+    return trimmed === '' ? undefined : trimmed;
+  })
+  @IsString()
+  @MaxLength(ADMIN_ORDER_SEARCH_MAX_LENGTH)
+  search?: string;
 }
 
 export class UpdateOrderStatusDto {

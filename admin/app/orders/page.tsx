@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { AdminShell } from '@/components/layout/admin-shell';
 import { Badge } from '@/components/ui/badge';
@@ -10,9 +10,15 @@ import { Card, CardTitle } from '@/components/ui/card';
 import { Pagination } from '@/components/ui/pagination';
 import { ROUTE_PERMISSIONS } from '@/lib/access';
 import { fetchAdminOrders, AdminOrder } from '@/lib/admin';
+import { trailingDebounce } from '@/lib/debounce';
+import {
+  applySearchChange,
+  ORDER_SEARCH_DEBOUNCE_MS,
+  ORDER_SEARCH_MAX_LENGTH,
+  ORDER_STATUS_OPTIONS as statusOptions,
+  type OrderListState,
+} from '@/lib/orders/order-list-query';
 import { PrepareShipmentPanel } from './components/prepare-shipment-panel';
-
-const statusOptions = ['ALL', 'PENDING', 'PROCESSING', 'PACKING', 'DELIVERING', 'COMPLETED', 'CANCELLED'] as const;
 
 /**
  * Only these can be handed to a courier. PACKING is the existing state for an
@@ -22,29 +28,32 @@ const statusOptions = ['ALL', 'PENDING', 'PROCESSING', 'PACKING', 'DELIVERING', 
 const BOOKABLE_STATUSES = new Set(['PROCESSING', 'PACKING']);
 
 export default function OrdersPage() {
-  const [search, setSearch] = useState('');
+  // What the operator is typing; the debounced, normalized term lives in listState.
+  const [searchInput, setSearchInput] = useState('');
+  const [listState, setListState] = useState<OrderListState>({ search: '', page: 1 });
+  const { search, page } = listState;
+  const setPage = (next: number) => setListState((current) => ({ ...current, page: next }));
   const [statusFilter, setStatusFilter] = useState<typeof statusOptions[number]>('ALL');
-  const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
+  // Search, status filtering and paging are all server-side. A new search term
+  // restarts from page 1 (applySearchChange).
+  const commitSearch = useMemo(
+    () => trailingDebounce((raw: string) => setListState((current) => applySearchChange(current, raw)), ORDER_SEARCH_DEBOUNCE_MS),
+    [],
+  );
+  useEffect(() => () => commitSearch.cancel(), [commitSearch]);
+
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['admin-orders', statusFilter, page, limit],
-    queryFn: () => fetchAdminOrders({ status: statusFilter === 'ALL' ? undefined : statusFilter, page, limit }),
+    queryKey: ['admin-orders', statusFilter, search, page, limit],
+    queryFn: () =>
+      fetchAdminOrders({ status: statusFilter === 'ALL' ? undefined : statusFilter, search: search || undefined, page, limit }),
     placeholderData: keepPreviousData,
     retry: false,
   });
 
-  // Free-text search stays client-side over the current page; status filtering
-  // and paging are handled server-side.
-  const orders = useMemo(() => {
-    if (!data) return [];
-    return data.items.filter((order: AdminOrder) =>
-      [order.orderNumber, order.user?.name ?? '', order.user?.email ?? ''].some((field) =>
-        field.toLowerCase().includes(search.toLowerCase()),
-      ),
-    );
-  }, [data, search]);
+  const orders = useMemo<AdminOrder[]>(() => data?.items ?? [], [data]);
 
   const selectedOrders = useMemo(
     () => orders.filter((order: AdminOrder) => selectedIds.has(order.id)),
@@ -73,8 +82,12 @@ export default function OrdersPage() {
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex-1">
             <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              value={searchInput}
+              maxLength={ORDER_SEARCH_MAX_LENGTH}
+              onChange={(event) => {
+                setSearchInput(event.target.value);
+                commitSearch(event.target.value);
+              }}
               placeholder="Cari nomor pesanan, pelanggan, atau email"
               className="h-11 w-full rounded-xl border border-gray-200 bg-gray-50 px-4 text-sm outline-none focus:border-[#465fff] focus:bg-white"
             />

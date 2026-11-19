@@ -699,10 +699,20 @@ export class AdminService {
 
   async listOrders(query: ListAdminOrdersQueryDto) {
     const { skip, take, page, limit } = pageArgs(query);
+    const search = query.search?.trim();
     const where: Prisma.OrderWhereInput = {
       deletedAt: null,
       status: query.status,
       payment: query.paymentStatus ? { status: query.paymentStatus } : undefined,
+      // Server-side search: the list is paginated, so filtering only the loaded
+      // page would hide every match beyond it (incident BMS-20261118-CKK0SJS2).
+      OR: search
+        ? [
+            { orderNumber: { contains: search, mode: 'insensitive' } },
+            { user: { name: { contains: search, mode: 'insensitive' } } },
+            { user: { email: { contains: search, mode: 'insensitive' } } },
+          ]
+        : undefined,
     };
     const [items, total] = await Promise.all([
       this.prisma.order.findMany({
