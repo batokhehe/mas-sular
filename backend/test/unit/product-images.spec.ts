@@ -272,7 +272,7 @@ describe('what the product queries load', () => {
   it('admin list and public list never load images; public detail loads them ordered', async () => {
     const findMany = jest.fn().mockResolvedValue([]);
     const findFirst = jest.fn().mockResolvedValue({ id: 'p1' });
-    const prisma = { product: { findMany, findFirst } };
+    const prisma = { product: { findMany, findFirst }, productInventory: { findMany: jest.fn().mockResolvedValue([]) } };
 
     await new AdminService(prisma as never, {} as never).listProducts();
     expect(JSON.stringify(findMany.mock.calls[0][0])).not.toContain('images');

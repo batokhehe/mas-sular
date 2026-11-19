@@ -160,7 +160,7 @@ describe('public catalog never sends SKU to customers', () => {
     const findMany = jest.fn().mockResolvedValue(rows);
     const findFirst = jest.fn().mockResolvedValue(rows[0] ?? null);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return { repo: new PrismaCatalogRepository({ product: { findMany, findFirst } } as any), findMany, findFirst };
+    return { repo: new PrismaCatalogRepository({ product: { findMany, findFirst }, productInventory: { findMany: jest.fn().mockResolvedValue([]) } } as any), findMany, findFirst };
   }
 
   it('listProducts omits sku at the query', async () => {

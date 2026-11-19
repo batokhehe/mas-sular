@@ -53,7 +53,7 @@ function expiryHarness(payment: { status: PaymentStatus; deletedAt?: Date | null
     }),
     inventoryReservation: {
       updateMany: jest.fn(async () => { calls.push('reservation.cas'); return { count: 1 }; }),
-      findUnique: jest.fn(async () => ({ reservedQty: 3, productId: 'p1', outletId: 'outlet-1' })),
+      findUnique: jest.fn(async () => ({ id: 'res-1', reservedQty: 3, productId: 'p1', outletId: 'outlet-1', inventoryHoldApplied: true })),
       update: jest.fn(async () => ({})),
     },
     productInventory: {
@@ -146,7 +146,7 @@ describe('C1-a A — reservation worker pre-filter', () => {
 
 // =========================================================== B. coverage =====
 
-interface Res { id: string; orderId: string; productId: string; outletId: string | null; reservedQty: number; committedQty: number; status: ReservationStatus }
+interface Res { id: string; orderId: string; productId: string; outletId: string | null; reservedQty: number; committedQty: number; status: ReservationStatus; inventoryHoldApplied: boolean }
 interface World {
   payment: { id: string; orderId: string; amount: number; status: PaymentStatus; verifiedByUserId: string | null; deletedAt: null };
   orderStatus: string;
@@ -192,8 +192,9 @@ function settlementWorld(init: Partial<World> & Pick<World, 'reservations' | 'it
       const text = sqlText(sql);
       if (text.includes('"Order"')) return [{ status: state.orderStatus }];
       if (text.includes('"ProductInventory"')) {
-        const pi = piById(sql.values[0]);
-        return [{ id: pi.id, stock: pi.stock, reserved: pi.reserved }];
+        // Locked by id (adjust/transfer paths) or by (productId, outletId) (reservation holds).
+        const pi = sql.values.length >= 2 ? state.pis[`${sql.values[0]}|${sql.values[1]}`] : piById(sql.values[0]);
+        return pi ? [{ id: pi.id, stock: pi.stock, reserved: pi.reserved }] : [];
       }
       throw new Error(`unexpected raw SQL: ${text}`);
     }),
@@ -257,7 +258,9 @@ function settlementWorld(init: Partial<World> & Pick<World, 'reservations' | 'it
 }
 
 const res = (over: Partial<Res> & Pick<Res, 'id' | 'productId' | 'reservedQty'>): Res => ({
-  orderId: 'ord-1', outletId: null, committedQty: 0, status: ReservationStatus.RESERVED, ...over,
+  orderId: 'ord-1', outletId: null, committedQty: 0, status: ReservationStatus.RESERVED,
+  // A reservation at an outlet placed its Stok Produk hold; one without is legacy.
+  inventoryHoldApplied: (over.outletId ?? null) !== null, ...over,
 });
 const ADMIN = { kind: 'ADMIN' as const, adminId: 'admin-1' };
 

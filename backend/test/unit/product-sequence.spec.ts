@@ -63,7 +63,7 @@ describe('the canonical order', () => {
 describe('PrismaCatalogRepository.listProducts ordering', () => {
   const build = () => {
     const findMany = jest.fn().mockResolvedValue([]);
-    return { findMany, repo: new PrismaCatalogRepository({ product: { findMany } } as never) };
+    return { findMany, repo: new PrismaCatalogRepository({ product: { findMany }, productInventory: { findMany: jest.fn().mockResolvedValue([]) } } as never) };
   };
 
   const orderByFor = async (query: Record<string, unknown>) => {
@@ -96,7 +96,7 @@ describe('PrismaCatalogRepository.listProducts ordering', () => {
     await repo.listProducts({} as never);
     const args = findMany.mock.calls[0][0];
     expect(args.where).toMatchObject({ status: ProductStatus.ACTIVE, deletedAt: null });
-    expect(args.omit).toEqual({ sku: true });
+    expect(args.omit).toEqual({ sku: true, stock: true });
   });
 });
 

@@ -7,7 +7,16 @@
  * passed their pre-checks before either touches a row; the PAYMENT ROW LOCK then
  * decides the order. Each race is repeated to cover both interleavings.
  *
- * Covers both stock models: legacy Product.stock and per-outlet ProductInventory.
+ * Covers both stock models:
+ * - 'outlet': the current model. Checkout reserves through the REAL reserveForOrder
+ *   against a per-outlet ProductInventory ("Stok Produk") row.
+ * - 'legacy': a reservation that ALREADY EXISTS from before the Stok Produk rule -
+ *   a RESERVED ledger row with no outlet and no ProductInventory hold, whose commit /
+ *   release / expiry still settle against the master Product.stock. New reservations
+ *   can no longer be created this way (reserveForOrder refuses a product without a
+ *   Stok Produk row - asserted below), so the fixture writes the row exactly as the
+ *   pre-Stok-Produk reserveForOrder did. The settlement services exercised on it are
+ *   the real ones, unchanged.
  */
 import { IncidentStatus, PaymentMethod, PaymentStatus, ReservationStatus } from '@prisma/client'
 import { randomUUID } from 'crypto'
@@ -109,12 +118,29 @@ describe('C1-a settlement ↔ inventory coverage (PostgreSQL)', () => {
       },
       include: { payment: true },
     })
-    await prisma.$transaction((tx) => inventory.reserveForOrder(tx, {
-      orderId: order.id,
-      items: lines.map((quantity) => ({ productId: product.id, quantity })),
-      paymentMethod: method,
-      outletId,
-    }), TX)
+    if (opts.model === 'outlet') {
+      await prisma.$transaction((tx) => inventory.reserveForOrder(tx, {
+        orderId: order.id,
+        items: lines.map((quantity) => ({ productId: product.id, quantity })),
+        paymentMethod: method,
+        outletId,
+      }), TX)
+    } else {
+      // Pre-existing legacy reservation, as the pre-Stok-Produk code wrote it: one
+      // RESERVED row per product (lines summed), no outlet, expiry from the payment
+      // method, plus its 'Reservation created' history entry. No stock column moves
+      // at reservation time on this model.
+      const created = await prisma.inventoryReservation.create({
+        data: {
+          orderId: order.id, productId: product.id, outletId: null, reservedQty: qty,
+          status: ReservationStatus.RESERVED, expiresAt: inventory.reservationExpiry(method),
+          inventoryHoldApplied: false, // legacy: never held Stok Produk
+        },
+      })
+      await prisma.inventoryReservationHistory.create({
+        data: { reservationId: created.id, status: ReservationStatus.RESERVED, note: 'Reservation created' },
+      })
+    }
     const reservation = await prisma.inventoryReservation.findFirstOrThrow({ where: { orderId: order.id } })
     return { uid, productId: product.id, outletId, orderId: order.id, paymentId: order.payment!.id, reservationId: reservation.id, qty, stock }
   }
@@ -289,6 +315,36 @@ describe('C1-a settlement ↔ inventory coverage (PostgreSQL)', () => {
       const after = await world.prisma.incident.findMany({ where: { paymentId: f.paymentId }, orderBy: { createdAt: 'asc' } })
       expect(after.map((r) => r.status)).toEqual([IncidentStatus.RESOLVED, IncidentStatus.OPEN])
     })
+  })
+
+  it('no legacy fallback for NEW reservations: a product without a Stok Produk row is refused, nothing is written', async () => {
+    const { prisma } = world
+    const uid = randomUUID().slice(0, 8)
+    const category = await prisma.category.create({ data: { name: `c1a-nf-${uid}`, slug: `c1a-nf-${uid}` } })
+    const product = await prisma.product.create({
+      data: {
+        slug: `c1a-nf-${uid}`, sku: `C1ANF-${uid}`, name: `C1A NF ${uid}`, description: 'x',
+        price: 10_000, imageUrl: '/x.png', stock: 50, categoryId: category.id, status: 'ACTIVE', weightGram: 500,
+      },
+    })
+    const outlet = await prisma.outlet.create({ data: { name: `C1A-NF-${uid}`, isActive: true } })
+    const user = await prisma.user.create({ data: { email: `c1a-nf-${uid}@test.local`, name: 'C1A' } })
+    const address = await prisma.address.create({
+      data: { userId: user.id, label: 'H', recipientName: 'C1A', phone: '6281200000000', fullAddress: 'Jl Test', latitude: 0, longitude: 0 },
+    })
+    const order = await prisma.order.create({
+      data: {
+        orderNumber: `C1A-NF-${uid}`, userId: user.id, addressId: address.id, status: 'PENDING',
+        subtotal: 10_000, deliveryFee: 0, totalPrice: 10_000, paymentMethod: PaymentMethod.BANK_TRANSFER,
+      },
+    })
+
+    await expect(prisma.$transaction((tx) => inventory.reserveForOrder(tx, {
+      orderId: order.id, items: [{ productId: product.id, quantity: 1 }], paymentMethod: PaymentMethod.BANK_TRANSFER, outletId: outlet.id,
+    }), TX)).rejects.toThrow(/Insufficient available stock/)
+
+    expect(await prisma.inventoryReservation.count({ where: { orderId: order.id } })).toBe(0)
+    expect((await prisma.product.findUniqueOrThrow({ where: { id: product.id } })).stock).toBe(50)
   })
 
   it('concurrent recordPaymentException calls for one payment create exactly one incident (advisory lock)', async () => {

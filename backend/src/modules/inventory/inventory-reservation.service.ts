@@ -5,6 +5,7 @@ import { ListReservationsQueryDto } from './application/dto/inventory-reservatio
 import { pageArgs, paginate } from '../../common/pagination/pagination';
 import { positiveInt } from '../../common/utils/number.util';
 import { InventoryCoverageError, InventoryCoverageShortfall } from './inventory-coverage.error';
+import { loadAvailableStock } from './stock-availability';
 
 /**
  * C1-a: payment states in which the customer may still pay (or an uploaded receipt
@@ -41,16 +42,19 @@ export interface ReserveArgs {
   orderId: string;
   items: ReservationItem[];
   paymentMethod: PaymentMethod;
-  /** Allocated outlet (multi-outlet). When set, stock is tracked per-outlet in
-   *  ProductInventory; otherwise the legacy Product.stock path is used. */
+  /** Allocated outlet (multi-outlet). When absent, the active outlet is used. Stock
+   *  is ALWAYS the outlet's Stok Produk row (ProductInventory), never Product.stock. */
   outletId?: string | null;
 }
 
 /**
- * Stock reservation ledger. Available stock = Product.stock − active RESERVED qty.
- * Reservations are created at checkout (no stock change), COMMITTED at payment
- * verification (deducts Product.stock), and RELEASED/EXPIRED on cancel/expiry.
- * Product.stock stays the source of truth.
+ * Stock reservation ledger over the "Stok Produk" inventory (ProductInventory).
+ * Available stock = ProductInventory.stock - ProductInventory.reserved at the outlet.
+ * Reservations are created at checkout (reserved += qty), COMMITTED at payment
+ * verification (stock -= qty, reserved -= qty), and RELEASED/EXPIRED on
+ * cancel/expiry. New reservations never use the master Product.stock; the legacy
+ * Product.stock branches in commit/release remain only so reservations created
+ * before this rule still settle consistently.
  */
 @Injectable()
 export class InventoryReservationService {
@@ -70,15 +74,14 @@ export class InventoryReservationService {
     return null; // COD never expires
   }
 
-  /** Non-locking available-stock read for previews. */
+  /** Non-locking available-stock read for previews (Stok Produk only; see stock-availability.ts). */
   async availableFor(productId: string): Promise<number> {
-    const product = await this.prisma.product.findUnique({ where: { id: productId }, select: { stock: true } });
-    if (!product) return 0;
-    const reserved = await this.prisma.inventoryReservation.aggregate({
-      where: { productId, status: ReservationStatus.RESERVED },
-      _sum: { reservedQty: true },
-    });
-    return product.stock - (reserved._sum.reservedQty ?? 0);
+    return (await this.availableByProduct([productId])).get(productId) ?? 0;
+  }
+
+  /** Non-locking availability per product from Stok Produk (best single active outlet). */
+  availableByProduct(productIds: readonly string[]): Promise<Map<string, number>> {
+    return loadAvailableStock(this.prisma, productIds);
   }
 
   /**
@@ -107,65 +110,42 @@ export class InventoryReservationService {
     // carts with the same products in reversed order can never deadlock (H1).
     const orderedProducts = [...qtyByProduct.entries()].sort(([a], [b]) => a.localeCompare(b));
 
+    // The outlet whose Stok Produk is reserved: the allocated one, else the active
+    // outlet. Never the master Product.stock (business rule: Stok Produk only).
+    const outletId = args.outletId ?? legacyOutletId;
+
     for (const [productId, quantity] of orderedProducts) {
-      // Multi-outlet path: per-outlet ProductInventory (when an outlet is allocated
-      // AND a ProductInventory row exists). Otherwise the legacy Product.stock path.
-      const pi = args.outletId
-        ? await tx.productInventory.findUnique({ where: { productId_outletId: { productId, outletId: args.outletId } } })
+      const pi = outletId
+        ? await tx.productInventory.findUnique({ where: { productId_outletId: { productId, outletId } } })
         : null;
+      // No Stok Produk row at the fulfilling outlet = no stock there.
+      if (!outletId || !pi) throw new BadRequestException('Insufficient available stock');
 
-      if (args.outletId && pi) {
-        const rows = await tx.$queryRaw<Array<{ stock: number; reserved: number }>>(
-          Prisma.sql`SELECT stock, reserved FROM "ProductInventory" WHERE id = ${pi.id} FOR UPDATE`,
-        );
-        const row = rows[0];
-        const available = (row?.stock ?? 0) - (row?.reserved ?? 0);
-        if (available < quantity) throw new BadRequestException('Insufficient available stock');
-
-        await tx.productInventory.update({
-          where: { id: pi.id },
-          data: { reserved: { increment: quantity }, available: (row!.stock - row!.reserved) - quantity },
-        });
-        const reservation = await tx.inventoryReservation.create({
-          data: { orderId: args.orderId, productId, outletId: args.outletId, reservedQty: quantity, status: ReservationStatus.RESERVED, expiresAt },
-        });
-        await this.addHistory(tx, reservation.id, ReservationStatus.RESERVED, 'Reservation created');
-        continue;
-      }
-
-      // Legacy Product.stock path (backward compatible).
-      const rows = await tx.$queryRaw<Array<{ stock: number }>>(
-        Prisma.sql`SELECT stock FROM "Product" WHERE id = ${productId} FOR UPDATE`,
+      // Current read under a row lock: concurrent checkouts serialize here (H1/BF-017).
+      const rows = await tx.$queryRaw<Array<{ stock: number; reserved: number }>>(
+        Prisma.sql`SELECT stock, reserved FROM "ProductInventory" WHERE id = ${pi.id} FOR UPDATE`,
       );
-      const stock = rows[0]?.stock;
-      if (stock === undefined) throw new BadRequestException('Product is unavailable');
+      const row = rows[0];
+      const available = (row?.stock ?? 0) - (row?.reserved ?? 0);
+      if (!row || available < quantity) throw new BadRequestException('Insufficient available stock');
 
-      // LOCKING read, not an aggregate (BF-017). The Product row above is locked,
-      // but the availability predicate is about InventoryReservation rows — a
-      // different table. A plain aggregate is a consistent read, served from the
-      // snapshot this transaction took before the competing checkout committed,
-      // so the loser of the Product lock still saw reserved = 0 and both sold the
-      // last unit. `FOR UPDATE` makes this a current read of committed data, so
-      // whoever acquires the Product lock second sees the winner's reservation.
-      // Summed here rather than in SQL to keep the row lock unambiguous.
-      const held = await tx.$queryRaw<Array<{ reservedQty: number }>>(
-        Prisma.sql`SELECT "reservedQty" FROM "InventoryReservation"
-                   WHERE "productId" = ${productId} AND status = ${ReservationStatus.RESERVED}::"ReservationStatus"
-                   FOR UPDATE`,
-      );
-      const reservedQty = held.reduce((sum, row) => sum + Number(row.reservedQty), 0);
-      if (stock - reservedQty < quantity) throw new BadRequestException('Insufficient available stock');
-
+      await tx.productInventory.update({
+        where: { id: pi.id },
+        data: { reserved: { increment: quantity }, available: (row.stock - row.reserved) - quantity },
+      });
       const reservation = await tx.inventoryReservation.create({
-        data: { orderId: args.orderId, productId, outletId: args.outletId ?? legacyOutletId, reservedQty: quantity, status: ReservationStatus.RESERVED, expiresAt },
+        // inventoryHoldApplied: this row's hold was placed above, in this transaction.
+        data: { orderId: args.orderId, productId, outletId, reservedQty: quantity, status: ReservationStatus.RESERVED, expiresAt, inventoryHoldApplied: true },
       });
       await this.addHistory(tx, reservation.id, ReservationStatus.RESERVED, 'Reservation created');
     }
   }
 
   /**
-   * Commit every RESERVED reservation for an order: deduct Product.stock by
-   * reservedQty and mark COMMITTED. Called after payment is verified.
+   * Commit every RESERVED reservation for an order and mark it COMMITTED. Called
+   * after payment is verified. A reservation that holds Stok Produk
+   * (inventoryHoldApplied) deducts that row's stock and frees its hold; a legacy
+   * reservation deducts Product.stock, exactly as before.
    *
    * C2: the RESERVED → COMMITTED transition is a per-row CAS. A reservation the
    * expiry worker flipped to EXPIRED between our snapshot read and this write
@@ -186,15 +166,15 @@ export class InventoryReservationService {
         continue; // stock/hold already handled by whoever won the transition
       }
 
-      const pi = await this.lockedPiFor(tx, r.productId, r.outletId);
-      if (pi) {
-        // Multi-outlet: deduct outlet stock and release the hold. `available` is
+      const hold = await this.holdFor(tx, r);
+      if (hold.kind === 'held') {
+        // Deduct outlet stock and release this reservation's hold. `available` is
         // recomputed from the FOR UPDATE row (C5): (stock−q) − (reserved−q).
         await tx.productInventory.update({
-          where: { id: pi.id },
-          data: { stock: { decrement: r.reservedQty }, reserved: { decrement: r.reservedQty }, available: pi.stock - pi.reserved },
+          where: { id: hold.pi.id },
+          data: { stock: { decrement: r.reservedQty }, reserved: { decrement: r.reservedQty }, available: hold.pi.stock - hold.pi.reserved },
         });
-      } else {
+      } else if (hold.kind === 'legacy') {
         await tx.product.update({ where: { id: r.productId }, data: { stock: { decrement: r.reservedQty } } });
       }
       await this.addHistory(tx, r.id, ReservationStatus.COMMITTED, note);
@@ -255,30 +235,38 @@ export class InventoryReservationService {
   }
 
   /**
-   * Per-outlet inventory row locked FOR UPDATE (C5) — mirrors reserveForOrder's
-   * locking so `available` is always recomputed from current, serialized values
-   * (never a stale snapshot). Null → legacy Product.stock path.
+   * Where a reservation's counters live, decided by the reservation's OWN record
+   * (inventoryHoldApplied) - never by whether a ProductInventory row happens to
+   * exist now (a legacy reservation settled after its product gained a Stok Produk
+   * row used to decrement a hold it never placed: production drift on 11699095).
+   * - 'held': the row this reservation holds, locked FOR UPDATE (C5) so `available`
+   *   is recomputed from current, serialized values.
+   * - 'legacy': no ProductInventory hold; Product.stock semantics, as before.
+   * - 'missing': it held a row that no longer exists (deleted with its outlet or
+   *   product). Nothing is moved - and never the master stock instead.
    */
-  private async lockedPiFor(
+  private async holdFor(
     tx: Prisma.TransactionClient,
-    productId: string,
-    outletId: string | null,
-  ): Promise<{ id: string; stock: number; reserved: number } | null> {
-    if (!outletId) return null;
-    const pi = await tx.productInventory.findUnique({
-      where: { productId_outletId: { productId, outletId } },
-      select: { id: true },
-    });
-    if (!pi) return null;
-    const rows = await tx.$queryRaw<Array<{ id: string; stock: number; reserved: number }>>(
-      Prisma.sql`SELECT id, stock, reserved FROM "ProductInventory" WHERE id = ${pi.id} FOR UPDATE`,
-    );
-    return rows[0] ?? null;
+    r: { id: string; productId: string; outletId: string | null; inventoryHoldApplied: boolean },
+  ): Promise<{ kind: 'held'; pi: { id: string; stock: number; reserved: number } } | { kind: 'legacy' } | { kind: 'missing' }> {
+    if (!r.inventoryHoldApplied) return { kind: 'legacy' };
+    const rows = r.outletId
+      ? await tx.$queryRaw<Array<{ id: string; stock: number; reserved: number }>>(
+          Prisma.sql`SELECT id, stock, reserved FROM "ProductInventory"
+                     WHERE "productId" = ${r.productId} AND "outletId" = ${r.outletId} FOR UPDATE`,
+        )
+      : [];
+    if (!rows[0]) {
+      this.logger.error(`reservation ${r.id} holds Stok Produk but its ProductInventory row is gone - counters not moved`);
+      return { kind: 'missing' };
+    }
+    return { kind: 'held', pi: rows[0] };
   }
 
   /**
-   * Release active reservations for an order. COMMITTED reservations restock
-   * Product.stock (it was deducted at commit); RESERVED ones just free the hold.
+   * Release active reservations for an order. COMMITTED reservations restock where
+   * their commit deducted (the held Stok Produk row, or Product.stock for a legacy
+   * reservation); RESERVED ones free their hold (legacy ones held nothing).
    * Returns whether any reservation existed (so legacy orders fall back to the
    * old restock path).
    */
@@ -291,7 +279,9 @@ export class InventoryReservationService {
     const reservations = await tx.inventoryReservation.findMany({
       where: { orderId, status: { in: [ReservationStatus.RESERVED, ReservationStatus.COMMITTED] } },
     });
-    for (const r of reservations) {
+    for (const found of reservations) {
+      // The status OBSERVED before the CAS decides which counters move (never re-read).
+      const r = { ...found };
       const releasedQty = r.status === ReservationStatus.COMMITTED ? r.committedQty : r.reservedQty;
       // CAS on the OBSERVED status (C2-style): if the expiry worker (or a
       // concurrent commit) transitioned this row after our snapshot read, skip it
@@ -306,22 +296,23 @@ export class InventoryReservationService {
         continue;
       }
 
-      const pi = await this.lockedPiFor(tx, r.productId, r.outletId);
-      if (pi) {
-        // Multi-outlet: COMMITTED → restock outlet; RESERVED → free the hold.
+      const hold = await this.holdFor(tx, r);
+      if (hold.kind === 'held') {
+        const pi = hold.pi;
+        // COMMITTED → restock the outlet; RESERVED → free this reservation's hold.
         // `available` recomputed from the FOR UPDATE row (C5).
         if (r.status === ReservationStatus.COMMITTED && r.committedQty > 0) {
           await tx.productInventory.update({
             where: { id: pi.id },
             data: { stock: { increment: r.committedQty }, available: pi.stock + r.committedQty - pi.reserved },
           });
-        } else {
+        } else if (r.status === ReservationStatus.RESERVED) {
           await tx.productInventory.update({
             where: { id: pi.id },
             data: { reserved: { decrement: r.reservedQty }, available: pi.stock - (pi.reserved - r.reservedQty) },
           });
         }
-      } else if (r.status === ReservationStatus.COMMITTED && r.committedQty > 0) {
+      } else if (hold.kind === 'legacy' && r.status === ReservationStatus.COMMITTED && r.committedQty > 0) {
         await tx.product.update({ where: { id: r.productId }, data: { stock: { increment: r.committedQty } } });
       }
       await this.addHistory(tx, r.id, status, note);
@@ -369,20 +360,20 @@ export class InventoryReservationService {
 
       const row = await tx.inventoryReservation.findUnique({
         where: { id },
-        select: { reservedQty: true, productId: true, outletId: true },
+        select: { id: true, reservedQty: true, productId: true, outletId: true, inventoryHoldApplied: true },
       });
       const reservedQty = row?.reservedQty ?? 0;
 
-      // Release the per-outlet hold so ProductInventory.available recovers. A
+      // Free THIS reservation's hold so ProductInventory.available recovers. A
       // RESERVED reservation never deducted stock, so only `reserved` is freed
-      // (stock unchanged). Legacy reservations without a ProductInventory row never
-      // touched per-outlet inventory → nothing to release (backward compatible).
+      // (stock unchanged). A legacy reservation held nothing in ProductInventory and
+      // frees nothing there - even if its product has a Stok Produk row today.
       // Row locked FOR UPDATE (C5) so `available` is recomputed from current values.
-      const pi = await this.lockedPiFor(tx, row?.productId ?? '', row?.outletId ?? null);
-      if (pi) {
+      const hold = row ? await this.holdFor(tx, row) : ({ kind: 'legacy' } as const);
+      if (hold.kind === 'held') {
         await tx.productInventory.update({
-          where: { id: pi.id },
-          data: { reserved: { decrement: reservedQty }, available: pi.stock - (pi.reserved - reservedQty) },
+          where: { id: hold.pi.id },
+          data: { reserved: { decrement: reservedQty }, available: hold.pi.stock - (hold.pi.reserved - reservedQty) },
         });
       }
 
