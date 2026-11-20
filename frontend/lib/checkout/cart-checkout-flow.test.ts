@@ -51,7 +51,7 @@ test('8. with nothing selected the checkout button is disabled and says why', ()
   assert.match(disabled, /Pilih minimal satu item untuk checkout\./)
 })
 
-test('existing cart behaviour is kept: quantity, remove, navigation, clear, empty state', () => {
+test('existing cart behaviour is kept: quantity, remove, navigation, empty state; "Tambah Pesanan" replaces "Hapus semua"', () => {
   // P0-1: actions are keyed by lineId; prices include the line's toppings.
   assert.match(CART, /setQty\(line\.lineId, line\.qty - 1\)/)
   assert.match(CART, /setQty\(line\.lineId, line\.qty \+ 1\)/)
@@ -59,7 +59,9 @@ test('existing cart behaviour is kept: quantity, remove, navigation, clear, empt
   assert.match(CART, /<Link href=\{`\/catalog\/\$\{line\.slug\}`\}/)
   assert.match(CART, /formatIDR\(lineUnitPrice\(line\)\)\} \/ item/)
   assert.match(CART, /formatIDR\(lineTotal\(line\)\)/)
-  assert.match(CART, /onClick=\{\(\) => clear\(\)\}/)
+  // Approved change: the header button continues shopping instead of emptying the cart.
+  assert.match(CART, /<Link href="\/catalog">\s*<Plus className="mr-1 size-4" \/> Tambah Pesanan\s*<\/Link>/)
+  assert.doesNotMatch(CART, /onClick=\{\(\) => clear\(\)\}/)
   assert.match(CART, /if \(lines\.length === 0\) \{[\s\S]*?title="Keranjang Anda kosong"/)
 })
 

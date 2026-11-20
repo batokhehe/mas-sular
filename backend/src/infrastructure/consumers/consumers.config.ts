@@ -1,4 +1,5 @@
 import { positiveInt } from '../../common/utils/number.util';
+import { isEmailChannelEnabled } from '../notifications/email-channel';
 export const CONSUMERS_CONFIG = 'CONSUMERS_CONFIG';
 
 export interface ConsumersConfig {
@@ -23,6 +24,12 @@ export interface ConsumersConfig {
   opsNotificationWhatsapp?: string;
   /** Base URL of the admin web app, used to deep-link an alert to the order. */
   adminUrl?: string;
+  /**
+   * EMAIL channel switch (NOTIFICATION_EMAIL_ENABLED). The payment consumer only
+   * produces EMAIL rows, so when this is not true it records nothing (events are
+   * acknowledged as skipped). Absent ⇒ disabled.
+   */
+  emailEnabled?: boolean;
 }
 
 export function loadConsumersConfig(env: NodeJS.ProcessEnv = process.env): ConsumersConfig {
@@ -40,5 +47,6 @@ export function loadConsumersConfig(env: NodeJS.ProcessEnv = process.env): Consu
     // honoured as a fallback so an environment that set it keeps working.
     opsNotificationWhatsapp: env.QONTAK_ADMIN ?? env.OPS_NOTIFICATION_WHATSAPP,
     adminUrl: env.ADMIN_URL,
+    emailEnabled: isEmailChannelEnabled(env),
   };
 }

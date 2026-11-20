@@ -7,6 +7,7 @@ import { InvalidPhoneError, normalizePhoneNumber } from '../../common/utils/phon
 import { extractRelated } from '../../infrastructure/lifecycle/queue-center.util';
 import { ManualTemplate, MANUAL_TEMPLATES } from '../../infrastructure/notifications/notification-message';
 import { TemplateRegistry } from '../../infrastructure/notifications/template-registry';
+import { EMAIL_CHANNEL_DISABLED_REASON, isEmailChannelEnabled } from '../../infrastructure/notifications/email-channel';
 import { TemplateRenderer } from '../../infrastructure/notifications/template-renderer';
 import { redactErrorText, redactRenderedText } from '../../common/logging/redact';
 
@@ -269,6 +270,7 @@ export class CustomerCommunicationService {
   }
 
   private channelReady(channel: NotificationChannel, template: ManualTemplate): boolean {
+    if (channel === NotificationChannel.EMAIL && !isEmailChannelEnabled()) return false;
     try {
       this.registry.resolve(channel, template);
       return true;
@@ -283,6 +285,9 @@ export class CustomerCommunicationService {
     this.assertManualTemplate(input.template);
     if (input.channel !== NotificationChannel.EMAIL && input.channel !== NotificationChannel.WHATSAPP) {
       throw new BadRequestException('Manual send supports EMAIL and WHATSAPP only');
+    }
+    if (input.channel === NotificationChannel.EMAIL && !isEmailChannelEnabled()) {
+      throw new BadRequestException(`EMAIL manual sends are not available: ${EMAIL_CHANNEL_DISABLED_REASON}`);
     }
     // Fail fast (instead of a permanently-FAILED row) when the provider template
     // is not configured for this channel.

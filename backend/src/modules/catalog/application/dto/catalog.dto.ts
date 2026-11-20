@@ -14,10 +14,15 @@ export class ListProductsQueryDto {
   @IsString()
   category?: string;
 
-  @ApiPropertyOptional({ enum: ['popular', 'price-low', 'price-high', 'rating'] })
+  /**
+   * `best-selling`: units actually sold (OrderItem.quantity on non-cancelled orders
+   * whose payment is PAID), most first; products with no paid sales follow in the
+   * canonical sequence. Only the ORDER is exposed - never the sales numbers.
+   */
+  @ApiPropertyOptional({ enum: ['popular', 'price-low', 'price-high', 'rating', 'best-selling'] })
   @IsOptional()
-  @IsIn(['popular', 'price-low', 'price-high', 'rating'])
-  sort?: 'popular' | 'price-low' | 'price-high' | 'rating';
+  @IsIn(['popular', 'price-low', 'price-high', 'rating', 'best-selling'])
+  sort?: 'popular' | 'price-low' | 'price-high' | 'rating' | 'best-selling';
 
   /**
    * P2 #10: `?promoSpecial=true` narrows the list to Promo Special products (the

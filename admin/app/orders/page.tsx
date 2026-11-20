@@ -5,7 +5,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { AdminShell } from '@/components/layout/admin-shell';
 import { Badge } from '@/components/ui/badge';
-import { orderStatusLabel } from '@/lib/status-labels';
+import { orderStatusLabel, paymentMethodLabel, paymentStatusLabel } from '@/lib/status-labels';
+import { orderCourier, orderStatusBadge, paymentStatusBadge } from '@/lib/orders/order-list-view';
+import { COURIER_LABELS } from '@/lib/promos/promo-payload';
 import { Card, CardTitle } from '@/components/ui/card';
 import { Pagination } from '@/components/ui/pagination';
 import { ROUTE_PERMISSIONS } from '@/lib/access';
@@ -125,7 +127,7 @@ export default function OrdersPage() {
           ) : orders.length === 0 ? (
             <p className="p-6 text-sm text-gray-500">Tidak ada pesanan yang cocok dengan filter.</p>
           ) : (
-            <table className="w-full min-w-[760px] text-left text-sm">
+            <table className="w-full min-w-[880px] text-left text-sm">
               <thead>
                 <tr className="border-b border-gray-100 text-xs uppercase text-gray-400">
                   <th className="w-8 py-3 font-medium"><span className="sr-only">Pilih</span></th>
@@ -133,6 +135,7 @@ export default function OrdersPage() {
                   <th className="py-3 font-medium">Pelanggan</th>
                   <th className="py-3 font-medium">Status</th>
                   <th className="py-3 font-medium">Pembayaran</th>
+                  <th className="py-3 font-medium">Kurir</th>
                   <th className="py-3 text-right font-medium">Total</th>
                   <th className="py-3 font-medium">Aksi</th>
                 </tr>
@@ -153,12 +156,7 @@ export default function OrdersPage() {
                     </td>
                     <td className="py-4 font-medium text-gray-800">{order.orderNumber}</td>
                     <td className="py-4 text-gray-500">{order.user?.name ?? '-'}</td>
-                    <td className="py-4">
-                      <Badge tone={order.status === 'COMPLETED' ? 'success' : order.status === 'PENDING' ? 'danger' : 'brand'}>
-                        {orderStatusLabel(order.status)}
-                      </Badge>
-                    </td>
-                    <td className="py-4 text-gray-500">{order.payment?.status ?? order.paymentMethod}</td>
+                    <OrderStatusCells order={order} />
                     <td className="py-4 text-right font-semibold text-gray-900">Rp {order.totalPrice.toLocaleString('id-ID')}</td>
                     <td className="py-4">
                       <Link href={`/orders/${order.id}`} className="text-sm font-medium text-[#465fff] hover:text-indigo-700">
@@ -186,5 +184,31 @@ export default function OrdersPage() {
         ) : null}
       </Card>
     </AdminShell>
+  );
+}
+
+/** Order status, payment status (each its own colored badge) and courier for one row. */
+function OrderStatusCells({ order }: { order: AdminOrder }) {
+  const orderBadge = orderStatusBadge(order.status, orderStatusLabel);
+  const paymentBadge = paymentStatusBadge(order.payment?.status, paymentStatusLabel);
+  const courier = orderCourier(order, COURIER_LABELS);
+  return (
+    <>
+      <td className="py-4">
+        <Badge tone={orderBadge.tone} data-status={order.status}>
+          {orderBadge.label}
+        </Badge>
+      </td>
+      <td className="py-4">
+        <Badge tone={paymentBadge.tone} data-status={order.payment?.status ?? 'NONE'}>
+          {paymentBadge.label}
+        </Badge>
+        <p className="mt-1 text-xs text-gray-400">{paymentMethodLabel(order.paymentMethod)}</p>
+      </td>
+      <td className="py-4">
+        <p className="font-medium text-gray-700">{courier.courier}</p>
+        {courier.service ? <p className="text-xs text-gray-400">{courier.service}</p> : null}
+      </td>
+    </>
   );
 }

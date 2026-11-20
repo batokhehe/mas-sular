@@ -141,7 +141,7 @@ export default function ProductDetailPage() {
                 {!outOfStock && availableToppings.length > 0 ? (
                   <fieldset>
                     <legend className="mb-2 font-semibold">
-                      Topping <span className="text-sm font-normal text-muted-foreground">(opsional)</span>
+                      Tambahan <span className="text-sm font-normal text-muted-foreground">(opsional)</span>
                     </legend>
                     <div className="grid gap-2 sm:grid-cols-2">
                       {availableToppings.map((topping) => (
@@ -203,7 +203,7 @@ export default function ProductDetailPage() {
                       ? 'Stok Habis'
                       : cartFull
                         ? 'Stok di keranjang penuh'
-                        : `Tambah ke Keranjang · ${formatIDR(unitPrice * qty)}`}
+                        : `Tambahkan · ${formatIDR(unitPrice * qty)}`}
                   </Button>
                 </div>
               </div>

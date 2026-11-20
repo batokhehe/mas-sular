@@ -8,6 +8,7 @@ import { Card } from '@/components/ui/card'
 import { hasCustomerSession } from '@/lib/auth/tokens'
 import { PaymentRedirectResult } from '@/components/storefront/payment-redirect-result'
 import { isMidtransRedirect } from '@/lib/payments/redirect-params'
+import { PaymentVerificationNotice } from '@/components/storefront/payment-verification-notice'
 
 // Support channel (configurable); safe default. Never a token/ID.
 const SUPPORT_URL = process.env.NEXT_PUBLIC_SUPPORT_URL || 'mailto:cs@baksomassular.com'
@@ -50,9 +51,10 @@ function SuccessInner() {
         <p className="text-sm text-muted-foreground">
           Terima kasih. Bukti pembayaran Anda sudah kami terima dan akan diverifikasi oleh tim kami.
         </p>
+        <PaymentVerificationNotice className="text-sm text-muted-foreground" />
         <p className="text-sm text-muted-foreground">
           Verifikasi biasanya memerlukan waktu <span className="font-medium text-foreground">5–15 menit</span> pada
-          jam operasional. Anda akan menerima notifikasi WhatsApp setelah pembayaran diverifikasi.
+          jam operasional.
         </p>
 
         <div className="mt-2 flex w-full flex-col gap-2">

@@ -178,7 +178,7 @@ test('product page: selector from the active-toppings endpoint, name + price, hi
   assert.match(page, /\+\{formatIDR\(topping\.price\)\}/)
   assert.match(page, /add\(product, qty, chosenToppings\)/)
   assert.match(page, /const unitPrice = \(product\?\.price \?\? 0\) \+ toppingsTotal\(chosenToppings\)/)
-  assert.match(page, /`Tambah ke Keranjang · \$\{formatIDR\(unitPrice \* qty\)\}`/)
+  assert.match(page, /`Tambahkan · \$\{formatIDR\(unitPrice \* qty\)\}`/)
   const hooks = read('lib/query/hooks/use-products.ts')
   assert.match(hooks, /queryKey: qk\.catalog\.toppings, queryFn: \(\) => productsApi\.toppings\(\)/)
   assert.match(read('lib/api/products.api.ts'), /toppings: \(\) => api\.get<Topping\[\]>\('\/catalog\/toppings'\)/)

@@ -3,6 +3,7 @@ import * as amqp from 'amqplib';
 import { PrismaService } from '../../database/prisma.service';
 import { RabbitConnectionManager } from '../outbox/rabbit-connection.manager';
 import { LifecycleMetrics } from './lifecycle.metrics';
+import { isEmailChannelEnabled } from '../notifications/email-channel';
 
 // Consumer DLQ topology (mirrors order-created-notification.consumer.ts).
 const DLQ = 'order.created.notifications.dlq';
@@ -72,7 +73,7 @@ export class RedriveService {
 
   // B. NotificationOutbox FAILED -> PENDING
   async redriveFailedNotifications(filter: NotificationRedriveFilter = {}): Promise<RedriveResult> {
-    const { where, params } = buildNotificationWhere(filter);
+    const { where, params } = buildNotificationWhere(filter, isEmailChannelEnabled());
     return this.redriveFailedRows('NotificationOutbox', `"NotificationOutbox"`, 'notification', where, params, filter);
   }
 
@@ -209,9 +210,12 @@ function buildOutboxWhere(f: OutboxRedriveFilter): { where: string; params: unkn
   return { where: parts.join(' AND '), params };
 }
 
-function buildNotificationWhere(f: NotificationRedriveFilter): { where: string; params: unknown[] } {
+function buildNotificationWhere(f: NotificationRedriveFilter, emailEnabled: boolean): { where: string; params: unknown[] } {
   const parts = [`"status" = 'FAILED'`];
   const params: unknown[] = [];
+  // EMAIL channel off (email-channel.ts): its FAILED rows are history, never
+  // re-queued - they would only fail again and lose their original lastError.
+  if (!emailEnabled) parts.push(`"channel" <> 'EMAIL'`);
   if (f.id) {
     parts.push('"id" = ?');
     params.push(f.id);

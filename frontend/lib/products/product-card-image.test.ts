@@ -41,7 +41,7 @@ test('images fill the square without distortion (object-fit, never stretched)', 
 test('everything else on the card is preserved', () => {
   assert.match(code, /href=\{`\/catalog\/\$\{product\.slug\}`\}/, 'navigation to the product')
   assert.match(code, /src=\{product\.imageUrl\}\s+alt=\{product\.name\}/, 'image source + alt text')
-  for (const marker of ['Terlaris', '>Baru<', 'variant="destructive"', 'Level pedas', 'formatIDR(product.price)', 'formatIDR(product.originalPrice)', 'add(product)', 'Stok Habis', 'Tambah ke Keranjang']) {
+  for (const marker of ['Terlaris', '>Baru<', 'variant="destructive"', 'Level pedas', 'formatIDR(product.price)', 'formatIDR(product.originalPrice)', 'add(product)', 'Stok Habis', "'Tambahkan'"]) {
     assert.ok(code.includes(marker), `lost: ${marker}`)
   }
 })

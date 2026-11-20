@@ -131,7 +131,7 @@ function InvoiceDocument({ invoice }: { invoice: CustomerInvoice }) {
                   </p>
                   {item.toppings.length > 0 ? (
                     <p className="text-xs text-muted-foreground">
-                      Topping: {item.toppings.map((t) => `${t.name} (+${formatIDR(t.price)})`).join(', ')}
+                      Tambahan: {item.toppings.map((t) => `${t.name} (+${formatIDR(t.price)})`).join(', ')}
                     </p>
                   ) : null}
                   {item.spicyLevel ? <p className="text-xs text-muted-foreground">Level pedas: {item.spicyLevel}</p> : null}

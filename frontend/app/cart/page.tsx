@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { Minus, Plus, Trash2, ChevronRight } from 'lucide-react'
 import { StorefrontShell } from '@/components/storefront/shell'
+import { ProductSection } from '@/components/storefront/product-section'
 import { Empty } from '@/components/common/empty'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -12,12 +13,12 @@ import { formatIDR } from '@/lib/utils/format'
 import { useCartStore, selectedLines, selectedSubtotal, lineUnitPrice, lineTotal } from '@/lib/stores/cart-store'
 import { useProducts } from '@/lib/query/hooks'
 import { canIncrease, stockIssues } from '@/lib/cart/stock-limits'
+import { pickRecommendations } from '@/lib/cart/recommendations'
 
 export default function CartPage() {
   const lines = useCartStore((s) => s.lines)
   const setQty = useCartStore((s) => s.setQty)
   const remove = useCartStore((s) => s.remove)
-  const clear = useCartStore((s) => s.clear)
   const setSelected = useCartStore((s) => s.setSelected)
   const setAllSelected = useCartStore((s) => s.setAllSelected)
   // P2 #6: only ticked lines go to checkout, and only they count in the subtotal.
@@ -32,6 +33,11 @@ export default function CartPage() {
   const issues = stockIssues(lines, availability)
   const issueFor = (productId: string) => issues.find((i) => i.productId === productId)
   const selectedIssues = stockIssues(selectedLines(lines), availability)
+
+  // "Rekomendasi Menu Lain": the catalog in best-selling order (units sold on paid
+  // orders, ranked by the backend), minus what is already in the cart or sold out.
+  const bestSellingQuery = useProducts({ sort: 'best-selling' })
+  const recommendations = pickRecommendations(bestSellingQuery.data ?? [], lines.map((l) => l.productId))
 
   if (lines.length === 0) {
     return (
@@ -57,8 +63,10 @@ export default function CartPage() {
       <section className="mx-auto max-w-5xl px-4 py-8">
         <div className="mb-6 flex items-center justify-between">
           <h1 className="text-2xl font-bold">Keranjang Saya</h1>
-          <Button variant="ghost" size="sm" className="text-destructive" onClick={() => clear()}>
-            Hapus semua
+          <Button asChild variant="outline" size="sm" className="rounded-full">
+            <Link href="/catalog">
+              <Plus className="mr-1 size-4" /> Tambah Pesanan
+            </Link>
           </Button>
         </div>
 
@@ -204,6 +212,10 @@ export default function CartPage() {
           </div>
         </div>
       </section>
+
+      <div className="pb-10">
+        <ProductSection title="Rekomendasi Menu Lain" products={recommendations} viewAllHref="/catalog" />
+      </div>
     </StorefrontShell>
   )
 }

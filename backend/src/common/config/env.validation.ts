@@ -79,6 +79,9 @@ const baseSchema = z
     RABBITMQ_URL: z.string().optional(),
 
     NOTIFICATION_SENDER_ENABLED: boolFlag,
+    // EMAIL channel switch (email-channel.ts). Off unless exactly "true";
+    // WhatsApp delivery does not depend on it.
+    NOTIFICATION_EMAIL_ENABLED: boolFlag,
     // B6: who may receive a delivered notification. `allowlist` (default) or `all`;
     // `all` is production-only (cross-field below). See notification-delivery.gate.ts.
     NOTIFICATION_RECIPIENT_POLICY: z.enum(['allowlist', 'all']).optional(),

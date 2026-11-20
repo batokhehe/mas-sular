@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { ProductStatus } from '@prisma/client';
+import { OrderStatus, PaymentStatus, ProductStatus } from '@prisma/client';
 import { PrismaService } from '../../../database/prisma.service';
 import { ListProductsQueryDto } from '../application/dto/catalog.dto';
 import { CatalogRepository } from '../domain/catalog.repository';
@@ -47,7 +47,32 @@ export class PrismaCatalogRepository implements CatalogRepository {
       omit: { sku: true, stock: true },
       orderBy,
     });
-    return this.withAvailableStock(products);
+    const ordered = query.sort === 'best-selling' ? await this.byUnitsSold(products) : products;
+    return this.withAvailableStock(ordered);
+  }
+
+  /**
+   * Re-orders an already-filtered list (fetched in the canonical sequence) by units
+   * sold: OrderItem quantities of non-deleted, non-cancelled orders whose payment is
+   * PAID. One grouped query for the listed products only. The sort is stable, so
+   * ties - including products never sold - keep the canonical sequence.
+   */
+  private async byUnitsSold<T extends { id: string }>(products: T[]): Promise<T[]> {
+    if (products.length === 0) return products;
+    const sold = await this.prisma.orderItem.groupBy({
+      by: ['productId'],
+      where: {
+        productId: { in: products.map((p) => p.id) },
+        order: {
+          deletedAt: null,
+          status: { not: OrderStatus.CANCELLED },
+          payment: { is: { status: PaymentStatus.PAID, deletedAt: null } },
+        },
+      },
+      _sum: { quantity: true },
+    });
+    const units = new Map(sold.map((row) => [row.productId, row._sum.quantity ?? 0]));
+    return [...products].sort((a, b) => (units.get(b.id) ?? 0) - (units.get(a.id) ?? 0));
   }
 
   /** Adds `availableStock` (Stok Produk, see stock-availability.ts) to each product. */

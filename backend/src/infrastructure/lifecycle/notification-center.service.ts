@@ -5,6 +5,7 @@ import { NotificationChannel, NotificationOutbox, NotificationStatus, Prisma } f
 import { PrismaService } from '../../database/prisma.service';
 import { pageArgs, paginate } from '../../common/pagination/pagination';
 import { TemplateRenderer } from '../notifications/template-renderer';
+import { EMAIL_CHANNEL_DISABLED_REASON, isEmailChannelEnabled } from '../notifications/email-channel';
 import { RedriveService } from './redrive.service';
 import { extractRelated } from './queue-center.util';
 import { num } from '../../common/utils/number.util';
@@ -370,9 +371,13 @@ export class NotificationCenterService {
   // ---------------- Manual resend (delegates to the existing redrive flow) ----------------
 
   async resend(id: string) {
-    const row = await this.prisma.notificationOutbox.findUnique({ where: { id }, select: { id: true, status: true } });
+    const row = await this.prisma.notificationOutbox.findUnique({ where: { id }, select: { id: true, status: true, channel: true } });
     if (!row) throw new NotFoundException('Notification not found');
     if (row.status !== NotificationStatus.FAILED) throw new BadRequestException('Only FAILED notifications can be resent');
+    // A disabled channel would only fail again: keep the historical row as it is.
+    if (row.channel === NotificationChannel.EMAIL && !isEmailChannelEnabled()) {
+      throw new BadRequestException(`EMAIL notifications cannot be resent: ${EMAIL_CHANNEL_DISABLED_REASON}`);
+    }
     await this.stampResend([id]);
     // Existing recovery flow: FAILED → PENDING; the sender worker re-delivers with
     // NotificationOutbox.id as the provider idempotency key. No new retry logic.
@@ -394,8 +399,21 @@ export class NotificationCenterService {
     const unique = [...new Set(ids.map((id) => id.trim()).filter(Boolean))];
     if (unique.length === 0) throw new BadRequestException('No notification ids provided');
     if (unique.length > BULK_RESEND_MAX) throw new BadRequestException(`At most ${BULK_RESEND_MAX} notifications per bulk resend`);
-    await this.stampResend(unique);
-    const result = await this.redrive.redriveFailedNotifications({ ids: unique });
+    // EMAIL rows are left untouched (not redriven) while the EMAIL channel is off;
+    // they are reported as skipped like any other id that is not re-queued.
+    const resendable = isEmailChannelEnabled()
+      ? unique
+      : (
+          await this.prisma.notificationOutbox.findMany({
+            where: { id: { in: unique }, channel: { not: NotificationChannel.EMAIL } },
+            select: { id: true },
+          })
+        ).map((r) => r.id);
+    if (resendable.length === 0) {
+      return { requested: unique.length, redriven: 0, skipped: unique.length };
+    }
+    await this.stampResend(resendable);
+    const result = await this.redrive.redriveFailedNotifications({ ids: resendable });
     try {
       await this.cache.del(CACHE_KEY);
     } catch {
