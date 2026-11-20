@@ -29,7 +29,7 @@ function storefrontSources(): string[] {
 }
 
 test('add-to-cart buttons say "Tambahkan"', () => {
-  assert.match(read('components/storefront/product-card.tsx'), /canAdd \? 'Tambahkan' : 'Stok di keranjang penuh'/)
+  assert.match(read('components/storefront/product-card.tsx'), /cartState\.mode === 'full' \? 'Stok di keranjang penuh' : 'Tambahkan'/)
   assert.match(read('app/catalog/[slug]/page.tsx'), /`Tambahkan · \$\{formatIDR\(unitPrice \* qty\)\}`/)
   for (const file of storefrontSources()) {
     assert.doesNotMatch(read(file), /Tambah(kan)? ke [Kk]eranjang/, file)

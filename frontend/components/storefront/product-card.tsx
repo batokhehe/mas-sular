@@ -2,21 +2,22 @@
 
 import Link from 'next/link'
 import { toast } from 'sonner'
-import { Star, Flame } from 'lucide-react'
+import { Star, Flame, Minus, Plus } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { formatIDR } from '@/lib/utils/format'
 import { useCartStore } from '@/lib/stores/cart-store'
-import { remainingAddable } from '@/lib/cart/stock-limits'
+import { cardCartState, plainLineId } from '@/lib/cart/card-quantity'
 import type { Product } from '@/lib/types/models'
 
 export function ProductCard({ product }: { product: Product }) {
   const add = useCartStore((s) => s.add)
+  const setQty = useCartStore((s) => s.setQty)
   const lines = useCartStore((s) => s.lines)
-  const outOfStock = product.availableStock <= 0
-  // Nothing left to add once the cart already holds every available unit.
-  const canAdd = remainingAddable(lines, product.id, product.availableStock) > 0
+  // "Tambahkan" until the product's plain line is in the (shared, persisted) cart,
+  // then `− qty +` on that same line. Stock is per product across all its lines.
+  const cartState = cardCartState(lines, product.id, product.availableStock)
 
   // All derived from real Product fields — no fabricated values.
   const discount =
@@ -81,17 +82,53 @@ export function ProductCard({ product }: { product: Product }) {
           ) : null}
         </div>
 
-        <Button
-          size="sm"
-          className="mt-auto w-full"
-          disabled={!canAdd}
-          onClick={() => {
-            add(product)
-            toast.success('Ditambahkan ke keranjang')
-          }}
-        >
-          {outOfStock ? 'Stok Habis' : canAdd ? 'Tambahkan' : 'Stok di keranjang penuh'}
-        </Button>
+        {cartState.mode === 'counter' ? (
+          <div
+            role="group"
+            aria-label={`Jumlah ${product.name} di keranjang`}
+            className="mt-auto flex w-full items-center justify-between rounded-full bg-secondary p-1"
+          >
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8 rounded-full"
+              // Quantity 0 removes the line (cart store setQty) and the card shows "Tambahkan" again.
+              onClick={() => setQty(plainLineId(product.id), cartState.qty - 1)}
+              aria-label={`Kurangi ${product.name}`}
+            >
+              <Minus className="size-3.5" />
+            </Button>
+            <span className="min-w-7 text-center text-sm font-semibold" aria-live="polite">
+              {cartState.qty}
+            </span>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8 rounded-full"
+              disabled={!cartState.canIncrement}
+              onClick={() => add(product)}
+              aria-label={`Tambah ${product.name}`}
+            >
+              <Plus className="size-3.5" />
+            </Button>
+          </div>
+        ) : (
+          <Button
+            size="sm"
+            className="mt-auto w-full"
+            disabled={!cartState.canIncrement}
+            onClick={() => {
+              add(product)
+              toast.success('Ditambahkan ke keranjang')
+            }}
+          >
+            {cartState.mode === 'soldout' ? 'Stok Habis' : cartState.mode === 'full' ? 'Stok di keranjang penuh' : 'Tambahkan'}
+          </Button>
+        )}
+        {/* Lines with add-ons are edited on the product page / in the cart, not here. */}
+        {cartState.addOnQty > 0 ? (
+          <p className="text-center text-xs text-muted-foreground">+{cartState.addOnQty} dengan tambahan di keranjang</p>
+        ) : null}
       </div>
     </Card>
   )
