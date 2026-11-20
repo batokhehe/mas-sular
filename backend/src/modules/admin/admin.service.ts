@@ -403,7 +403,7 @@ export class AdminService {
       endDate: dto.endDate ?? null,
     };
 
-    return this.prisma.promo.create({ data });
+    return this.prisma.promo.create({ data: toPromoWriteData(data) });
   }
 
   listPromos() {
@@ -433,13 +433,14 @@ export class AdminService {
     // Validate the configuration as it will be stored: the record with this
     // PATCH (and the fields it clears) applied.
     const merged: any = { ...existing, ...data };
-    this.validatePromoConfiguration(merged, existing);
+    this.validatePromoConfiguration(merged, existing, data);
+    const writeData = toPromoWriteData(data);
 
     // An edit that cannot affect usage rules keeps the plain single write.
     const touchesUsageRules =
       data.isNewUserOnly !== undefined || (data.maxUsageCount !== undefined && data.maxUsageCount !== null);
     if (!touchesUsageRules) {
-      return this.prisma.promo.update({ where: { id }, data });
+      return this.prisma.promo.update({ where: { id }, data: writeData });
     }
 
     // P1.2.3: classification and limit edits SERIALIZE with checkout on the Promo row.
@@ -458,7 +459,7 @@ export class AdminService {
           const locked = rows[0];
           if (!locked) throw new NotFoundException('Promo not found');
           await this.assertPromoUsageRules(tx, id, locked, data);
-          return tx.promo.update({ where: { id }, data });
+          return tx.promo.update({ where: { id }, data: writeData });
         },
         { timeout: 10000 },
       );
@@ -573,25 +574,15 @@ export class AdminService {
     return data;
   }
 
-  private validatePromoConfiguration(dto: any, existing?: any) {
+  /**
+   * `dto` is the configuration as it will be stored (on update: the record with
+   * the normalized PATCH applied); `patch` is that normalized PATCH itself.
+   */
+  private validatePromoConfiguration(dto: any, existing?: any, patch?: Record<string, unknown>) {
     const shippingType = dto.shippingDiscountType;
     if (shippingType !== undefined && shippingType !== null) {
       // Must have eligible couriers
-      const eligible = dto.eligibleCouriers;
-      if (!Array.isArray(eligible) || eligible.length === 0) {
-        throw new BadRequestException('eligibleCouriers must contain at least one courier for shipping discounts');
-      }
-      // Check duplicates
-      const set = new Set(eligible.map((c: any) => String(c).toLowerCase()));
-      if (set.size !== eligible.length) {
-        throw new BadRequestException('eligibleCouriers must not contain duplicates');
-      }
-      for (const c of eligible) {
-        const lc = String(c).toLowerCase();
-        if (lc !== 'paxel' && lc !== 'jne') {
-          throw new BadRequestException('eligibleCouriers may only contain paxel or jne');
-        }
-      }
+      assertEligibleCouriers(dto.eligibleCouriers, 'eligibleCouriers must contain at least one courier for shipping discounts');
       if (shippingType === 'PERCENTAGE') {
         if (dto.shippingDiscountPercentage === undefined || dto.shippingDiscountPercentage === null || dto.shippingDiscountPercentage < 1 || dto.shippingDiscountPercentage > 100) {
           throw new BadRequestException('Invalid shipping discount percentage');
@@ -620,6 +611,20 @@ export class AdminService {
         }
       }
       this.assertPromoComponentCap(dto.productMaxDiscountAmount, 'Product discount cap');
+    }
+
+    // Legacy FREE_SHIPPING (no components): eligibleCouriers is its live courier
+    // restriction at checkout (OrdersService.isCourierEligible). A NEW free-shipping
+    // configuration must name at least one courier - on create, when an update
+    // switches a voucher to it, or when an update sets the list. An existing one
+    // stored without couriers (it applies to every courier) stays editable for
+    // unrelated fields, so its checkout behaviour is unchanged.
+    if (isLegacyFreeShipping(dto)) {
+      const isNewConfiguration = !existing || !isLegacyFreeShipping(existing) || (patch !== undefined && 'eligibleCouriers' in patch);
+      const eligible = dto.eligibleCouriers;
+      if (isNewConfiguration || (eligible !== null && eligible !== undefined)) {
+        assertEligibleCouriers(eligible, 'eligibleCouriers must contain at least one courier for free shipping vouchers');
+      }
     }
   }
 
@@ -1367,4 +1372,42 @@ export class AdminService {
     const rows = await this.prisma.permission.findMany({ orderBy: [{ subject: 'asc' }, { action: 'asc' }] });
     return rows.filter((p) => catalogue.has(`${p.subject}.${p.action}`));
   }
+}
+
+/** Legacy (component-less) free-shipping voucher. */
+function isLegacyFreeShipping(promo: unknown): boolean {
+  if (!promo || typeof promo !== 'object') return false;
+  const p = promo as Record<string, unknown>;
+  return p.voucherType === 'FREE_SHIPPING' && (p.productDiscountType ?? null) === null && (p.shippingDiscountType ?? null) === null;
+}
+
+/** At least one courier, paxel/jne only, no duplicates (case-insensitive). */
+function assertEligibleCouriers(eligible: unknown, emptyMessage: string): void {
+  if (!Array.isArray(eligible) || eligible.length === 0) {
+    throw new BadRequestException(emptyMessage);
+  }
+  const set = new Set(eligible.map((c: unknown) => String(c).toLowerCase()));
+  if (set.size !== eligible.length) {
+    throw new BadRequestException('eligibleCouriers must not contain duplicates');
+  }
+  for (const c of eligible) {
+    const lc = String(c).toLowerCase();
+    if (lc !== 'paxel' && lc !== 'jne') {
+      throw new BadRequestException('eligibleCouriers may only contain paxel or jne');
+    }
+  }
+}
+
+/**
+ * `eligibleCouriers` is a nullable Json column. Its generated input type
+ * (NullableJsonNullValueInput | InputJsonValue) excludes a plain `null`, and at
+ * runtime Prisma 6 stores one as the JSON literal `null`, not SQL NULL (verified
+ * against PostgreSQL in test/integration/promo-legacy-free-shipping.int-spec.ts).
+ * Clearing it - switching a legacy voucher away from free shipping, or the
+ * inert-field rule in normalizePromoPatch - therefore writes Prisma.DbNull (SQL
+ * NULL). Validation keeps seeing the plain null; only the database write is translated.
+ */
+function toPromoWriteData<T extends object>(data: T): T {
+  if (!('eligibleCouriers' in data) || (data as { eligibleCouriers?: unknown }).eligibleCouriers !== null) return data;
+  return { ...data, eligibleCouriers: Prisma.DbNull } as T;
 }

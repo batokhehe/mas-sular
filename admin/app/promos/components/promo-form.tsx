@@ -12,6 +12,7 @@ import {
   SUPPORTED_COURIERS,
   hasProductComponent,
   hasShippingComponent,
+  isGrandfatheredFreeShipping,
   normalizeCouriers,
   promoFormValuesFromPromo,
   toggleCourier,
@@ -23,6 +24,7 @@ import {
 } from '@/lib/promos/promo-payload';
 import type {
   ProductDiscountTypeValue,
+  SupportedCourier,
   PromoFormValues,
   ShippingDiscountTypeValue,
   VoucherTypeValue,
@@ -76,11 +78,16 @@ export function PromoForm({
   );
   const [showErrors, setShowErrors] = useState(false);
 
-  const errors = useMemo(() => validatePromoForm(values), [values]);
+  // An existing legacy free-shipping voucher stored without couriers stays editable
+  // as it is; every new free-shipping configuration must name a courier.
+  const couriersOptional = isGrandfatheredFreeShipping(initialValues);
+  const errors = useMemo(() => validatePromoForm(values, { couriersOptional }), [values, couriersOptional]);
   const productEnabled = hasProductComponent(values);
   const shippingEnabled = hasShippingComponent(values);
   const componentMode = usesComponents(values);
   const selectedCouriers = normalizeCouriers(values.eligibleCouriers);
+  const onToggleCourier = (courier: SupportedCourier, checked: boolean) =>
+    setValues((current) => toggleCourier(current, courier, checked));
 
   const handleNumericChange = (field: keyof PromoFormValues, value: string) => {
     setValues((current) => ({
@@ -198,16 +205,28 @@ export function PromoForm({
               />
             </label>
           ) : (
-            <label className="space-y-2 text-sm text-gray-700">
-              <span>Maksimal potongan gratis ongkir</span>
-              <input
-                type="number"
-                min={0}
-                value={values.freeShippingMaxAmount ?? ''}
-                onChange={(event) => handleNumericChange('freeShippingMaxAmount', event.target.value)}
-                className={INPUT_CLASS}
+            <>
+              <label className="space-y-2 text-sm text-gray-700">
+                <span>Maksimal potongan gratis ongkir</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={values.freeShippingMaxAmount ?? ''}
+                  onChange={(event) => handleNumericChange('freeShippingMaxAmount', event.target.value)}
+                  className={INPUT_CLASS}
+                />
+              </label>
+              {/* Legacy "Gratis ongkir": the courier list is its live restriction at checkout. */}
+              <CourierFieldset
+                selected={selectedCouriers}
+                onToggle={onToggleCourier}
+                hint={
+                  couriersOptional && selectedCouriers.length === 0
+                    ? 'Voucher lama ini berlaku untuk semua kurir sampai kurir dipilih.'
+                    : 'Wajib minimal satu kurir. Gratis ongkir hanya berlaku untuk kurir yang dipilih.'
+                }
               />
-            </label>
+            </>
           )}
 
           <div className="col-span-full space-y-4 rounded-2xl border border-gray-200 bg-gray-50/70 p-4">
@@ -361,29 +380,13 @@ export function PromoForm({
                     className={INPUT_CLASS}
                   />
                 </label>
-                <fieldset className="col-span-full space-y-2 text-sm text-gray-700">
-                  <legend className="mb-1">Kurir yang berlaku</legend>
-                  <div className="flex flex-wrap gap-4">
-                    {SUPPORTED_COURIERS.map((courier) => (
-                      <label key={courier} className="inline-flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={selectedCouriers.includes(courier)}
-                          onChange={(event) =>
-                            setValues((current) => toggleCourier(current, courier, event.target.checked))
-                          }
-                          className={CHECKBOX_CLASS}
-                        />
-                        <span>{COURIER_LABELS[courier]}</span>
-                      </label>
-                    ))}
-                  </div>
-                  {/* The backend refuses a shipping component without a courier,
-                      and grants the discount only to a listed one. */}
-                  <p className="text-xs text-gray-500">
-                    Wajib minimal satu kurir. Diskon ongkir hanya berlaku untuk kurir yang dipilih.
-                  </p>
-                </fieldset>
+                {/* The backend refuses a shipping component without a courier,
+                    and grants the discount only to a listed one. */}
+                <CourierFieldset
+                  selected={selectedCouriers}
+                  onToggle={onToggleCourier}
+                  hint="Wajib minimal satu kurir. Diskon ongkir hanya berlaku untuk kurir yang dipilih."
+                />
               </div>
             ) : null}
           </div>
@@ -472,5 +475,36 @@ export function PromoForm({
         </div>
       </form>
     </Card>
+  );
+}
+
+/** Paxel / JNE selection, shared by the shipping component and the legacy "Gratis ongkir" type. */
+function CourierFieldset({
+  selected,
+  onToggle,
+  hint,
+}: {
+  selected: readonly SupportedCourier[];
+  onToggle: (courier: SupportedCourier, checked: boolean) => void;
+  hint: string;
+}) {
+  return (
+    <fieldset className="col-span-full space-y-2 text-sm text-gray-700">
+      <legend className="mb-1">Kurir yang berlaku</legend>
+      <div className="flex flex-wrap gap-4">
+        {SUPPORTED_COURIERS.map((courier) => (
+          <label key={courier} className="inline-flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={selected.includes(courier)}
+              onChange={(event) => onToggle(courier, event.target.checked)}
+              className={CHECKBOX_CLASS}
+            />
+            <span>{COURIER_LABELS[courier]}</span>
+          </label>
+        ))}
+      </div>
+      <p className="text-xs text-gray-500">{hint}</p>
+    </fieldset>
   );
 }

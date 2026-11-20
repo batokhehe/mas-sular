@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { AdminService } from '../../src/modules/admin/admin.service';
@@ -210,7 +211,8 @@ describe('Promo configuration hardening (Phase 4N.12)', () => {
       await service.updatePromo('promo-1', { productDiscountType: 'PERCENTAGE', productDiscountPercentage: 10 } as any);
       const data = patchData();
       expect(data.freeShippingMaxAmount).toBeNull();
-      expect(data.eligibleCouriers).toBeNull();
+      // Json column: cleared as SQL NULL (a plain null would be stored as JSON null).
+      expect(data.eligibleCouriers).toBe(Prisma.DbNull);
     });
 
     it('component -> legacy clears the obsolete component columns', async () => {
@@ -243,8 +245,9 @@ describe('Promo configuration hardening (Phase 4N.12)', () => {
         shippingDiscountPercentage: null,
         shippingDiscountAmount: null,
         shippingMaxDiscountAmount: null,
-        eligibleCouriers: null,
       });
+      // Json column: cleared as SQL NULL (a plain null would be stored as JSON null).
+      expect(data.eligibleCouriers).toBe(Prisma.DbNull);
     });
 
     it('component -> legacy FREE_SHIPPING keeps an explicitly supplied courier restriction', async () => {
