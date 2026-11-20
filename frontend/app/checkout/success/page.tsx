@@ -63,7 +63,7 @@ export default function CheckoutSuccessPage() {
           {needsReceipt ? (
             <div className="space-y-3">
               <p className="text-sm text-muted-foreground">
-                Selesaikan pembayaran, lalu unggah bukti pembayaran. Tautan unggah juga sudah kami kirim ke email Anda.
+                Selesaikan pembayaran, lalu unggah bukti pembayaran.
               </p>
               {showUpload ? (
                 <UploadReceipt mode="auth" reference={order.payment!.id} />

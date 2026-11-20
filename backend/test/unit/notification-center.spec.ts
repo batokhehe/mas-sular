@@ -142,6 +142,52 @@ describe('NotificationCenterService.resend — delegates to the existing redrive
     await expect(service.resend('missing')).rejects.toBeInstanceOf(NotFoundException);
     expect(redrive.redriveFailedNotifications).not.toHaveBeenCalled();
   });
+
+  describe('EMAIL channel switch', () => {
+    const saved = process.env.NOTIFICATION_EMAIL_ENABLED;
+    afterEach(() => {
+      if (saved === undefined) delete process.env.NOTIFICATION_EMAIL_ENABLED;
+      else process.env.NOTIFICATION_EMAIL_ENABLED = saved;
+    });
+
+    it('disabled: a FAILED EMAIL row is refused (400) and left untouched', async () => {
+      delete process.env.NOTIFICATION_EMAIL_ENABLED;
+      const { service, prisma, redrive } = build();
+      prisma.notificationOutbox.findUnique.mockResolvedValueOnce({ id: 'ntf-e', status: 'FAILED', channel: 'EMAIL' });
+      await expect(service.resend('ntf-e')).rejects.toThrow(/EMAIL channel is disabled/);
+      expect(redrive.redriveFailedNotifications).not.toHaveBeenCalled();
+    });
+
+    it('disabled: a FAILED WhatsApp row is still resent', async () => {
+      delete process.env.NOTIFICATION_EMAIL_ENABLED;
+      const { service, prisma, redrive } = build();
+      prisma.notificationOutbox.findUnique.mockResolvedValueOnce({ id: 'ntf-w', status: 'FAILED', channel: 'WHATSAPP' });
+      await service.resend('ntf-w');
+      expect(redrive.redriveFailedNotifications).toHaveBeenCalledWith({ id: 'ntf-w' });
+    });
+
+    it('disabled: bulk resend re-queues only the non-EMAIL ids and reports the rest as skipped', async () => {
+      delete process.env.NOTIFICATION_EMAIL_ENABLED;
+      const { service, prisma, redrive } = build();
+      (prisma as unknown as { $executeRaw: jest.Mock }).$executeRaw = jest.fn().mockResolvedValue(1);
+      prisma.notificationOutbox.findMany.mockResolvedValueOnce([{ id: 'ntf-w' }]);
+      const res = await service.bulkResend(['ntf-w', 'ntf-e']);
+      expect(prisma.notificationOutbox.findMany).toHaveBeenCalledWith({
+        where: { id: { in: ['ntf-w', 'ntf-e'] }, channel: { not: 'EMAIL' } },
+        select: { id: true },
+      });
+      expect(redrive.redriveFailedNotifications).toHaveBeenCalledWith({ ids: ['ntf-w'] });
+      expect(res).toEqual({ requested: 2, redriven: 1, skipped: 1 });
+    });
+
+    it('disabled: a bulk selection of EMAIL rows only re-queues nothing', async () => {
+      delete process.env.NOTIFICATION_EMAIL_ENABLED;
+      const { service, prisma, redrive } = build();
+      prisma.notificationOutbox.findMany.mockResolvedValueOnce([]);
+      await expect(service.bulkResend(['ntf-e'])).resolves.toEqual({ requested: 1, redriven: 0, skipped: 1 });
+      expect(redrive.redriveFailedNotifications).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe('Notification Center permissions', () => {

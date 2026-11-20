@@ -90,7 +90,7 @@ export function ProductCard({ product }: { product: Product }) {
             toast.success('Ditambahkan ke keranjang')
           }}
         >
-          {outOfStock ? 'Stok Habis' : canAdd ? 'Tambah ke Keranjang' : 'Stok di keranjang penuh'}
+          {outOfStock ? 'Stok Habis' : canAdd ? 'Tambahkan' : 'Stok di keranjang penuh'}
         </Button>
       </div>
     </Card>

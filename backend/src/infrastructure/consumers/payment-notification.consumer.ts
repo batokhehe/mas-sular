@@ -172,6 +172,14 @@ export class PaymentNotificationConsumer implements OnApplicationBootstrap, OnMo
 
   /** Dedup + enqueue. ProcessedEvent insert shares the tx → exactly-once enqueue. */
   async process(messageId: string, event: { name?: string; payload?: Record<string, unknown> }): Promise<ProcessOutcome> {
+    // Every row this consumer creates is EMAIL. With the EMAIL channel disabled the
+    // event is acknowledged without an outbox row: no undeliverable FAILED rows, no
+    // retries. Payment state itself never depended on this notification.
+    if (this.config.emailEnabled !== true) {
+      this.logger.debug(`EMAIL channel disabled; ${event.name ?? 'payment event'} not enqueued (messageId=${messageId})`);
+      return 'skipped';
+    }
+
     const seen = await this.prisma.processedEvent.findUnique({
       where: { consumer_messageId: { consumer: CONSUMER, messageId } },
     });

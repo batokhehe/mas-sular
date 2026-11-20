@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useUploadReceipt } from '@/lib/query/hooks/use-upload-receipt'
+import { PaymentVerificationNotice } from '@/components/storefront/payment-verification-notice'
 
 interface UploadReceiptProps {
   mode: 'token' | 'auth'
@@ -36,7 +37,7 @@ export function UploadReceipt({ mode, reference, onUploaded }: UploadReceiptProp
       <div className="flex flex-col items-center gap-2 rounded-lg border border-green-200 bg-green-50 p-6 text-center">
         <CheckCircle2 className="size-8 text-green-600" />
         <p className="font-semibold">Bukti pembayaran terkirim</p>
-        <p className="text-sm text-muted-foreground">Pembayaran Anda sedang diverifikasi.</p>
+        <PaymentVerificationNotice className="text-sm text-muted-foreground" />
       </div>
     )
   }

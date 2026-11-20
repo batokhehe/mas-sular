@@ -277,14 +277,14 @@ describe('both channels obey the same one boundary', () => {
 
   it('Email is blocked and permitted by the same rules', async () => {
     const blocked = build({
-      env: { NOTIFICATION_DELIVERY_ENABLED: 'true', NOTIFICATION_ALLOWED_RECIPIENTS: CUSTOMER_PHONE },
+      env: { NOTIFICATION_DELIVERY_ENABLED: 'true', NOTIFICATION_EMAIL_ENABLED: 'true', NOTIFICATION_ALLOWED_RECIPIENTS: CUSTOMER_PHONE },
       channel: NotificationChannel.EMAIL, recipient: CUSTOMER_EMAIL,
     });
     await blocked.worker.processBatch();
     expect(blocked.resendHttp).not.toHaveBeenCalled();
 
     const allowed = build({
-      env: { NOTIFICATION_DELIVERY_ENABLED: 'true', NOTIFICATION_ALLOWED_RECIPIENTS: CUSTOMER_EMAIL },
+      env: { NOTIFICATION_DELIVERY_ENABLED: 'true', NOTIFICATION_EMAIL_ENABLED: 'true', NOTIFICATION_ALLOWED_RECIPIENTS: CUSTOMER_EMAIL },
       channel: NotificationChannel.EMAIL, recipient: CUSTOMER_EMAIL,
     });
     await allowed.worker.processBatch();
@@ -556,7 +556,7 @@ describe('B6: explicit production policy delivers to legitimate customer recipie
   });
 
   it('Resend email reaches an arbitrary customer (mock transport)', async () => {
-    const { worker, resendHttp, qontakHttp } = build({ env: PROD_ALL, channel: NotificationChannel.EMAIL, recipient: 'someone@example.invalid' });
+    const { worker, resendHttp, qontakHttp } = build({ env: { ...PROD_ALL, NOTIFICATION_EMAIL_ENABLED: 'true' }, channel: NotificationChannel.EMAIL, recipient: 'someone@example.invalid' });
     await worker.processBatch();
     expect(resendHttp).toHaveBeenCalledTimes(1);
     expect(qontakHttp).not.toHaveBeenCalled();
@@ -598,5 +598,39 @@ describe('B6: explicit production policy delivers to legitimate customer recipie
     await worker.processBatch();
     expect(qontakHttp).not.toHaveBeenCalled();
     expect(persistedError(prisma)).toContain('blocked by notification safety gate');
+  });
+});
+
+// ---------------------------------------------------------------- EMAIL switch
+
+describe('EMAIL channel switch (NOTIFICATION_EMAIL_ENABLED)', () => {
+  const OPEN = { NOTIFICATION_DELIVERY_ENABLED: 'true', NOTIFICATION_ALLOWED_RECIPIENTS: `${CUSTOMER_PHONE},${CUSTOMER_EMAIL}` };
+
+  it('is off by default: an allowlisted EMAIL row is refused terminally and never reaches Resend', async () => {
+    const { worker, resendHttp, factory, prisma } = build({ env: OPEN, channel: NotificationChannel.EMAIL, recipient: CUSTOMER_EMAIL });
+    await worker.processBatch();
+    expect(resendHttp).not.toHaveBeenCalled();
+    expect(factory.get).not.toHaveBeenCalled();
+    expect(persistedError(prisma)).toContain('EMAIL channel is disabled');
+  });
+
+  it('only the exact string "true" enables it', () => {
+    for (const value of [undefined, '', 'false', 'TRUE', '1', 'yes']) {
+      expect(loadNotificationDeliveryConfig({ ...OPEN, NOTIFICATION_EMAIL_ENABLED: value }).emailEnabled).toBe(false);
+    }
+    expect(loadNotificationDeliveryConfig({ ...OPEN, NOTIFICATION_EMAIL_ENABLED: 'true' }).emailEnabled).toBe(true);
+  });
+
+  it('WhatsApp is unaffected while EMAIL is off', async () => {
+    const { worker, qontakHttp, resendHttp } = build({ env: OPEN, recipient: CUSTOMER_PHONE });
+    await worker.processBatch();
+    expect(qontakHttp).toHaveBeenCalledTimes(1);
+    expect(resendHttp).not.toHaveBeenCalled();
+  });
+
+  it('turning it on restores EMAIL delivery under the same recipient rules', async () => {
+    const { worker, resendHttp } = build({ env: { ...OPEN, NOTIFICATION_EMAIL_ENABLED: 'true' }, channel: NotificationChannel.EMAIL, recipient: CUSTOMER_EMAIL });
+    await worker.processBatch();
+    expect(resendHttp).toHaveBeenCalledTimes(1);
   });
 });

@@ -8,6 +8,7 @@ describe('loadConsumersConfig', () => {
     expect(cfg.maxAttempts).toBe(5);
     expect(cfg.retryDelayMs).toBe(30_000);
     expect(cfg.rabbitmqUrl).toBeUndefined();
+    expect(cfg.emailEnabled).toBe(false); // EMAIL channel off unless explicitly enabled
   });
 
   it('parses overrides from env', () => {
@@ -17,6 +18,7 @@ describe('loadConsumersConfig', () => {
       CONSUMER_PREFETCH: '25',
       CONSUMER_MAX_ATTEMPTS: '8',
       CONSUMER_RETRY_DELAY_MS: '5000',
+      NOTIFICATION_EMAIL_ENABLED: 'true',
     });
     expect(cfg).toEqual({
       enabled: true,
@@ -24,6 +26,7 @@ describe('loadConsumersConfig', () => {
       prefetch: 25,
       maxAttempts: 8,
       retryDelayMs: 5000,
+      emailEnabled: true,
     });
   });
 

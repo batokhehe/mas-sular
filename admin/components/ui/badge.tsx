@@ -1,13 +1,15 @@
 import { HTMLAttributes } from 'react';
 import { cn } from '@/lib/utils';
 
-type BadgeTone = 'success' | 'danger' | 'neutral' | 'brand';
+type BadgeTone = 'success' | 'danger' | 'neutral' | 'brand' | 'warning' | 'info';
 
 const tones: Record<BadgeTone, string> = {
   success: 'bg-emerald-50 text-emerald-700',
   danger: 'bg-red-50 text-red-700',
   neutral: 'bg-gray-100 text-gray-600',
   brand: 'bg-indigo-50 text-[#465fff]',
+  warning: 'bg-amber-50 text-amber-700',
+  info: 'bg-sky-50 text-sky-700',
 };
 
 interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {

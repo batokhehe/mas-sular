@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { NotificationChannel } from '@prisma/client';
 import { InvalidPhoneError, maskPhone, normalizePhoneNumber } from '../../common/utils/phone.util';
+import { EMAIL_CHANNEL_DISABLED_REASON, isEmailChannelEnabled } from './email-channel';
 import { NotificationMessage } from './notification-message';
 
 export const NOTIFICATION_DELIVERY_CONFIG = 'NOTIFICATION_DELIVERY_CONFIG';
@@ -42,6 +43,11 @@ export interface NotificationDeliveryConfig {
   allowedRecipients: string[];
   /** Recipient policy. Absent means `allowlist`; only an explicit `all` widens it. */
   policy?: NotificationRecipientPolicy;
+  /**
+   * EMAIL channel switch (NOTIFICATION_EMAIL_ENABLED, see email-channel.ts). Absent
+   * or false ⇒ EMAIL rows are refused; WhatsApp is unaffected.
+   */
+  emailEnabled?: boolean;
 }
 
 /**
@@ -102,6 +108,7 @@ export function loadNotificationDeliveryConfig(
     // normalization above — normalizeRecipient already case-folds emails.
     allowedRecipients: [...new Set(allowedRecipients)],
     policy: resolveRecipientPolicy(env),
+    emailEnabled: isEmailChannelEnabled(env),
   };
 }
 
@@ -134,7 +141,7 @@ export class NotificationDeliveryGate {
   ) {
     // Counts only — never the recipients themselves.
     this.logger.log(
-      `notification delivery: enabled=${config.enabled} policy=${config.policy ?? 'allowlist'} allowlist_entries=${config.allowedRecipients.length}`,
+      `notification delivery: enabled=${config.enabled} policy=${config.policy ?? 'allowlist'} allowlist_entries=${config.allowedRecipients.length} email=${config.emailEnabled === true}`,
     );
   }
 
@@ -142,6 +149,11 @@ export class NotificationDeliveryGate {
   assertDeliverable(message: NotificationMessage): void {
     if (!this.config.enabled) {
       throw new NotificationBlockedError('NOTIFICATION_DELIVERY_ENABLED is not "true"');
+    }
+    // Channel switch before any recipient check: a disabled channel is refused for
+    // every recipient (terminal, like any other policy refusal).
+    if (message.channel === NotificationChannel.EMAIL && this.config.emailEnabled !== true) {
+      throw new NotificationBlockedError(EMAIL_CHANNEL_DISABLED_REASON);
     }
     const allowlist = this.config.policy !== 'all';
     if (allowlist && this.config.allowedRecipients.length === 0) {

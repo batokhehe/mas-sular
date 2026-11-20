@@ -86,6 +86,30 @@ describe('RedriveService', () => {
       expect(sql).toContain('"template" = $2');
       expect(sql).toContain('"channel" = $3::"NotificationChannel"');
     });
+
+    describe('EMAIL channel switch', () => {
+      const saved = process.env.NOTIFICATION_EMAIL_ENABLED;
+      afterEach(() => {
+        if (saved === undefined) delete process.env.NOTIFICATION_EMAIL_ENABLED;
+        else process.env.NOTIFICATION_EMAIL_ENABLED = saved;
+      });
+
+      it('disabled (default): FAILED EMAIL rows are never re-queued - they stay as history', async () => {
+        delete process.env.NOTIFICATION_EMAIL_ENABLED;
+        const { service, prisma } = build();
+        await service.redriveFailedNotifications({});
+        const sql = prisma.$executeRawUnsafe.mock.calls[0][0] as string;
+        expect(sql).toContain(`"channel" <> 'EMAIL'`);
+      });
+
+      it('enabled: no channel exclusion', async () => {
+        process.env.NOTIFICATION_EMAIL_ENABLED = 'true';
+        const { service, prisma } = build();
+        await service.redriveFailedNotifications({});
+        const sql = prisma.$executeRawUnsafe.mock.calls[0][0] as string;
+        expect(sql).not.toContain(`"channel" <> 'EMAIL'`);
+      });
+    });
   });
 
   describe('C. Consumer DLQ shovel', () => {

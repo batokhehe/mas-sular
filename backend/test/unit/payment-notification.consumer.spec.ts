@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import { PaymentNotificationConsumer } from '../../src/infrastructure/consumers/payment-notification.consumer';
 import { ConsumersConfig } from '../../src/infrastructure/consumers/consumers.config';
 
-const CONFIG: ConsumersConfig = { enabled: true, rabbitmqUrl: 'amqp://localhost', prefetch: 10, maxAttempts: 5, retryDelayMs: 30_000 };
+const CONFIG: ConsumersConfig = { enabled: true, rabbitmqUrl: 'amqp://localhost', prefetch: 10, maxAttempts: 5, retryDelayMs: 30_000, emailEnabled: true };
 const ORDER = { id: 'order-1', orderNumber: 'BMS-1', user: { email: 'jane@example.com', name: 'Jane' } };
 const PAID = { name: 'payment.paid', payload: { paymentId: 'pay-1', orderId: 'order-1', amount: 50000 } };
 const FAILED = { name: 'payment.failed', payload: { paymentId: 'pay-1', orderId: 'order-1' } };
@@ -38,6 +38,16 @@ function build(prisma = buildPrisma(), config = CONFIG) {
 }
 
 describe('PaymentNotificationConsumer', () => {
+  it('EMAIL channel disabled (the default) → every payment event is skipped with no DB work at all', async () => {
+    for (const config of [{ ...CONFIG, emailEnabled: false }, { ...CONFIG, emailEnabled: undefined }]) {
+      const { consumer, prisma } = build(buildPrisma(), config);
+      await expect(consumer.process('evt-off', PAID)).resolves.toBe('skipped');
+      expect(prisma.processedEvent.findUnique).not.toHaveBeenCalled();
+      expect(prisma.order.findUnique).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    }
+  });
+
   it('payment.paid → enqueues a payment.approved NotificationOutbox + ProcessedEvent in one tx', async () => {
     const { consumer, prisma } = build();
     const outcome = await consumer.process('evt-1', PAID);
