@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ShippingQuote, ShippingRate, ShippingRateRequest } from './domain/shipping-provider.interface';
 import { ShippingProviderFactory } from './shipping-provider.factory';
+import { checkoutQuotes } from './checkout-offer.policy';
 
 @Injectable()
 export class ShippingService {
@@ -96,11 +97,16 @@ export class ShippingService {
       .filter((rate): rate is ShippingRate => rate !== null);
   }
 
-  /** Legacy: the first quote for a named courier, in the legacy {cost, etd} shape. */
+  /**
+   * Legacy: the first quote for a named courier, in the legacy {cost, etd} shape.
+   * Used only by customer checkout (the courier-only fallback and the shipping-cost
+   * endpoint), so it picks the first service OFFERED at checkout
+   * (checkout-offer.policy) - never a withheld one such as Paxel Same Day.
+   */
   async calculateRateForCourier(courier: string, request: ShippingRateRequest): Promise<ShippingRate> {
     const provider = this.factory.get(courier);
     if (!provider) throw new BadRequestException('Unsupported courier');
-    const [first] = await provider.getRates(request);
+    const [first] = checkoutQuotes(await provider.getRates(request));
     if (!first) throw new BadRequestException('Shipping rate is unavailable');
     return toLegacyRate(first);
   }

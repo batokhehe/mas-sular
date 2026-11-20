@@ -156,6 +156,9 @@ const PAXEL_EXPECTED = [
   'paxel:PAXEL_NEXTDAY:23000',
   'paxel:PAXEL_REGULAR:15000',
 ];
+// What the CUSTOMER is shown: Paxel Same Day is withheld at checkout (checkout-offer.policy),
+// while the provider still quotes it (PAXEL_EXPECTED above).
+const PAXEL_CHECKOUT_EXPECTED = PAXEL_EXPECTED.filter((s) => !s.startsWith('paxel:PAXEL_SAMEDAY:'));
 
 beforeAll(() => Logger.overrideLogger(false));
 afterEach(() => jest.restoreAllMocks());
@@ -389,7 +392,7 @@ describe('checkout: JTR cannot be selected, even by a manipulated request', () =
   it('shipping options: Paxel and the non-trucking JNE services, no JTR, same option shape', async () => {
     const options = await orders().svc.getShippingOptions('u1', dto() as never);
     expect(show(options)).toEqual([
-      ...PAXEL_EXPECTED,
+      ...PAXEL_CHECKOUT_EXPECTED,
       'jne:REG23:13000',
       'jne:SPS23:228000',
       'jne:YES23:17000',

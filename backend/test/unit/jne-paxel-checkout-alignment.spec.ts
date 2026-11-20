@@ -61,6 +61,9 @@ const PAXEL_EXPECTED = [
   'paxel:PAXEL_NEXTDAY:18000',
   'paxel:PAXEL_REGULAR:15000',
 ];
+// What the CUSTOMER is shown: Paxel Same Day is withheld at checkout (checkout-offer.policy),
+// while the provider still quotes it (PAXEL_EXPECTED above).
+const PAXEL_CHECKOUT_EXPECTED = PAXEL_EXPECTED.filter((s) => !s.startsWith('paxel:PAXEL_SAMEDAY:'));
 const row = (service: string, price: string, extra = '"currency":"IDR"') =>
   `{"service_code":"${service}","service_display":"${service}",${extra ? `${extra},` : ''}"etd_from":"1","etd_thru":"2","price":${price}}`;
 
@@ -325,7 +328,7 @@ describe('OrdersService checkout: options, response contract and voucher discoun
 
   it('shipping options: Paxel and the valid JNE service together; invalid JNE rows absent', async () => {
     const options = await orders(MIXED).getShippingOptions('u1', dto() as never);
-    expect(show(options)).toEqual([...PAXEL_EXPECTED, 'jne:REG23:18000']);
+    expect(show(options)).toEqual([...PAXEL_CHECKOUT_EXPECTED, 'jne:REG23:18000']);
   });
 
   it('response contract: every option keeps provider, service, serviceName, estimatedDays and an integer shippingCost', async () => {
@@ -346,7 +349,7 @@ describe('OrdersService checkout: options, response contract and voucher discoun
 
   it('all JNE services invalid: only Paxel options, and a JNE selection is refused (never charged Rp0)', async () => {
     const svc = orders(`{"price":[${row('REG23', '"0"')}]}`);
-    expect(show(await svc.getShippingOptions('u1', dto() as never))).toEqual(PAXEL_EXPECTED);
+    expect(show(await svc.getShippingOptions('u1', dto() as never))).toEqual(PAXEL_CHECKOUT_EXPECTED);
     await expect(svc.getSummary('u1', dto() as never)).rejects.toThrow(
       'Selected shipping service is unavailable',
     );
