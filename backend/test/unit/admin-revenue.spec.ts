@@ -13,7 +13,9 @@ function dashboardPrisma(revenueSum: number) {
   return {
     order,
     payment: { count: jest.fn().mockResolvedValue(0) },
-    product: { count: jest.fn().mockResolvedValue(0) },
+    product: { count: jest.fn().mockResolvedValue(0), findMany: jest.fn().mockResolvedValue([]) },
+    // Low-stock metric reads Stok Produk (ProductInventory), never Product.stock.
+    productInventory: { findMany: jest.fn().mockResolvedValue([]) },
     user: { count: jest.fn().mockResolvedValue(0) },
     promo: { findMany: jest.fn().mockResolvedValue([]), findUnique: jest.fn() },
     voucherUsage: { count: jest.fn().mockResolvedValue(0), groupBy: jest.fn().mockResolvedValue([]) },

@@ -60,7 +60,7 @@ export default function ProductInventoryPage() {
           ) : isError ? (
             <p className="p-6 text-sm text-red-600">Gagal memuat stok.</p>
           ) : (data?.items.length ?? 0) === 0 ? (
-            <p className="p-6 text-sm text-gray-500">Belum ada data stok. Isi ProductInventory atau tambahkan outlet.</p>
+            <p className="p-6 text-sm text-gray-500">Belum ada data stok. Produk baru otomatis muncul di sini dengan stok 0 untuk setiap outlet aktif.</p>
           ) : (
             <table className="w-full min-w-[720px] text-left text-sm">
               <thead>

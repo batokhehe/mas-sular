@@ -52,9 +52,25 @@ function buildPrisma() {
             ],
       ),
     },
+    // Stock levels come from Stok Produk (ProductInventory: stock - reserved at the
+    // best ACTIVE outlet), never Product.stock - the fixture's `stock: 999` on every
+    // product proves the legacy column is not read.
     product: {
-      count: jest.fn().mockImplementation((args: { where: { stock: { gt?: number } } }) => (args.where.stock.gt !== undefined ? 3 : 1)),
-      findMany: jest.fn().mockResolvedValue([{ id: 'p1', name: 'Bakso Urat', stock: 2 }]),
+      findMany: jest.fn().mockResolvedValue([
+        { id: 'p5', name: 'Plenty', stock: 999 },
+        { id: 'p3', name: 'At Threshold', stock: 999 },
+        { id: 'p1', name: 'Bakso Urat', stock: 999 },
+        { id: 'p4', name: 'No Stok Produk Row', stock: 999 },
+        { id: 'p2', name: 'Five Left', stock: 999 },
+      ]),
+    },
+    productInventory: {
+      findMany: jest.fn().mockResolvedValue([
+        { productId: 'p1', stock: 6, reserved: 4 }, // 2
+        { productId: 'p2', stock: 5, reserved: 0 }, // 5
+        { productId: 'p3', stock: 12, reserved: 2 }, // 10 (= threshold, still low)
+        { productId: 'p5', stock: 60, reserved: 10 }, // 50
+      ]),
     },
     inventoryReservation: { aggregate: jest.fn().mockResolvedValue({ _sum: { reservedQty: 12 } }) },
     shipment: {
@@ -144,7 +160,26 @@ describe('ExecutiveDashboardService.compute', () => {
     const { service } = svc();
     const d = await service.compute();
     expect(d.inventoryAlert).toMatchObject({ lowStock: 3, outOfStock: 1, reserved: 12 });
-    expect(d.inventoryAlert.needRestock[0]).toEqual({ id: 'p1', name: 'Bakso Urat', stock: 2 });
+    // The out-of-stock product now sorts first (0 < 2); the exact order is
+    // asserted in the next test.
+    expect(d.inventoryAlert.needRestock).toContainEqual({ id: 'p1', name: 'Bakso Urat', stock: 2 });
+  });
+
+  it('inventoryAlert reads Stok Produk availability (active outlets), not Product.stock', async () => {
+    const { service, prisma } = svc();
+    const d = await service.compute();
+    // Lowest available first; `stock` is the Stok Produk AVAILABLE quantity.
+    expect(d.inventoryAlert.needRestock).toEqual([
+      { id: 'p4', name: 'No Stok Produk Row', stock: 0 },
+      { id: 'p1', name: 'Bakso Urat', stock: 2 },
+      { id: 'p2', name: 'Five Left', stock: 5 },
+      { id: 'p3', name: 'At Threshold', stock: 10 },
+    ]);
+    expect(prisma.product.findMany).toHaveBeenCalledWith({ where: { deletedAt: null, status: 'ACTIVE' }, select: { id: true, name: true } });
+    expect(prisma.productInventory.findMany).toHaveBeenCalledWith({
+      where: { productId: { in: ['p5', 'p3', 'p1', 'p4', 'p2'] }, outlet: { isActive: true } },
+      select: { productId: true, stock: true, reserved: true },
+    });
   });
 
   it('shipmentSummary: buckets rolled up from the status groupBy + delivered-today', async () => {

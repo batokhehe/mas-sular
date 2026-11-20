@@ -143,6 +143,10 @@ function world(current: { imageUrl: string; images: Image[] } | null = { imageUr
   const tx = {
     productImage: { deleteMany: jest.fn().mockResolvedValue({}), createMany: jest.fn().mockResolvedValue({}), upsert: jest.fn().mockResolvedValue({}) },
     product: { create, aggregate, update: jest.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'p1', ...data })) },
+    // createProduct also initialises Stok Produk rows for active outlets (none here;
+    // see product-stock-single-source.spec.ts).
+    outlet: { findMany: jest.fn().mockResolvedValue([]) },
+    productInventory: { createMany: jest.fn().mockResolvedValue({ count: 0 }) },
   };
   const prisma = {
     product: {

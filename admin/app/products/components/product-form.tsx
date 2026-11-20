@@ -56,7 +56,8 @@ export type ProductFormValues = {
   isPromoSpecial: boolean;
   isTrialPack: boolean;
   status: 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
-  stock: number;
+  // No `stock`: stock is managed only in Stok Produk (ProductInventory). The form
+  // never sends one, so a product edit can never change stock.
   categoryId: string;
   // Physical attributes. Optional on the wire: an unmeasured field is OMITTED
   // rather than sent as 0/null, so saving an unrelated edit leaves a NULL
@@ -104,7 +105,6 @@ export function ProductForm({
     status:
       (initialValues?.status as ProductFormValues['status']) ??
       'ACTIVE',
-    stock: initialValues?.stock ?? 0,
     categoryId: initialValues?.categoryId ?? categories[0]?.id ?? '',
   });
 
@@ -121,7 +121,7 @@ export function ProductForm({
   const handleChange = (field: keyof ProductFormValues, value: string | boolean) => {
     setValues((current) => ({
       ...current,
-      [field]: typeof value === 'string' && ['price', 'stock', 'originalPrice', 'spicyLevel'].includes(field)
+      [field]: typeof value === 'string' && ['price', 'originalPrice', 'spicyLevel'].includes(field)
         ? toNumber(value)
         : value,
     }));
@@ -246,17 +246,6 @@ export function ProductForm({
               value={values.originalPrice ?? ''}
               onChange={(event) => handleChange('originalPrice', event.target.value)}
               className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none focus:border-[#465fff] focus:bg-white"
-            />
-          </label>
-          <label className="space-y-2 text-sm text-gray-700">
-            <span>Stok</span>
-            <input
-              type="number"
-              min={0}
-              value={values.stock}
-              onChange={(event) => handleChange('stock', event.target.value)}
-              className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none focus:border-[#465fff] focus:bg-white"
-              required
             />
           </label>
           <label className="space-y-2 text-sm text-gray-700">

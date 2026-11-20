@@ -10,13 +10,14 @@
 
 export const PRODUCT_SEQUENCE_SORT = 'sequence' as const;
 
-/** Sort dropdown: the canonical order first (and the default), then the explicit sorts. */
+/**
+ * Sort dropdown: the canonical order first (and the default), then the explicit sorts.
+ * No stock sorts: stock is viewed and managed only in Stok Produk.
+ */
 export const PRODUCT_SORT_OPTIONS = [
   { label: 'Urutan Produk', value: PRODUCT_SEQUENCE_SORT },
   { label: 'Terbaru', value: 'createdAt' },
   { label: 'Nama A → Z', value: 'nameAsc' },
-  { label: 'Stok Rendah → Tinggi', value: 'stockAsc' },
-  { label: 'Stok Tinggi → Rendah', value: 'stockDesc' },
 ] as const;
 export type ProductSortValue = (typeof PRODUCT_SORT_OPTIONS)[number]['value'];
 export const DEFAULT_PRODUCT_SORT: ProductSortValue = PRODUCT_SEQUENCE_SORT;
@@ -28,7 +29,7 @@ export type ProductStatusFilter = (typeof PRODUCT_STATUS_FILTER_OPTIONS)[number]
 export const REORDER_DISABLED_HINT =
   'Hapus pencarian dan filter, lalu pilih urutan "Urutan Produk" untuk mengatur urutan.';
 
-type Sortable = { sequence: number; name: string; stock: number; createdAt: string; id: string };
+type Sortable = { sequence: number; name: string; createdAt: string; id: string };
 
 /** The list view state that decides whether a drag means anything. */
 export type ListView = { sort: ProductSortValue; search: string; statusFilter: ProductStatusFilter };
@@ -52,8 +53,6 @@ export function isReorderable(view: ListView): boolean {
 export function sortProducts<T extends Sortable>(products: readonly T[], sort: ProductSortValue): T[] {
   const next = [...products];
   if (sort === 'nameAsc') return next.sort((a, b) => a.name.localeCompare(b.name));
-  if (sort === 'stockAsc') return next.sort((a, b) => a.stock - b.stock);
-  if (sort === 'stockDesc') return next.sort((a, b) => b.stock - a.stock);
   if (sort === 'createdAt') return next.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   return next.sort(
     (a, b) => a.sequence - b.sequence || b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id),
