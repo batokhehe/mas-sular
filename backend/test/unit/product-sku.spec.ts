@@ -30,6 +30,10 @@ function adminWith(create: jest.Mock, update: jest.Mock = jest.fn().mockResolved
       // same transaction as the insert (see product-sequence.spec.ts).
       aggregate: jest.fn().mockResolvedValue({ _max: { sequence: 0 } }),
     },
+    // createProduct also initialises Stok Produk rows for active outlets (none here;
+    // see product-stock-single-source.spec.ts).
+    outlet: { findMany: jest.fn().mockResolvedValue([]) },
+    productInventory: { createMany: jest.fn().mockResolvedValue({ count: 0 }) },
   };
   const prisma = { ...client, $transaction: (fn: (tx: typeof client) => unknown) => fn(client) };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -1,8 +1,9 @@
 name: Inventory integration
 
 # Real-PostgreSQL checks ci.yml does not run: stock reservation concurrency, settlement
-# coverage, Stok Produk adjustments and reservation hold ownership. Each suite boots its
-# own Testcontainers PostgreSQL 16 (+ RabbitMQ), applies every migration with
+# coverage, Stok Produk adjustments, reservation hold ownership and single-source product
+# stock (product create/edit vs Stok Produk). Each suite boots its own Testcontainers
+# PostgreSQL 16 (+ RabbitMQ where the suite needs it), applies every migration with
 # `prisma migrate deploy`, and throws everything away with the job - never a shared or
 # production database. Scoped to the files these suites protect.
 on:
@@ -18,6 +19,8 @@ on:
       - 'backend/test/integration/c1a-settlement-coverage.int-spec.ts'
       - 'backend/test/integration/stock-adjust-concurrency.int-spec.ts'
       - 'backend/test/integration/reservation-hold-ownership.int-spec.ts'
+      - 'backend/test/integration/product-stock-single-source.int-spec.ts'
+      - 'backend/src/modules/admin/admin.service.ts'
       - '.github/workflows/inventory-integration.yml'
   push:
     branches-ignore: [main]
@@ -32,6 +35,8 @@ on:
       - 'backend/test/integration/c1a-settlement-coverage.int-spec.ts'
       - 'backend/test/integration/stock-adjust-concurrency.int-spec.ts'
       - 'backend/test/integration/reservation-hold-ownership.int-spec.ts'
+      - 'backend/test/integration/product-stock-single-source.int-spec.ts'
+      - 'backend/src/modules/admin/admin.service.ts'
       - '.github/workflows/inventory-integration.yml'
   workflow_dispatch:
 
@@ -55,4 +60,5 @@ jobs:
           test/integration/c1a-settlement-coverage.int-spec.ts
           test/integration/stock-adjust-concurrency.int-spec.ts
           test/integration/reservation-hold-ownership.int-spec.ts
+          test/integration/product-stock-single-source.int-spec.ts
         working-directory: backend

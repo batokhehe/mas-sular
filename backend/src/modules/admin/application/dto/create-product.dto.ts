@@ -81,8 +81,11 @@ export class CreateProductDto {
   @IsEnum(ProductStatus)
   status!: ProductStatus;
 
+  // Deprecated, IGNORED (Stok Produk is the only stock interface). Still accepted
+  // so an older Admin build or API client is not rejected by forbidNonWhitelisted.
+  @IsOptional()
   @IsInt()
-  stock!: number;
+  stock?: number;
 
   @IsString()
   categoryId!: string;

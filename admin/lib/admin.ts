@@ -40,7 +40,6 @@ export type AdminProduct = {
   imageUrl?: string | null;
   originalPrice?: number | null;
   categoryId: string;
-  stock: number;
   status: string;
   isBestSeller: boolean;
   isNew: boolean;

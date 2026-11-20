@@ -102,7 +102,7 @@ export default function ProductsPage() {
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-semibold text-gray-900">Manajemen Produk</h2>
-          <p className="mt-1 text-sm text-gray-500">Katalog, stok, harga, dan visibilitas produk.</p>
+          <p className="mt-1 text-sm text-gray-500">Katalog, harga, dan visibilitas produk. Stok dikelola di menu Stok Produk.</p>
         </div>
         <PermissionGate permissions={ROUTE_PERMISSIONS.productCreate}>
           <Link href="/products/new">
@@ -179,7 +179,6 @@ export default function ProductsPage() {
                   {mayReorder ? <th className="w-10 py-3 font-medium">Urutan</th> : null}
                   <th className="py-3 font-medium">Nama</th>
                   <th className="py-3 font-medium">Kategori</th>
-                  <th className="py-3 font-medium">Stok</th>
                   <th className="py-3 font-medium">Status</th>
                   <th className="py-3 font-medium">Aksi</th>
                 </tr>
@@ -241,7 +240,6 @@ export default function ProductsPage() {
                       ) : null}
                     </td>
                     <td className="py-4 text-gray-500">{product.categoryId}</td>
-                    <td className="py-4 text-gray-500">{product.stock}</td>
                     <td className="py-4">
                       <Badge tone={product.status === 'ACTIVE' ? 'success' : 'neutral'}>{productStatusLabel(product.status)}</Badge>
                     </td>

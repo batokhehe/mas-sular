@@ -70,7 +70,7 @@ export default function ProductDetailPage() {
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-semibold text-gray-900">Ubah Produk</h2>
-          <p className="mt-1 text-sm text-gray-500">Perbarui detail katalog dan stok produk ini.</p>
+          <p className="mt-1 text-sm text-gray-500">Perbarui detail katalog produk ini. Stok dikelola di menu Stok Produk.</p>
         </div>
         <Link href="/products" className="text-sm font-medium text-[#465fff] hover:text-indigo-700">
           Kembali ke produk

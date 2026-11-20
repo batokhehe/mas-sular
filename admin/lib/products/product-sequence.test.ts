@@ -31,11 +31,10 @@ const read = (p: string) => readFileSync(join(process.cwd(), p), 'utf8');
 const PAGE = strip(read('app/products/page.tsx'));
 const API = read('lib/admin.ts');
 
-const product = (id: string, over: Partial<{ sequence: number; name: string; stock: number; createdAt: string }> = {}) => ({
+const product = (id: string, over: Partial<{ sequence: number; name: string; createdAt: string }> = {}) => ({
   id,
   sequence: 0,
   name: id,
-  stock: 0,
   createdAt: '2026-01-01T00:00:00.000Z',
   ...over,
 });
@@ -43,16 +42,16 @@ const ids = (list: readonly { id: string }[]) => list.map((p) => p.id);
 
 // ---------------------------------------------------------------- the sort dropdown
 
-test('the canonical order is an option and the default; the existing admin sorts are unchanged', () => {
+test('the canonical order is an option and the default; no stock sorts (stock lives in Stok Produk)', () => {
   assert.equal(PRODUCT_SEQUENCE_SORT, 'sequence');
   assert.equal(DEFAULT_PRODUCT_SORT, PRODUCT_SEQUENCE_SORT);
   assert.deepEqual(
     PRODUCT_SORT_OPTIONS.map((o) => o.value),
-    ['sequence', 'createdAt', 'nameAsc', 'stockAsc', 'stockDesc'],
+    ['sequence', 'createdAt', 'nameAsc'],
   );
   assert.deepEqual(
     PRODUCT_SORT_OPTIONS.map((o) => o.label),
-    ['Urutan Produk', 'Terbaru', 'Nama A → Z', 'Stok Rendah → Tinggi', 'Stok Tinggi → Rendah'],
+    ['Urutan Produk', 'Terbaru', 'Nama A → Z'],
   );
   assert.deepEqual([...PRODUCT_STATUS_FILTER_OPTIONS], ['ALL', 'ACTIVE', 'DRAFT', 'ARCHIVED']);
 });
@@ -69,12 +68,10 @@ test('sortProducts: the sequence mirrors the server order (sequence, then newest
 
 test('sortProducts: the explicit admin sorts behave exactly as before', () => {
   const list = [
-    product('b', { sequence: 1, name: 'Bakso', stock: 9, createdAt: '2026-02-01T00:00:00.000Z' }),
-    product('a', { sequence: 2, name: 'Ayam', stock: 1, createdAt: '2026-03-01T00:00:00.000Z' }),
+    product('b', { sequence: 1, name: 'Bakso', createdAt: '2026-02-01T00:00:00.000Z' }),
+    product('a', { sequence: 2, name: 'Ayam', createdAt: '2026-03-01T00:00:00.000Z' }),
   ];
   assert.deepEqual(ids(sortProducts(list, 'nameAsc')), ['a', 'b']);
-  assert.deepEqual(ids(sortProducts(list, 'stockAsc')), ['a', 'b']);
-  assert.deepEqual(ids(sortProducts(list, 'stockDesc')), ['b', 'a']);
   assert.deepEqual(ids(sortProducts(list, 'createdAt')), ['a', 'b']);
 });
 
@@ -94,7 +91,7 @@ test('reordering is allowed only on the full list in canonical order', () => {
   assert.equal(isReorderable(view({ search: '   ' })), true); // whitespace is not a search
   assert.equal(isReorderable(view({ statusFilter: 'ACTIVE' })), false);
   assert.equal(isReorderable(view({ statusFilter: 'ARCHIVED' })), false);
-  for (const sort of ['createdAt', 'nameAsc', 'stockAsc', 'stockDesc'] as ProductSortValue[]) {
+  for (const sort of ['createdAt', 'nameAsc'] as ProductSortValue[]) {
     assert.equal(isReorderable(view({ sort })), false, sort);
   }
 });

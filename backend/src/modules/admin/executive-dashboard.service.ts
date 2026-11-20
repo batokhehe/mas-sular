@@ -4,10 +4,10 @@ import { Cache } from 'cache-manager';
 import { OrderStatus, PaymentMethod, PaymentStatus, Prisma, ShipmentStatus } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { num } from '../../common/utils/number.util';
+import { loadStockLevels, RESTOCK_LIST_LIMIT } from '../inventory/stock-levels';
 
 export type HealthLevel = 'green' | 'yellow' | 'red';
 
-const LOW_STOCK_THRESHOLD = 10;
 const CACHE_KEY = 'admin:executive-dashboard';
 const CACHE_TTL_MS = 30_000;
 
@@ -79,10 +79,8 @@ export class ExecutiveDashboardService {
       topProductRows,
       topCustomerGroups,
       recentOrders,
-      lowStock,
-      outOfStock,
+      stockLevels,
       reservedAgg,
-      needRestock,
       shipmentStatus,
       deliveredToday,
       health,
@@ -120,15 +118,9 @@ export class ExecutiveDashboardService {
           shipment: { select: { status: true } },
         },
       }),
-      this.prisma.product.count({ where: { deletedAt: null, status: 'ACTIVE', stock: { gt: 0, lte: LOW_STOCK_THRESHOLD } } }),
-      this.prisma.product.count({ where: { deletedAt: null, status: 'ACTIVE', stock: { lte: 0 } } }),
+      // Stok Produk availability (same as storefront/checkout), never Product.stock.
+      loadStockLevels(this.prisma, { deletedAt: null, status: 'ACTIVE' }),
       this.prisma.inventoryReservation.aggregate({ where: { status: 'RESERVED' }, _sum: { reservedQty: true } }),
-      this.prisma.product.findMany({
-        where: { deletedAt: null, status: 'ACTIVE', stock: { lte: LOW_STOCK_THRESHOLD } },
-        select: { id: true, name: true, stock: true },
-        orderBy: { stock: 'asc' },
-        take: 10,
-      }),
       this.prisma.shipment.groupBy({ by: ['status'], _count: { _all: true } }),
       this.prisma.shipment.count({ where: { status: ShipmentStatus.DELIVERED, updatedAt: { gte: todayStart } } }),
       this.systemHealth(),
@@ -196,10 +188,14 @@ export class ExecutiveDashboardService {
         total: o.totalPrice,
       })),
       inventoryAlert: {
-        lowStock,
-        outOfStock,
+        lowStock: stockLevels.lowStock,
+        outOfStock: stockLevels.outOfStock,
         reserved: num(reservedAgg._sum.reservedQty),
-        needRestock: needRestock.map((p) => ({ id: p.id, name: p.name, stock: p.stock })),
+        // `stock` keeps the payload shape the Admin dashboard reads; it is the
+        // Stok Produk AVAILABLE quantity.
+        needRestock: stockLevels.atOrBelowThreshold
+          .slice(0, RESTOCK_LIST_LIMIT)
+          .map((p) => ({ id: p.id, name: p.name, stock: p.available })),
       },
       shipmentSummary: {
         waiting:

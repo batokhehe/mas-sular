@@ -157,7 +157,11 @@ function adminWorld(rows: Row[]) {
     }),
   };
   const auditLog = { create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => audits.push(data)) };
-  const tx = { product, auditLog };
+  // createProduct also initialises Stok Produk rows for active outlets (none here;
+  // see product-stock-single-source.spec.ts).
+  const outlet = { findMany: jest.fn(async () => []) };
+  const productInventory = { createMany: jest.fn(async () => ({ count: 0 })) };
+  const tx = { product, auditLog, outlet, productInventory };
   // The real transaction is atomic: a throw inside must leave no update applied.
   const $transaction = jest.fn(async (fn: (client: typeof tx) => Promise<unknown>) => {
     const snapshot = rows.map((row) => ({ ...row }));

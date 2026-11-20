@@ -49,7 +49,9 @@ function dashboardPrisma(rows: Row[]) {
       groupBy: jest.fn().mockResolvedValue([]),
     },
     payment: { count: jest.fn().mockResolvedValue(0) },
-    product: { count: jest.fn().mockResolvedValue(0) },
+    product: { count: jest.fn().mockResolvedValue(0), findMany: jest.fn().mockResolvedValue([]) },
+    // Low-stock metric reads Stok Produk (ProductInventory), never Product.stock.
+    productInventory: { findMany: jest.fn().mockResolvedValue([]) },
     user: { count: jest.fn().mockResolvedValue(0) },
     promo: {
       findMany: jest.fn().mockResolvedValue([]),

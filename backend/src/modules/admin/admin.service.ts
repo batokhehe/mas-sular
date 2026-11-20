@@ -9,6 +9,7 @@ import { trackingCacheKey } from '../shipment/shipment-sync.service';
 import { mergeAdminShipmentMetadata } from '../shipment/shipment-metadata';
 import { lockShipmentRow } from '../shipment/shipment-row-lock';
 import { InventoryReservationService } from '../inventory/inventory-reservation.service';
+import { loadStockLevels } from '../inventory/stock-levels';
 import { CreateBannerDto } from '../cms/application/dto/banner.dto';
 import {
   CreateShipmentDto,
@@ -150,7 +151,8 @@ export class AdminService {
       }),
       this.prisma.payment.count({ where: { deletedAt: null, status: PaymentStatus.WAITING_VERIFICATION } }),
       this.prisma.product.count({ where: { deletedAt: null, status: 'ACTIVE' } }),
-      this.prisma.product.count({ where: { deletedAt: null, stock: { lte: 10 } } }),
+      // Stok Produk availability (same as storefront/checkout), never Product.stock.
+      loadStockLevels(this.prisma, { deletedAt: null }).then((levels) => levels.atOrBelowThreshold.length),
       this.prisma.order.count({ where: { deletedAt: null } }),
       this.prisma.user.count({ where: { deletedAt: null } }),
       this.prisma.order.count({ where: { deletedAt: null, status: OrderStatus.PENDING } }),
@@ -218,7 +220,11 @@ export class AdminService {
     // create, atomic with the product row. With images[] the cover is images[0];
     // without it the legacy imageUrl is the cover (its validation is unchanged) and
     // becomes the single gallery image, so Product.imageUrl = images[0] from day one.
-    const { images, ...fields } = dto;
+    // `stock` is NOT product data (Stok Produk is the only stock interface): an
+    // incoming value - from an old Admin build or an API client - is ignored.
+    // Product.stock keeps its column default; operational stock starts at 0 in the
+    // ProductInventory rows createProductRow initialises.
+    const { images, stock: _stockIgnored, ...fields } = dto;
     const gallery = images !== undefined ? assertProductImageList(images) : undefined;
     if (gallery) assertCoverMatches(fields.imageUrl, gallery);
     const imageUrl = gallery ? gallery[0] : fields.imageUrl;
@@ -252,10 +258,27 @@ export class AdminService {
    * not unique and PRODUCT_SEQUENCE_ORDER_BY breaks the tie, and the next reorder
    * renumbers the whole set to 1..N anyway.
    */
+  /**
+   * In the SAME transaction the product gets a stock-0 Stok Produk row at every
+   * ACTIVE outlet, so it appears in Stok Produk at once (that page lists
+   * ProductInventory rows) and stays unavailable to customers until stock is set
+   * there. Active outlets only: availability reads only active outlets, and the
+   * Stok Produk adjustment and transfer completion still create a row on demand
+   * for any other outlet. skipDuplicates keeps the (productId, outletId) unique key
+   * safe. Any failure rolls the product back with it.
+   */
   private createProductRow(data: Prisma.ProductCreateArgs['data']) {
     return this.prisma.$transaction(async (tx) => {
       const { _max } = await tx.product.aggregate({ _max: { sequence: true } });
-      return tx.product.create({ data: { ...data, sequence: (_max.sequence ?? 0) + 1 } });
+      const product = await tx.product.create({ data: { ...data, sequence: (_max.sequence ?? 0) + 1 } });
+      const outlets = await tx.outlet.findMany({ where: { isActive: true }, select: { id: true } });
+      if (outlets.length > 0) {
+        await tx.productInventory.createMany({
+          data: outlets.map((outlet) => ({ productId: product.id, outletId: outlet.id, stock: 0, reserved: 0, available: 0 })),
+          skipDuplicates: true,
+        });
+      }
+      return product;
     });
   }
 
@@ -321,7 +344,9 @@ export class AdminService {
     // untouched. A blank SKU is treated as "not provided" rather than written: ''
     // would erase the Paxel item code and collide on @unique. A non-blank SKU from
     // an API client is still applied as before.
-    const { sku, images, ...rest } = dto;
+    // `stock` is never written from here, whether omitted or sent: stock is managed
+    // only in Stok Produk (ProductInventory.update). Product.stock stays as stored.
+    const { sku, images, stock: _stockIgnored, ...rest } = dto;
     const data = sku?.trim() ? { ...rest, sku } : rest;
 
     // No gallery change and no new cover: exactly the previous single update.
