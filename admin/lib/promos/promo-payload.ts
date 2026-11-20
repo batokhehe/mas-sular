@@ -85,6 +85,23 @@ export function usesComponents(values: PromoFormValues): boolean {
   return hasProductComponent(values) || hasShippingComponent(values);
 }
 
+/** A legacy (component-less) "Gratis ongkir" voucher: its courier list is the live restriction. */
+export function usesLegacyFreeShipping(values: PromoFormValues): boolean {
+  return !usesComponents(values) && values.voucherType === 'FREE_SHIPPING';
+}
+
+/**
+ * An EXISTING legacy free-shipping voucher stored without couriers (it applies to
+ * every courier, the backward-compatible checkout rule). It may keep being edited
+ * - title, dates, active flag - without choosing couriers; any new free-shipping
+ * configuration must name at least one. Mirrors AdminService.validatePromoConfiguration.
+ */
+export function isGrandfatheredFreeShipping(promo?: Partial<AdminPromo>): boolean {
+  if (!promo?.id) return false;
+  const legacy = !promo.productDiscountType && !promo.shippingDiscountType;
+  return legacy && promo.voucherType === 'FREE_SHIPPING' && normalizeCouriers(promo.eligibleCouriers).length === 0;
+}
+
 const isSupportedCourier = (value: unknown): value is SupportedCourier =>
   typeof value === 'string' && (SUPPORTED_COURIERS as readonly string[]).includes(value.toLowerCase());
 
@@ -223,7 +240,12 @@ const isUsableInteger = (value: unknown): value is number =>
  * The server still re-validates - this only keeps the admin from posting a
  * configuration it already knows will be refused.
  */
-export function validatePromoForm(values: PromoFormValues): string[] {
+export interface PromoFormValidationOptions {
+  /** Editing a grandfathered legacy free-shipping voucher (isGrandfatheredFreeShipping): couriers stay optional. */
+  couriersOptional?: boolean;
+}
+
+export function validatePromoForm(values: PromoFormValues, options: PromoFormValidationOptions = {}): string[] {
   const errors: string[] = [];
 
   if (!values.code.trim()) errors.push('Kode voucher wajib diisi.');
@@ -304,6 +326,13 @@ export function validatePromoForm(values: PromoFormValues): string[] {
     amount(values.discountAmount, 'Nominal diskon');
   } else if (values.voucherType === 'FREE_SHIPPING') {
     optionalCap(values.freeShippingMaxAmount, 'Maksimal potongan gratis ongkir');
+    const couriers = normalizeCouriers(values.eligibleCouriers);
+    const requested = Array.isArray(values.eligibleCouriers) ? values.eligibleCouriers : [];
+    if (couriers.length === 0 && !options.couriersOptional) {
+      errors.push('Gratis ongkir wajib memiliki minimal satu kurir (Paxel atau JNE).');
+    } else if (requested.some((courier) => !isSupportedCourier(courier))) {
+      errors.push('Kurir yang didukung hanya Paxel dan JNE.');
+    }
   }
 
   return errors;
@@ -386,6 +415,15 @@ export function buildPromoPayload(values: PromoFormValues, mode: 'create' | 'upd
     payload.freeShippingMaxAmount = clear(
       values.voucherType === 'FREE_SHIPPING' ? values.freeShippingMaxAmount : undefined,
     );
+    // The courier list is the live restriction of a legacy free-shipping voucher.
+    // Empty is only possible for a grandfathered voucher (validatePromoForm), whose
+    // stored value is then left alone; any other legacy type stores none.
+    if (values.voucherType === 'FREE_SHIPPING') {
+      const couriers = normalizeCouriers(values.eligibleCouriers);
+      if (couriers.length > 0) payload.eligibleCouriers = couriers;
+    } else {
+      payload.eligibleCouriers = clear(undefined);
+    }
 
     if (clearing) {
       payload.productDiscountType = null;

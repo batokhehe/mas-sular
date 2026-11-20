@@ -1,4 +1,5 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { AdminService } from '../../src/modules/admin/admin.service';
 
 describe('AdminService promo create/update (Phase 4G.1)', () => {
@@ -332,7 +333,8 @@ describe('AdminService promo create/update (Phase 4G.1)', () => {
       expect(data.shippingDiscountPercentage).toBeNull();
       expect(data.shippingDiscountAmount).toBeNull();
       expect(data.shippingMaxDiscountAmount).toBeNull();
-      expect(data.eligibleCouriers).toBeNull();
+      // Json column: cleared as SQL NULL (a plain null would be stored as JSON null).
+      expect(data.eligibleCouriers).toBe(Prisma.DbNull);
       expect(data).not.toHaveProperty('productDiscountType');
       expect(data).not.toHaveProperty('productDiscountAmount');
     });

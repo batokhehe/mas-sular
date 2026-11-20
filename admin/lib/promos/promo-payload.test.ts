@@ -7,6 +7,7 @@ import {
   SUPPORTED_COURIERS,
   VOUCHER_TYPES,
   buildPromoPayload,
+  isGrandfatheredFreeShipping,
   normalizeCouriers,
   promoFormValuesFromPromo,
   toggleCourier,
@@ -60,13 +61,85 @@ test('legacy fixed promo creates a valid payload', () => {
 });
 
 test('legacy free shipping promo creates a valid payload, cap optional', () => {
-  const withCap = base({ voucherType: 'FREE_SHIPPING', freeShippingMaxAmount: 15000 });
+  const withCap = base({ voucherType: 'FREE_SHIPPING', freeShippingMaxAmount: 15000, eligibleCouriers: ['paxel'] });
   assert.deepEqual(validatePromoForm(withCap), []);
   assert.equal(buildPromoPayload(withCap, 'create').freeShippingMaxAmount, 15000);
 
-  const withoutCap = base({ voucherType: 'FREE_SHIPPING' });
+  const withoutCap = base({ voucherType: 'FREE_SHIPPING', eligibleCouriers: ['jne'] });
   assert.deepEqual(validatePromoForm(withoutCap), []);
   assert.equal('freeShippingMaxAmount' in buildPromoPayload(withoutCap, 'create'), false);
+});
+
+// --- legacy FREE_SHIPPING courier eligibility -------------------------------
+
+test('legacy free shipping without a courier is refused (create, or any new configuration)', () => {
+  for (const eligibleCouriers of [undefined, [] as string[]]) {
+    const errors = validatePromoForm(base({ voucherType: 'FREE_SHIPPING', eligibleCouriers }));
+    assert.ok(errors.includes('Gratis ongkir wajib memiliki minimal satu kurir (Paxel atau JNE).'), JSON.stringify(errors));
+  }
+  // An unsupported courier is not silently accepted either.
+  assert.ok(
+    validatePromoForm(base({ voucherType: 'FREE_SHIPPING', eligibleCouriers: ['paxel', 'sicepat'] })).includes(
+      'Kurir yang didukung hanya Paxel dan JNE.',
+    ),
+  );
+});
+
+test('legacy free shipping: Paxel only, JNE only and both produce the courier list on create and update', () => {
+  for (const couriers of [['paxel'], ['jne'], ['paxel', 'jne'], ['JNE', 'paxel', 'jne']]) {
+    const values = base({ voucherType: 'FREE_SHIPPING', eligibleCouriers: couriers });
+    assert.deepEqual(validatePromoForm(values), [], couriers.join());
+    const expected = normalizeCouriers(couriers);
+    assert.deepEqual(buildPromoPayload(values, 'create').eligibleCouriers, expected);
+    assert.deepEqual(buildPromoPayload(values, 'update').eligibleCouriers, expected);
+    // Still a legacy voucher: no component is invented.
+    assert.equal('shippingDiscountType' in buildPromoPayload(values, 'create'), false);
+  }
+});
+
+test('switching a legacy voucher away from free shipping clears its couriers (null on update)', () => {
+  const fromFreeShipping = base({ voucherType: 'FREE_SHIPPING', eligibleCouriers: ['paxel', 'jne'] });
+  for (const voucherType of ['PERCENTAGE_DISCOUNT', 'FIXED_DISCOUNT'] as const) {
+    const switched = { ...withVoucherType(fromFreeShipping, voucherType), discountPercentage: 10, discountAmount: 5000 };
+    assert.equal(buildPromoPayload(switched, 'update').eligibleCouriers, null, voucherType);
+    assert.equal('eligibleCouriers' in buildPromoPayload(switched, 'create'), false, voucherType);
+  }
+});
+
+test('edit: stored couriers prefill the selection of a legacy free-shipping voucher', () => {
+  const values = promoFormValuesFromPromo(
+    { id: 'promo-1', code: 'ONGKIR', voucherType: 'FREE_SHIPPING', eligibleCouriers: ['jne'] },
+    identityDate,
+  );
+  assert.deepEqual(values.eligibleCouriers, ['jne']);
+  assert.equal(values.voucherType, 'FREE_SHIPPING');
+  assert.equal(isGrandfatheredFreeShipping({ id: 'promo-1', voucherType: 'FREE_SHIPPING', eligibleCouriers: ['jne'] }), false);
+});
+
+test('grandfathered legacy free shipping (stored without couriers) stays editable without choosing one', () => {
+  const stored = { id: 'promo-old', code: 'ONGKIR', title: 'Lama', description: 'Gratis ongkir lama', voucherType: 'FREE_SHIPPING' as const, eligibleCouriers: null };
+  assert.equal(isGrandfatheredFreeShipping(stored), true);
+  const edited = { ...promoFormValuesFromPromo(stored, identityDate), title: 'Judul baru', isActive: false };
+  assert.deepEqual(validatePromoForm(edited, { couriersOptional: true }), []);
+  // The stored courier list is left alone (not overwritten with an empty list).
+  const payload = buildPromoPayload(edited, 'update');
+  assert.equal('eligibleCouriers' in payload, false);
+  assert.equal(payload.title, 'Judul baru');
+  // Choosing couriers later is still sent.
+  assert.deepEqual(buildPromoPayload({ ...edited, eligibleCouriers: ['paxel'] }, 'update').eligibleCouriers, ['paxel']);
+  // Not grandfathered: new promos, component vouchers, other legacy types.
+  assert.equal(isGrandfatheredFreeShipping({ voucherType: 'FREE_SHIPPING', eligibleCouriers: null }), false);
+  assert.equal(isGrandfatheredFreeShipping({ id: 'p', voucherType: 'FREE_SHIPPING', shippingDiscountType: 'FREE_SHIPPING' }), false);
+  assert.equal(isGrandfatheredFreeShipping({ id: 'p', voucherType: 'PERCENTAGE_DISCOUNT', eligibleCouriers: null }), false);
+});
+
+test('the form shows the courier selector for legacy free shipping and wires the grandfathered rule', () => {
+  const form = readFileSync(new URL('../../app/promos/components/promo-form.tsx', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+  // Inside the legacy FREE_SHIPPING branch (after its cap input) and in the shipping component.
+  assert.match(form, /Maksimal potongan gratis ongkir<\/span>.*?<CourierFieldset selected=\{selectedCouriers\} onToggle=\{onToggleCourier\}/);
+  assert.equal(form.match(/<CourierFieldset /g)?.length, 2);
+  assert.match(form, /const couriersOptional = isGrandfatheredFreeShipping\(initialValues\);/);
+  assert.match(form, /validatePromoForm\(values, \{ couriersOptional \}\)/);
 });
 
 test('no payload ever carries SHIPPING_PERCENTAGE or SHIPPING_FIXED as a voucher type', () => {
