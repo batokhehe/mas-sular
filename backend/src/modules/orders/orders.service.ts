@@ -8,6 +8,7 @@ import { ShippingService } from '../shipping/shipping.service';
 import { CheckoutPickupSchedule, PickupScheduleService } from '../shipping/pickup-schedule.service';
 import { ShippingQuote, ShippingRateRequest } from '../shipping/domain/shipping-provider.interface';
 import { selectPaxelBox } from '../shipping/domain/paxel-box';
+import { checkoutQuotes, isOfferedAtCheckout } from '../shipping/checkout-offer.policy';
 import { DeliveryCoverageService } from '../delivery-coverage/delivery-coverage.service';
 import { InventoryReservationService } from '../inventory/inventory-reservation.service';
 import { InventoryAllocationService } from '../inventory/inventory-allocation.service';
@@ -181,6 +182,11 @@ export class OrdersService {
     quotes?: ShippingQuote[] | null,
   ): Promise<ShippingQuote> {
     if (dto.shipping_provider && dto.shipping_service) {
+      // A service withheld from customers (checkout-offer.policy) is never
+      // selectable, even when a stale client or a crafted request still names it.
+      if (!isOfferedAtCheckout({ provider: dto.shipping_provider, service: dto.shipping_service })) {
+        throw new BadRequestException('Selected shipping service is unavailable');
+      }
       return quotes
         ? this.shipping.selectQuote(quotes, dto.shipping_provider, dto.shipping_service)
         : this.shipping.findQuote(request, dto.shipping_provider, dto.shipping_service);
@@ -393,7 +399,9 @@ export class OrdersService {
     await this.resolveCoverage(address);
     const { request, quotes } = await this.resolveOutletRequest(address, items, this.getShippingWeightGram(items, products));
     // Allocation already priced the chosen outlet; legacy path quotes on demand.
-    const options = quotes ?? (await this.shipping.getQuotes(request));
+    // Customer-facing list: services withheld from checkout are dropped here only
+    // (checkout-offer.policy); the providers still quote them.
+    const options = checkoutQuotes(quotes ?? (await this.shipping.getQuotes(request)));
     if (!this.pickupSchedule) return options;
     const pickupSchedule = this.pickupSchedule.forReference(new Date());
     return options.map((option) => ({ ...option, pickupSchedule }));

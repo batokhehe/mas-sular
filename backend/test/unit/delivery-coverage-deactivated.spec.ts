@@ -63,7 +63,7 @@ function address(overrides: Record<string, unknown> = {}) {
 }
 
 const PAXEL_QUOTES = [
-  { provider: 'paxel', service: 'PAXEL_SAMEDAY', serviceName: 'Paxel Same Day', shippingCost: 23000 },
+  { provider: 'paxel', service: 'PAXEL_REGULAR', serviceName: 'Paxel Regular', shippingCost: 23000 },
   { provider: 'paxel', service: 'PAXEL_NEXTDAY', serviceName: 'Paxel Next Day', shippingCost: 21000 },
 ];
 

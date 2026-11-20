@@ -54,10 +54,10 @@ const PAXEL_INSTANT = {
   estimatedDays: '00:00-24:00',
   shippingCost: 44000,
 };
-const PAXEL_SAMEDAY = {
+const PAXEL_REGULAR = {
   provider: 'paxel',
-  service: 'PAXEL_SAMEDAY',
-  serviceName: 'Paxel Same Day',
+  service: 'PAXEL_REGULAR',
+  serviceName: 'Paxel Regular',
   estimatedDays: '18:00-22:00',
   shippingCost: 78000,
 };
@@ -68,7 +68,7 @@ const JNE_REG = {
   estimatedDays: '2-3 Days',
   shippingCost: 9000,
 };
-const ALLOCATOR_QUOTES = [PAXEL_INSTANT, PAXEL_SAMEDAY, JNE_REG];
+const ALLOCATOR_QUOTES = [PAXEL_INSTANT, PAXEL_REGULAR, JNE_REG];
 
 /** Real selection logic, so the tests assert the production error, not a copy. */
 const realSelect = (quotes: typeof ALLOCATOR_QUOTES, provider: string, service: string) =>
@@ -149,8 +149,8 @@ describe('getSummary reuses allocation quotes', () => {
 
   it('selects the requested Paxel service out of the reused quotes', async () => {
     const { service } = build();
-    const summary = await service.getSummary(USER, summaryDto({ shipping_service: 'PAXEL_SAMEDAY' }) as never);
-    expect(summary.shipping.service).toBe('PAXEL_SAMEDAY');
+    const summary = await service.getSummary(USER, summaryDto({ shipping_service: 'PAXEL_REGULAR' }) as never);
+    expect(summary.shipping.service).toBe('PAXEL_REGULAR');
     expect(summary.shipping_cost).toBe(78000);
   });
 

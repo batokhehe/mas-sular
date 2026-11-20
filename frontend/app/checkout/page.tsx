@@ -32,6 +32,7 @@ import { useMe } from '@/lib/query/hooks/use-me'
 import { useCheckout } from '@/lib/query/hooks/use-checkout'
 import { useCheckoutSummary } from '@/lib/query/hooks/use-checkout-summary'
 import { useShippingOptions } from '@/lib/query/hooks/use-shipping-options'
+import { reconcileShippingSelection } from '@/lib/checkout/shipping-selection'
 import { useCreateAddress } from '@/lib/query/hooks/use-addresses'
 import { useCartStore, selectedLines, toCheckoutItems, lineUnitPrice, lineTotal } from '@/lib/stores/cart-store'
 import { useCheckoutAddressStore } from '@/lib/stores/checkout-address-store'
@@ -131,16 +132,17 @@ export default function CheckoutPage() {
   // Worded from the backend's pickup schedule (one per response); null = no notice.
   const pickupNoticeText = useMemo(() => pickupNotice(shippingOptions), [shippingOptions])
 
-  // Reset the selection when the address changes; auto-pick the cheapest option once loaded.
+  // Reset the selection when the address changes. Otherwise keep it in step with the
+  // CURRENT options: auto-pick the cheapest once loaded, and never keep a service the
+  // latest response no longer offers (reconcileShippingSelection).
   useEffect(() => {
     setSelectedShipping(null)
   }, [selectedAddressId])
   useEffect(() => {
-    if (!selectedShipping && shippingOptions.length > 0) {
-      const cheapest = [...shippingOptions].sort((a, b) => a.shippingCost - b.shippingCost)[0]
-      setSelectedShipping(cheapest)
-    }
-  }, [shippingOptions, selectedShipping])
+    if (shippingQuery.isFetching && !shippingQuery.data) return
+    const next = reconcileShippingSelection(selectedShipping, shippingOptions)
+    if (next !== selectedShipping) setSelectedShipping(next)
+  }, [shippingOptions, selectedShipping, shippingQuery.isFetching, shippingQuery.data])
 
   const canPlaceOrder = deliverable && !!selectedShipping
 

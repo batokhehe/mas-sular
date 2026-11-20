@@ -49,7 +49,7 @@ const ADDRESS = {
 
 const QUOTES = [
   { provider: 'jne', service: 'REG', serviceName: 'JNE Reguler', estimatedDays: '1-2 Days', shippingCost: 9000 },
-  { provider: 'paxel', service: 'PAXEL_SAMEDAY', serviceName: 'Paxel Same Day', estimatedDays: 'Today', shippingCost: 78000 },
+  { provider: 'paxel', service: 'PAXEL_NEXTDAY', serviceName: 'Paxel Next Day', estimatedDays: 'Tomorrow', shippingCost: 78000 },
 ];
 
 function build(pickupSchedule?: PickupScheduleService) {
