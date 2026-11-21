@@ -11,6 +11,7 @@ import {
 } from '../../../shipping/infrastructure/http/shipping-http-client';
 import { assertPaxelEnvironment, SHIPPING_CONFIG, ShippingConfig } from '../../../shipping/shipping.config';
 import { lookupProviderStatus } from '../../shipment-status.mapper';
+import { DESTINATION_SNAPSHOT_VERSION, ShipmentDestinationSnapshotV1 } from '../../domain/destination-snapshot';
 import { formatPaxelDatetime } from './paxel-datetime';
 import { paxelCancelSignature, paxelCreateSignature } from './paxel-signature';
 import {
@@ -72,7 +73,7 @@ function assertRange(value: number, min: number, max: number, label: string, pro
   }
 }
 
-interface PaxelEndpoint {
+export interface PaxelEndpoint {
   name: string;
   phone: string;
   address: string;
@@ -181,6 +182,42 @@ export function buildPaxelOrderAggregate(
     length: Math.round(spec.lengthCm),
     width: Math.round(spec.widthCm),
     height: Math.round(spec.heightCm),
+  };
+}
+
+/**
+ * Shipment.destinationSnapshot for a SUCCESSFUL Paxel booking, read from the exact
+ * `destination` object that was sent. Paxel takes the address unmodified, so the
+ * snapshot is complete. Coordinates are recorded as sent-or-not, never stored.
+ */
+export function buildPaxelDestinationSnapshot(destination: PaxelEndpoint, capturedAt: Date): ShipmentDestinationSnapshotV1 {
+  const providerFields: Record<string, string> = {
+    name: destination.name,
+    phone: destination.phone,
+    address: destination.address,
+    province: destination.province,
+    city: destination.city,
+    district: destination.district,
+    village: destination.village,
+    zip_code: destination.zip_code,
+  };
+  if (destination.note !== undefined) providerFields.note = destination.note;
+  return {
+    version: DESTINATION_SNAPSHOT_VERSION,
+    provider: 'paxel',
+    capturedAt: capturedAt.toISOString(),
+    recipientName: destination.name,
+    phone: destination.phone,
+    addressLines: [destination.address],
+    village: destination.village,
+    district: destination.district,
+    city: destination.city,
+    province: destination.province,
+    postalCode: destination.zip_code,
+    note: destination.note ?? null,
+    addressTruncated: false,
+    coordinatesSubmitted: destination.latitude !== undefined || destination.longitude !== undefined,
+    providerFields,
   };
 }
 
@@ -312,6 +349,8 @@ export class PaxelShipmentProvider implements ShipmentProvider {
       // shipping_cost rides along in here and ONLY here. Shipment.cost stays the
       // checkout rate snapshot, which is what the customer was charged.
       rawPayload: parsed ?? text,
+      // The `destination` object of the request Paxel just accepted, as sent.
+      destinationSnapshot: buildPaxelDestinationSnapshot(payload.destination, new Date()),
     };
   }
 

@@ -119,12 +119,15 @@ describe('JNE PICKUP_CASHLESS — booking against the confirmed response', () =>
 
     const result = await provider.createShipment(INPUT);
 
-    expect(result).toEqual({
+    const { destinationSnapshot, ...booking } = result;
+    expect(booking).toEqual({
       trackingNumber: '0109401600067399',
       providerShipmentId: '0109401600067399',
       status: ShipmentStatus.CREATED,
       rawPayload: { detail: [{ status: 'success', cnote_no: '0109401600067399' }] },
     });
+    // Plus the receiver fields this accepted request carried (Shipment.destinationSnapshot).
+    expect(destinationSnapshot).toMatchObject({ version: 1, provider: 'jne', recipientName: INPUT.destination.name.trim() });
     // Never the order number, never a local id.
     expect(result.trackingNumber).not.toBe(INPUT.orderNumber);
     expect(http).toHaveBeenCalledTimes(1);

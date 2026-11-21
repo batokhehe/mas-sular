@@ -618,6 +618,11 @@ model Order {
   shippingPayload          Json?
   // Allocated fulfillment outlet (multi-outlet allocation; null on legacy orders).
   outletId                 String?
+  /// Immutable recipient snapshot (versioned JSON, see orders/domain/recipient-snapshot.ts)
+  /// copied from the validated Address at checkout, in the order-create transaction.
+  /// Never updated afterwards, so editing the saved Address cannot rewrite history.
+  /// Null on orders created before it existed (no backfill): fall back to `address`.
+  recipientSnapshot        Json?
   user                     User                   @relation(fields: [userId], references: [id])
   address                  Address                @relation(fields: [addressId], references: [id])
   voucher                  Promo?                 @relation(fields: [voucherId], references: [id])
@@ -950,6 +955,12 @@ model Shipment {
   providerShipmentId String?
   providerPayload    Json?
   metadata           Json?
+  /// Immutable destination snapshot (versioned JSON, see shipment/domain/destination-snapshot.ts):
+  /// the receiver fields ACTUALLY submitted to the courier (after provider-specific
+  /// transformation, e.g. JNE's 30-character address lines), written in the same
+  /// transaction as the AWB of a SUCCESSFUL booking. Null before booking and on
+  /// shipments booked before it existed (no backfill).
+  destinationSnapshot Json?
   order              Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
   history            ShipmentHistory[]
   createdAt          DateTime          @default(now())

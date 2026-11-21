@@ -303,63 +303,81 @@ export class ShipmentService {
 
     const result = await provider.createShipment(input);
 
-    await this.prisma.$transaction(async (tx) => {
-      await tx.shipment.update({
-        where: { id: shipment.id },
-        data: {
-          status: result.status,
-          trackingNumber: result.trackingNumber,
-          providerShipmentId: result.providerShipmentId,
-          providerPayload: this.json(result.rawPayload),
-        },
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.shipment.update({
+          where: { id: shipment.id },
+          data: {
+            status: result.status,
+            trackingNumber: result.trackingNumber,
+            providerShipmentId: result.providerShipmentId,
+            providerPayload: this.json(result.rawPayload),
+            // The receiver fields this successful booking submitted, written with its
+            // AWB - never for a failed booking (createShipment threw before here).
+            ...(result.destinationSnapshot ? { destinationSnapshot: this.json(result.destinationSnapshot) } : {}),
+          },
+        });
+        // Legal-transition CAS (audit F4): only an order still in a shippable state
+        // flips to SHIPPED. An order cancelled while the courier call was in flight
+        // keeps CANCELLED (tracking stays recorded on the shipment for ops) and the
+        // customer is NOT told it shipped.
+        const flip = await tx.order.updateMany({
+          where: { id: order.id, status: { in: orderStatusSourcesFor(OrderStatus.SHIPPED) } },
+          data: { status: OrderStatus.SHIPPED, trackingNumber: result.trackingNumber },
+        });
+        if (flip.count === 1) {
+          await tx.orderEvent.create({
+            data: { orderId: order.id, status: OrderStatus.SHIPPED, note: `Shipment created (${providerName})` },
+          });
+          await this.enqueueWhatsApp(tx, 'order.shipped', order, {
+            provider: providerName,
+            service: order.shippingServiceName ?? order.shippingService ?? shipment.service,
+            tracking: result.trackingNumber,
+          });
+          // P1 #15: the order's SHIPPED transition, announced on the same contract an
+          // admin-driven transition uses, so the admin "Order Shipped" notification
+          // fires for automatic bookings too - carrying the OFFICIAL AWB the courier
+          // just returned. Inside this branch on purpose: it commits atomically with
+          // the CAS'd SHIPPED flip, so it is emitted exactly once, never on a failed
+          // booking, and never for an order cancelled while the courier call was in
+          // flight. Only the admin consumer listens to it (the customer's shipped
+          // WhatsApp is the row enqueued above), so nobody is notified twice.
+          await tx.outboxEvent.create({
+            data: buildOutboxEvent({
+              aggregateType: 'order',
+              aggregateId: order.id,
+              eventName: 'order.status_updated',
+              exchange: 'orders',
+              routingKey: 'order.status_updated',
+              payload: {
+                orderId: order.id,
+                orderNumber: order.orderNumber,
+                status: OrderStatus.SHIPPED,
+                shipmentId: shipment.id,
+                trackingNumber: result.trackingNumber,
+                shippingProvider: providerName,
+              },
+              metadata: { source: 'shipment.auto_booking' },
+            }),
+          });
+        } else {
+          this.logger.warn({ event: 'shipment.order_not_shippable', orderId: order.id, tracking: result.trackingNumber });
+        }
       });
-      // Legal-transition CAS (audit F4): only an order still in a shippable state
-      // flips to SHIPPED. An order cancelled while the courier call was in flight
-      // keeps CANCELLED (tracking stays recorded on the shipment for ops) and the
-      // customer is NOT told it shipped.
-      const flip = await tx.order.updateMany({
-        where: { id: order.id, status: { in: orderStatusSourcesFor(OrderStatus.SHIPPED) } },
-        data: { status: OrderStatus.SHIPPED, trackingNumber: result.trackingNumber },
+    } catch (err) {
+      // The courier ACCEPTED the booking but it could not be recorded here. Recovery is
+      // unchanged (the error propagates to createForOrderSafe exactly as before); this
+      // line only makes sure the issued AWB is never lost silently - it is the key an
+      // operator needs to reconcile with the courier.
+      this.logger.error({
+        event: 'shipment.persist_failed_after_booking',
+        orderId: order.id,
+        provider: providerName,
+        tracking: result.trackingNumber,
+        error: err instanceof Error ? err.message : String(err),
       });
-      if (flip.count === 1) {
-        await tx.orderEvent.create({
-          data: { orderId: order.id, status: OrderStatus.SHIPPED, note: `Shipment created (${providerName})` },
-        });
-        await this.enqueueWhatsApp(tx, 'order.shipped', order, {
-          provider: providerName,
-          service: order.shippingServiceName ?? order.shippingService ?? shipment.service,
-          tracking: result.trackingNumber,
-        });
-        // P1 #15: the order's SHIPPED transition, announced on the same contract an
-        // admin-driven transition uses, so the admin "Order Shipped" notification
-        // fires for automatic bookings too - carrying the OFFICIAL AWB the courier
-        // just returned. Inside this branch on purpose: it commits atomically with
-        // the CAS'd SHIPPED flip, so it is emitted exactly once, never on a failed
-        // booking, and never for an order cancelled while the courier call was in
-        // flight. Only the admin consumer listens to it (the customer's shipped
-        // WhatsApp is the row enqueued above), so nobody is notified twice.
-        await tx.outboxEvent.create({
-          data: buildOutboxEvent({
-            aggregateType: 'order',
-            aggregateId: order.id,
-            eventName: 'order.status_updated',
-            exchange: 'orders',
-            routingKey: 'order.status_updated',
-            payload: {
-              orderId: order.id,
-              orderNumber: order.orderNumber,
-              status: OrderStatus.SHIPPED,
-              shipmentId: shipment.id,
-              trackingNumber: result.trackingNumber,
-              shippingProvider: providerName,
-            },
-            metadata: { source: 'shipment.auto_booking' },
-          }),
-        });
-      } else {
-        this.logger.warn({ event: 'shipment.order_not_shippable', orderId: order.id, tracking: result.trackingNumber });
-      }
-    });
+      throw err;
+    }
 
     this.logger.log({ event: 'shipment.created', orderId, provider: providerName, tracking: result.trackingNumber });
     return { ok: true, status: result.status, trackingNumber: result.trackingNumber };

@@ -519,6 +519,10 @@ export type AdminOrderDetail = AdminOrder & {
   shippingDiscountAmount?: number;
   voucherCode?: string | null;
   outletId?: string | null;
+  /** Allocated fulfillment outlet (GET /admin/orders/:id includes id + name). */
+  outlet?: { id: string; name: string } | null;
+  /** Immutable recipient copy taken at checkout (null on orders that predate it). */
+  recipientSnapshot?: OrderRecipientSnapshot | null;
   // Payment service fee (gateway orders): the customer-charged "Biaya Layanan"
   // plus the merchant-side accounting, recorded in both fee modes.
   paymentServiceFee?: number;
@@ -590,8 +594,44 @@ export type AdminOrderDetail = AdminOrder & {
     trackingNumber?: string | null;
     trackingUrl?: string | null;
     history?: Array<{ id: string; providerStatus: string; mappedStatus: string; changedAt: string }>;
+    /** Receiver fields actually submitted to the courier (null before booking / legacy). */
+    destinationSnapshot?: ShipmentDestinationSnapshot | null;
   } | null;
   events: Array<{ id: string; status: string; note?: string | null; createdAt: string }>;
+};
+
+/** Order.recipientSnapshot v1 (backend orders/domain/recipient-snapshot.ts). */
+export type OrderRecipientSnapshot = {
+  version: number;
+  recipientName: string;
+  phone: string;
+  addressDetail: string | null;
+  fullAddress: string;
+  village: string | null;
+  district: string | null;
+  city: string | null;
+  province: string | null;
+  postalCode: string | null;
+  note: string | null;
+};
+
+/** Shipment.destinationSnapshot v1 (backend shipment/domain/destination-snapshot.ts). */
+export type ShipmentDestinationSnapshot = {
+  version: number;
+  provider: string;
+  capturedAt: string;
+  recipientName: string;
+  phone: string | null;
+  addressLines: string[];
+  village: string | null;
+  district: string | null;
+  city: string | null;
+  province: string | null;
+  postalCode: string | null;
+  note: string | null;
+  addressTruncated: boolean;
+  coordinatesSubmitted?: boolean;
+  providerFields: Record<string, string>;
 };
 
 export function fetchAdminOrder(id: string) {
