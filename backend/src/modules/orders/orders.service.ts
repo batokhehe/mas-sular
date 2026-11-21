@@ -37,6 +37,7 @@ import { buildCheckoutGatewayPayload } from '../payments/gateway/domain/payment-
 import { DEFAULT_PAYMENT_METHOD, isSelectablePaymentMethod, selectablePaymentMethods } from '../payments/gateway/domain/payment-channel';
 import { calculatePaymentServiceFee, PaymentServiceFeeBreakdown } from '../payments/gateway/domain/payment-service-fee';
 import { toCustomerOrder } from './domain/customer-order-view';
+import { buildRecipientSnapshot } from './domain/recipient-snapshot';
 import { latestPaxelStatusCode, paxelStatusDisplayLabel } from '../shipment/shipment-display-label';
 import {
   feeSettingFor,
@@ -971,7 +972,9 @@ export class OrdersService {
    * customer-charged "Biaya Layanan" and whether that row applies.
    */
   async getSummary(userId: string, dto: CheckoutSummaryDto) {
-    const { payment_service_fee_breakdown: _internal, ...customerSummary } = await this.computeSummary(userId, dto);
+    // Internal-only fields: the merchant fee accounting and the recipient snapshot the
+    // order will store (the customer already sees their own address elsewhere).
+    const { payment_service_fee_breakdown: _internal, recipient_snapshot: _recipient, ...customerSummary } = await this.computeSummary(userId, dto);
     return customerSummary;
   }
 
@@ -1046,6 +1049,9 @@ export class OrdersService {
       outlet_id: outletId,
       shipping: quote,
       voucher,
+      // The recipient as validated and priced above - from THIS address row, not a
+      // later lookup. Stored on the order inside the order-create transaction.
+      recipient_snapshot: buildRecipientSnapshot(address),
     };
   }
 
@@ -1303,6 +1309,8 @@ export class OrdersService {
           orderNumber,
           userId,
           addressId: dto.address_id,
+          // Immutable copy of the validated recipient, committed atomically with the order.
+          recipientSnapshot: summary.recipient_snapshot as unknown as Prisma.InputJsonValue,
           paymentMethod,
           subtotal: summary.subtotal,
           deliveryFee: summary.shipping_cost,

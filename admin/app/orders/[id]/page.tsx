@@ -6,7 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'next/navigation';
 import {
   ShoppingCart, CreditCard, UploadCloud, CheckCircle2, Boxes, Truck, PackageCheck, XCircle, Circle,
-  MapPin, Phone, Mail, ExternalLink, Download, RefreshCw, Printer, MessageSquare, Trash2, Pencil, ClipboardList,
+  MapPin, Phone, Mail, ExternalLink, Download, RefreshCw, MessageSquare, Trash2, Pencil, ClipboardList,
 } from 'lucide-react';
 import { PermissionGate } from '@/components/auth/permission-gate';
 import { AdminShell } from '@/components/layout/admin-shell';
@@ -25,7 +25,7 @@ import { useAdminProfile } from '@/lib/auth';
 import { formatRupiah } from '@/lib/utils/number';
 import { feeModeLabel, feeRuleLabel } from '@/lib/orders/service-fee-view';
 import { orderItemPricing } from '@/lib/orders/order-item-view';
-import { packingSlipPath } from '@/lib/orders/packing-slip-view';
+import { PrintResiAction } from '@/components/orders/print-resi';
 import {
   ADMIN_LOADING_MESSAGES, ADMIN_SUCCESS_MESSAGES, confirmApprove, confirmReject, runWithFeedback,
 } from '@/lib/admin-alert';
@@ -166,9 +166,9 @@ export default function OrderDetailPage() {
         <div className="space-y-5">
           {/* SECTION 1 — Order Summary */}
           <Section title="Ringkasan Pesanan" icon={ClipboardList}>
-            {/* P3: the printable packing slip, in its own tab (read-only). */}
+            {/* Print Resi: 100 x 150 mm packing slip from THIS page's data; opens the print dialog, read-only. */}
             <div className="mb-4 flex justify-end">
-              <ActionButton icon={Printer} onClick={() => window.open(packingSlipPath(order.id), '_blank', 'noopener,noreferrer')}>Packing Slip</ActionButton>
+              <PrintResiAction order={order} />
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Nomor Pesanan" value={order.orderNumber} />

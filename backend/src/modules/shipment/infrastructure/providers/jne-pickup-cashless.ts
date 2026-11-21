@@ -1,6 +1,7 @@
 import { BUSINESS_TIMEZONE, zonedCivil } from '../../../../common/utils/business-time.util';
 import { PermanentError } from '../../../shipping/domain/shipping-errors';
 import { JnePickupConfig, jnePickupConfigIssues } from '../../../shipping/shipping.config';
+import { DESTINATION_SNAPSHOT_VERSION, ShipmentDestinationSnapshotV1 } from '../../domain/destination-snapshot';
 
 /**
  * JNE `POST /pickupcashless` - request construction and response interpretation
@@ -245,6 +246,63 @@ export function stripJneControlCharacters(value: string): string {
  */
 export function toJneAddressLine(value: string): string {
   return truncateJneAddress(stripJneControlCharacters(value).replace(/\s+/g, ' ').trim());
+}
+
+/**
+ * True when toJneAddressLine would DROP text from `value` - i.e. the line is still
+ * longer than JNE's limit after the control-character/whitespace normalization
+ * (which itself loses nothing a reader needs).
+ */
+export function jneAddressLineTruncated(value: string): boolean {
+  const normalized = stripJneControlCharacters(value).replace(/\s+/g, ' ').trim();
+  return Array.from(normalized).length > JNE_ADDRESS_MAX_LENGTH;
+}
+
+/** The receiver-side /pickupcashless fields kept in Shipment.destinationSnapshot. */
+export const JNE_DESTINATION_SNAPSHOT_FIELDS = [
+  'RECEIVER_NAME',
+  'RECEIVER_ADDR1',
+  'RECEIVER_ADDR2',
+  'RECEIVER_CITY',
+  'RECEIVER_ZIP',
+  'RECEIVER_REGION',
+  'RECEIVER_COUNTRY',
+  'RECEIVER_CONTACT',
+  'RECEIVER_PHONE',
+  'DESTINATION_CODE',
+] as const satisfies readonly JnePickupCashlessField[];
+
+/**
+ * Shipment.destinationSnapshot for a SUCCESSFUL /pickupcashless booking, read from
+ * the exact `fields` that were serialized and sent. `receiver` is the builder's own
+ * input, used only to tell whether the 30-character cut removed text.
+ */
+export function buildJneDestinationSnapshot(
+  fields: JnePickupCashlessFields,
+  receiver: JnePickupCashlessSource['receiver'],
+  capturedAt: Date,
+): ShipmentDestinationSnapshotV1 {
+  const providerFields: Record<string, string> = {};
+  for (const name of JNE_DESTINATION_SNAPSHOT_FIELDS) providerFields[name] = fields[name];
+  const orNull = (value: string) => (value === '' ? null : value);
+  return {
+    version: DESTINATION_SNAPSHOT_VERSION,
+    provider: JNE,
+    capturedAt: capturedAt.toISOString(),
+    recipientName: fields.RECEIVER_NAME,
+    phone: orNull(fields.RECEIVER_PHONE),
+    addressLines: [fields.RECEIVER_ADDR1, fields.RECEIVER_ADDR2].filter((line) => line !== ''),
+    // Not separate JNE fields: village/district travel inside RECEIVER_ADDR2.
+    village: null,
+    district: null,
+    city: orNull(fields.RECEIVER_CITY),
+    province: orNull(fields.RECEIVER_REGION),
+    postalCode: orNull(fields.RECEIVER_ZIP),
+    // JNE's SPECIAL_INS is a fixed instruction, not the customer's address note.
+    note: null,
+    addressTruncated: jneAddressLineTruncated(receiver.addressDetail?.trim() ?? '') || jneAddressLineTruncated(buildReceiverAddr2(receiver)),
+    providerFields,
+  };
 }
 
 /** JNE's documented ORDER_ID limit. */

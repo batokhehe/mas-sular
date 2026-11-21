@@ -56,13 +56,14 @@ test('route path', () => {
   assert.equal(packingSlipPath('0f1e-22'), '/orders/0f1e-22/packing-slip');
 });
 
-test('Order Detail: the old whole-page window.print() action is gone; "Packing Slip" lives in Order Summary (Ringkasan Pesanan)', () => {
+test('Order Detail: no whole-page window.print(); the A4 "Packing Slip" tab was replaced by "Print Resi" in Order Summary (Ringkasan Pesanan)', () => {
   assert.equal(/window\.print\(/.test(DETAIL), false);
   assert.equal(/Print Packing Slip/.test(DETAIL), false);
+  assert.equal(/packingSlipPath/.test(DETAIL), false);
   const summary = DETAIL.split('<Section title="Ringkasan Pesanan"')[1]?.split('</Section>')[0] ?? '';
-  assert.match(summary, /<ActionButton icon=\{Printer\} onClick=\{\(\) => window\.open\(packingSlipPath\(order\.id\), '_blank', 'noopener,noreferrer'\)\}>Packing Slip<\/ActionButton>/);
+  assert.match(summary, /<PrintResiAction order=\{order\} \/>/);
   const quick = DETAIL.split('<CardTitle>Aksi Cepat</CardTitle>')[1]?.split('</Card>')[0] ?? '';
-  assert.equal(/Packing Slip/.test(quick), false);
+  assert.equal(/Packing Slip|Print Resi/.test(quick), false);
 });
 
 test('API client: authenticated api() GET of the dedicated endpoint', () => {
@@ -105,7 +106,7 @@ test('barcode: fed exactly the tracking number, only when available; SVG, never 
   assert.match(SLIP, /<p className="mt-1 break-all font-mono text-sm tracking-wider">\{barcode\}<\/p>/);
   assert.match(SLIP, /value=\{slip\.shipment\.awbLabel\}/);
   assert.match(BARCODE, /<svg/);
-  assert.match(BARCODE, /const encoding = encodeCode128B\(value\);\s*if \(!encoding\) return null;/);
+  assert.match(BARCODE, /const encoding = encodeCode128\(value\);\s*if \(!encoding\) return null;/);
   assert.equal(/canvas|toDataURL/.test(BARCODE), false);
 });
 

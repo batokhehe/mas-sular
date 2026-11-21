@@ -5,8 +5,10 @@ import { safeRecord } from '../../../../infrastructure/integration-log/safe-reco
 import { sanitizeErrorText, sanitizePayload } from '../../../../infrastructure/integration-log/integration-log.sanitizer';
 import { JneDestinationResolver } from '../../../shipping/infrastructure/jne-destination.resolver';
 import {
+  buildJneDestinationSnapshot,
   buildJnePickupCashlessFields,
   JnePickupCashlessFields,
+  JnePickupCashlessSource,
   JnePickupCashlessResult,
   parseJnePickupCashlessResponse,
   serializeJnePickupCashless,
@@ -181,6 +183,9 @@ export class JneShipmentProvider implements ShipmentProvider {
         // Snapshotted onto the shipment; the confirmed success body holds no PII, and
         // the same sanitizer as the integration log keeps it that way if JNE adds fields.
         rawPayload: sanitizePayload(result.payload),
+        // The receiver fields of the request JNE just accepted - the same `fields`
+        // object that was serialized above, so this is what JNE holds (30-char lines).
+        destinationSnapshot: buildJneDestinationSnapshot(fields, this.receiverSource(input), new Date()),
       };
     }
     if (result.kind === 'provider_error') {
@@ -233,6 +238,20 @@ export class JneShipmentProvider implements ShipmentProvider {
   }
 
   /** Every documented `/pickupcashless` field for this booking, validated. Never sends. */
+  /** The booking's receiver, as the /pickupcashless builder receives it. */
+  private receiverSource(input: CreateShipmentInput): JnePickupCashlessSource['receiver'] {
+    return {
+      name: input.destination.name,
+      phone: input.destination.phone,
+      addressDetail: input.destination.addressDetail,
+      village: input.destination.village,
+      district: input.destination.district,
+      city: input.destination.city,
+      postalCode: input.destination.postalCode,
+      province: input.destination.province,
+    };
+  }
+
   async buildPickupCashlessFields(input: CreateShipmentInput): Promise<JnePickupCashlessFields> {
     if (!this.destinations) {
       throw new PermanentError(
@@ -248,16 +267,7 @@ export class JneShipmentProvider implements ShipmentProvider {
         goodsAmount: input.goodsAmount,
         destinationCode,
         pickupAtIso: input.recordedPickupAtIso,
-        receiver: {
-          name: input.destination.name,
-          phone: input.destination.phone,
-          addressDetail: input.destination.addressDetail,
-          village: input.destination.village,
-          district: input.destination.district,
-          city: input.destination.city,
-          postalCode: input.destination.postalCode,
-          province: input.destination.province,
-        },
+        receiver: this.receiverSource(input),
         items: (input.items ?? []).map((item) => ({ name: item.name, quantity: item.quantity, weightGram: item.weightGram })),
       },
       this.cfg.pickup,

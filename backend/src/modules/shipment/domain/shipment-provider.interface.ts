@@ -1,4 +1,5 @@
 import { ShipmentStatus } from '@prisma/client';
+import { ShipmentDestinationSnapshotV1 } from './destination-snapshot';
 
 export interface ShipmentEndpoint {
   name: string;
@@ -87,6 +88,12 @@ export interface CreateShipmentResult {
   status: ShipmentStatus;
   /** Raw provider response, snapshotted onto the shipment (never returned to clients). */
   rawPayload: unknown;
+  /**
+   * The receiver fields this SUCCESSFUL booking actually submitted (after the
+   * provider's own transformations), persisted with the AWB. Optional: a provider
+   * that cannot describe its request leaves it out and the column stays null.
+   */
+  destinationSnapshot?: ShipmentDestinationSnapshotV1;
 }
 
 export interface ShipmentTrackingResult {

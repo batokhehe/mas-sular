@@ -787,6 +787,8 @@ export class AdminService {
       include: {
         user: { select: { id: true, name: true, email: true, phone: true } },
         address: ADDRESS_WITH_REGIONS,
+        // Allocated fulfillment outlet, for the Print Resi slip header (read-only).
+        outlet: { select: { id: true, name: true } },
         // product image/sku for the operations-center line items (select → no N+1).
         items: { include: { toppings: true, product: { select: { id: true, sku: true, imageUrl: true } } } },
         payment: {

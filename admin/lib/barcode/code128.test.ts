@@ -9,6 +9,14 @@ import {
   isCode128BEncodable,
   START_B,
   STOP,
+  START_C,
+  SWITCH_TO_B,
+  SWITCH_TO_C,
+  encodeCode128,
+  decodeCode128,
+  modulesFromBars,
+  barcodeSize,
+  QUIET_ZONE_MODULES,
 } from './code128.ts';
 
 /**
@@ -105,4 +113,48 @@ test('decoder rejects a corrupted checksum or symbol', () => {
 test('bars: runs of 1s offset by the quiet zone', () => {
   assert.deepEqual(code128Bars('1101', 10), [[10, 2], [13, 1]]);
   assert.deepEqual(code128Bars('0110', 0), [[1, 2]]);
+});
+
+test('auto B/C: numeric AWBs start in set C; digit runs switch per ISO 15417 Annex E; checksum covers switch codes', () => {
+  assert.deepEqual(encodeCode128('0291492600000050')?.symbols, [START_C, 2, 91, 49, 26, 0, 0, 0, 50, 13, STOP]);
+  // (105 + 1*2 + 2*91 + 3*49 + 4*26 + 8*50) % 103 = 13
+  assert.equal(encodeCode128('0291492600000050')?.checksum, 13);
+  assert.deepEqual(encodeCode128('12')?.symbols.slice(0, 2), [START_C, 12]);
+  assert.equal(encodeCode128('1')?.symbols[0], START_B);
+  assert.equal(encodeCode128('123')?.symbols[0], START_B, 'three digits: B is shorter');
+  assert.deepEqual(encodeCode128('12345')?.symbols.slice(0, 4), [START_C, 12, 34, SWITCH_TO_B], 'odd run: last digit back in B');
+  assert.deepEqual(encodeCode128('A1234')?.symbols.slice(0, 5), [START_B, 33, SWITCH_TO_C, 12, 34], '>= 4 trailing digits switch');
+  assert.equal(encodeCode128('A12345B')?.symbols.includes(SWITCH_TO_C), false, '5 inner digits stay in B');
+  const paxel = encodeCode128('CO.EMSULAR-20261030-1-CYOCBX');
+  assert.ok(paxel?.symbols.includes(SWITCH_TO_C) && paxel.symbols.includes(SWITCH_TO_B));
+  assert.ok(encodeCode128('0291492600000050')!.modules.length < encodeCode128B('0291492600000050')!.modules.length);
+});
+
+test('auto B/C round-trips EXACTLY through an independent decoder and through the drawn bars', () => {
+  const printable = Array.from({ length: 95 }, (_, i) => String.fromCharCode(32 + i)).join('');
+  const samples = ['0291492600000050', 'CO.EMSULAR-20261030-1-CYOCBX', '0', '00', '007', '0000', '1234567', 'A1', 'AB123456CD7890', '12 34', printable];
+  for (let n = 1; n <= 12; n += 1) samples.push('9'.repeat(n), `X${'5'.repeat(n)}`, `${'5'.repeat(n)}X`, `X${'5'.repeat(n)}X`);
+  for (const value of samples) {
+    const enc = encodeCode128(value);
+    assert.ok(enc, value);
+    assert.equal(decodeCode128(enc.modules), value, value);
+    assert.equal(decodeCode128(modulesFromBars(code128Bars(enc.modules), enc.totalModules)), value, `drawn: ${value}`);
+    assert.equal(enc.totalModules, enc.modules.length + 2 * QUIET_ZONE_MODULES);
+  }
+  // The B-only decoder and the general one agree on B-only symbols.
+  assert.equal(decodeCode128(encodeCode128B('Wikipedia')!.modules), 'Wikipedia');
+  for (const bad of ['', `A${String.fromCharCode(10)}`, `${String.fromCharCode(0xc5)}1`]) assert.equal(encodeCode128(bad), null);
+  const enc = encodeCode128('0291492600000050')!;
+  assert.equal(decodeCode128(enc.modules.slice(0, 11) + bits(CODE128_PATTERNS[3]) + enc.modules.slice(22)), null, 'corrupted symbol');
+  assert.equal(SWITCH_TO_C, 99);
+});
+
+test('barcodeSize: widest whole-dot (203 dpi) module that fits, else scaled to fit', () => {
+  assert.deepEqual(barcodeSize(143, 86), { moduleMm: 0.5, widthMm: 71.5, snapped: true, meetsMinimum: true });
+  assert.deepEqual(barcodeSize(200, 86), { moduleMm: 0.375, widthMm: 75, snapped: true, meetsMinimum: true });
+  assert.deepEqual(barcodeSize(341, 86), { moduleMm: 0.25, widthMm: 85.25, snapped: true, meetsMinimum: true });
+  const tooLong = barcodeSize(400, 86);
+  assert.equal(tooLong.snapped, false);
+  assert.equal(tooLong.meetsMinimum, false);
+  assert.equal(tooLong.widthMm, 86);
 });
