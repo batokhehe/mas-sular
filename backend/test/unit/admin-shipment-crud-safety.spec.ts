@@ -143,6 +143,7 @@ describe('a booked shipment cannot be hard-deleted', () => {
 
     await service.deleteShipment('sh1');
 
-    expect(prisma.shipment.delete).toHaveBeenCalledWith({ where: { id: 'sh1' } });
+    // Compare-and-set on the state the guards checked (duplicate-booking recovery).
+    expect(prisma.shipment.delete).toHaveBeenCalledWith({ where: { id: 'sh1', status: 'CREATED', trackingNumber: null, bookingAttemptId: undefined } });
   });
 });

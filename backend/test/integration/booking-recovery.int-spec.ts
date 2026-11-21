@@ -12,6 +12,8 @@
  *    nothing on the newer attempt's row.
  * 4. not_booked consults the real IntegrationApiLog and refuses while the courier is
  *    on record as having accepted a booking.
+ * 5. The generic admin PATCH / DELETE cannot resolve, reset or remove a shipment in
+ *    recovery or in flight, while ordinary edits (compare-and-set writes) still apply.
  *
  * Real ShipmentService + real Prisma; the courier is a mock (no network, no real
  * booking). Self-contained: only a postgres:16-alpine container, reaped on exit.
@@ -24,6 +26,7 @@ import { randomUUID } from 'crypto'
 import { PostgreSqlContainer, StartedPostgreSqlContainer } from '@testcontainers/postgresql'
 import { OrderStatus, PrismaClient, ShipmentStatus } from '@prisma/client'
 import { BOOKING_IN_PROGRESS, RECONCILIATION_REQUIRED, ShipmentService } from '../../src/modules/shipment/shipment.service'
+import { AdminService } from '../../src/modules/admin/admin.service'
 
 const BACKEND = join(__dirname, '..', '..')
 const NEW_MIGRATION = '20261121090000_shipment_booking_attempt_owner'
@@ -240,5 +243,47 @@ describe('not_booked reads the real integration log', () => {
     const row = await prisma.shipment.findUniqueOrThrow({ where: { id: shipmentId } })
     expect(row.status).toBe(ShipmentStatus.FAILED)
     expect(row.metadata).toMatchObject({ booking: { reconciliation: { outcome: 'not_booked', cancelledAtCourier: true, cancelledTrackingNumber: '0291492600000401' } } })
+  })
+})
+
+describe('generic admin PATCH / DELETE against real Prisma', () => {
+  const admin = () => new AdminService(prisma as never, {} as never)
+
+  it('UNKNOWN: status, AWB and delete are refused; the row and its recovery metadata are untouched', async () => {
+    const { shipmentId } = await paidOrder()
+    const recovery = { reconciliationRequired: true, booking: { unrecorded: { provider: 'jne', trackingNumber: '0291492600000501', providerShipmentId: '0291492600000501', bookedAt: '2026-11-21T03:00:00.000Z', persistError: 'x' } } }
+    await prisma.shipment.update({ where: { id: shipmentId }, data: { status: ShipmentStatus.UNKNOWN, bookingAttemptId: randomUUID(), metadata: recovery } })
+    const before = await prisma.shipment.findUniqueOrThrow({ where: { id: shipmentId } })
+
+    await expect(admin().updateShipment(shipmentId, { status: ShipmentStatus.FAILED } as never)).rejects.toThrow(/reconcile/)
+    await expect(admin().updateShipment(shipmentId, { status: ShipmentStatus.RATE_SELECTED } as never)).rejects.toThrow(/reconcile/)
+    await expect(admin().updateShipment(shipmentId, { trackingNumber: '0291492600000501' } as never)).rejects.toThrow(/reconcile/)
+    await admin().updateShipment(shipmentId, { metadata: { reconciliationRequired: false, booking: null } } as never) // no-op
+    await expect(admin().deleteShipment(shipmentId)).rejects.toThrow(/reconcile/)
+
+    const after = await prisma.shipment.findUniqueOrThrow({ where: { id: shipmentId } })
+    expect(after).toEqual(before)
+  })
+
+  it('owned PENDING: cannot be reset or deleted', async () => {
+    const { shipmentId } = await paidOrder()
+    const owner = randomUUID()
+    await prisma.shipment.update({ where: { id: shipmentId }, data: { status: ShipmentStatus.PENDING, bookingAttemptId: owner, bookingAttemptStartedAt: new Date() } })
+    await expect(admin().updateShipment(shipmentId, { status: ShipmentStatus.FAILED } as never)).rejects.toThrow(/booking attempt owns/)
+    await expect(admin().deleteShipment(shipmentId)).rejects.toThrow(/booking attempt owns/)
+    expect(await prisma.shipment.findUniqueOrThrow({ where: { id: shipmentId } })).toMatchObject({ status: ShipmentStatus.PENDING, bookingAttemptId: owner })
+  })
+
+  it('ordinary shipments: compare-and-set edits, metadata merge and draft delete still work', async () => {
+    const { shipmentId } = await paidOrder()
+    await admin().updateShipment(shipmentId, { cost: 12_500, status: ShipmentStatus.FAILED } as never)
+    await admin().updateShipment(shipmentId, { metadata: { note: 'called customer' } } as never)
+    expect(await prisma.shipment.findUniqueOrThrow({ where: { id: shipmentId } })).toMatchObject({ cost: 12_500, status: ShipmentStatus.FAILED, metadata: { note: 'called customer' } })
+    await admin().updateShipment(shipmentId, { trackingNumber: '0291492600000502', status: ShipmentStatus.CREATED } as never) // manual fulfilment
+    expect(await prisma.shipment.findUniqueOrThrow({ where: { id: shipmentId } })).toMatchObject({ trackingNumber: '0291492600000502' })
+
+    const draft = await paidOrder()
+    await admin().deleteShipment(draft.shipmentId)
+    expect(await prisma.shipment.findUnique({ where: { id: draft.shipmentId } })).toBeNull()
   })
 })

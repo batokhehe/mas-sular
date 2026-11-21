@@ -137,7 +137,14 @@ export interface ShipmentMetadata {
  * attempt/recovery records (an AWB the courier issued must never be edited away). An admin
  * metadata edit can never overwrite or delete them.
  */
-const SYSTEM_OWNED_PATHS: ReadonlyArray<readonly string[]> = [['jne', 'webhook'], ['paxel', 'webhook'], ['tracking'], ['booking']];
+const SYSTEM_OWNED_PATHS: ReadonlyArray<readonly string[]> = [
+  ['jne', 'webhook'],
+  ['paxel', 'webhook'],
+  ['tracking'],
+  ['booking'],
+  // Set and cleared only by the booking/reconciliation workflow.
+  ['reconciliationRequired'],
+];
 
 /** Narrow the loosely-typed Json column without throwing on legacy shapes. */
 export function readShipmentMetadata(value: Prisma.JsonValue | null | undefined): ShipmentMetadata {

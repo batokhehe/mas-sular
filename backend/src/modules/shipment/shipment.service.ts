@@ -15,6 +15,7 @@ import { PaxelPickupScheduler } from './paxel-pickup-scheduler';
 import { buildOutboxEvent } from '../../infrastructure/outbox/outbox-event.builder';
 import { AmbiguousBookingError } from '../shipping/domain/shipping-errors';
 import { JNE_PICKUP_CASHLESS_OPERATION } from './infrastructure/providers/jne-shipment.provider';
+import { bookingRecoveryLock } from './shipment-recovery-lock';
 
 /** Region names only; ids mean nothing to a courier. */
 const ADDRESS_REGION_NAMES = {
@@ -960,6 +961,13 @@ export class ShipmentService {
       // Already booked — never book twice because an admin clicked again.
       return { ok: true, status: shipment.status, trackingNumber: shipment.trackingNumber };
     }
+    // Duplicate-booking recovery: neither the pickup slot nor the service of a shipment
+    // awaiting reconciliation, or owned by a booking attempt, is rewritten here - the
+    // booking below would refuse anyway, and the attempt / reconciliation must see the
+    // shipment exactly as it was booked.
+    const lock = bookingRecoveryLock(shipment);
+    if (lock === 'reconciliation') return { ok: false, status: shipment.status, error: RECONCILIATION_REQUIRED };
+    if (lock === 'booking_in_progress') return { ok: false, status: shipment.status, error: BOOKING_IN_PROGRESS };
 
     await this.prisma.shipment.update({
       where: { id: shipment.id },
