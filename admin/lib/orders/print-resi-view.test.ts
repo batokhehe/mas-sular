@@ -4,8 +4,10 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   courierLogoSrc, formatResiDate, INITIAL_FIT, nextFitStep, persistedAwb, PRINT_RESI_BLOCKER_MESSAGE, printResiBlocker,
-  PrintResiOrderInput, RECIPIENT_NOTICE, resolveRecipient, RESI_PAGE, RESI_SCALES, ResiFitState, toPrintResiView,
+  RECIPIENT_NOTICE, resolveRecipient, RESI_PAGE, RESI_SCALES, toPrintResiView,
 } from './print-resi-view.ts';
+// Type-only: `node --test` strips types natively and cannot import interfaces as values.
+import type { PrintResiOrderInput, ResiFitState } from './print-resi-view.ts';
 import { PRINT_RESI_CSS } from './print-resi-css.ts';
 import { barcodeSize, code128Bars, decodeCode128, encodeCode128, modulesFromBars, START_C } from '../barcode/code128.ts';
 
