@@ -1,4 +1,4 @@
-import { IsBoolean, IsIn, IsOptional, IsString, Matches, MaxLength, ValidateIf } from 'class-validator';
+import { Equals, IsBoolean, IsIn, IsOptional, IsString, Length, Matches, MaxLength, ValidateIf } from 'class-validator';
 
 /**
  * Manual reconciliation of an UNKNOWN shipment (ShipmentService.reconcileBooking),
@@ -19,6 +19,20 @@ export class ReconcileShipmentDto {
   @IsString()
   @MaxLength(64)
   providerShipmentId?: string;
+
+  /**
+   * Required for `not_booked`: the operator affirms the courier confirmed there is NO
+   * active booking for this order. A timeout is never evidence of that.
+   */
+  @ValidateIf((dto: ReconcileShipmentDto) => dto.outcome === 'not_booked')
+  @Equals(true)
+  confirmNoActiveBooking?: boolean;
+
+  /** Required for `not_booked`: courier ticket / case id / portal reference for that confirmation. */
+  @ValidateIf((dto: ReconcileShipmentDto) => dto.outcome === 'not_booked')
+  @IsString()
+  @Length(3, 200)
+  courierCheckReference?: string;
 
   /** not_booked only: confirms a booking the courier issued was cancelled with the courier. */
   @IsOptional()

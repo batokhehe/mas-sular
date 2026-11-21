@@ -26,7 +26,8 @@ export class ShipmentAdminController {
    * courier accepted a booking this system could not record). The operator checks
    * with the courier first; this never calls the courier. `booked` records the AWB
    * and ships the order in one transaction; `not_booked` makes the shipment FAILED
-   * so Retry is offered again.
+   * so Retry is offered again - only with the courier's confirmation (reference)
+   * that no booking is active, and a cancellation of any booking this system saw.
    */
   @Permissions('Shipment.update')
   @Post(':orderId/shipment/reconcile')
@@ -39,7 +40,17 @@ export class ShipmentAdminController {
         actor,
       );
     }
-    return this.shipments.reconcileBooking(orderId, { outcome: 'not_booked', cancelledAtCourier: dto.cancelledAtCourier, note: dto.note }, actor);
+    return this.shipments.reconcileBooking(
+      orderId,
+      {
+        outcome: 'not_booked',
+        confirmNoActiveBooking: dto.confirmNoActiveBooking,
+        courierCheckReference: dto.courierCheckReference,
+        cancelledAtCourier: dto.cancelledAtCourier,
+        note: dto.note,
+      },
+      actor,
+    );
   }
 
   /**

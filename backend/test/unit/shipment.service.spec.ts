@@ -76,9 +76,11 @@ describe('ShipmentService', () => {
         data: expect.objectContaining({ trackingNumber: 'JNE123', providerShipmentId: 'JNE123', status: ShipmentStatus.CREATED }),
       }),
     );
-    // booking claim taken BEFORE the provider call (F3)
+    // booking claim taken BEFORE the provider call (F3), carrying the attempt's owner token
     expect(prisma.shipment.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { status: ShipmentStatus.PENDING } }),
+      expect.objectContaining({
+        data: { status: ShipmentStatus.PENDING, bookingAttemptId: expect.any(String), bookingAttemptStartedAt: expect.any(Date) },
+      }),
     );
     // order → SHIPPED via legal-transition CAS (F4) + event row
     const flip = prisma.__tx.order.updateMany.mock.calls[0][0];
@@ -164,7 +166,8 @@ describe('ShipmentService', () => {
     expect(outcome).toMatchObject({ ok: false, status: ShipmentStatus.FAILED });
     expect(prisma.shipment.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { orderId: 'o1', trackingNumber: null },
+        // Only the attempt this call owns, and only while it is still PENDING.
+        where: { orderId: 'o1', trackingNumber: null, bookingAttemptId: expect.any(String), status: ShipmentStatus.PENDING },
         data: expect.objectContaining({ status: ShipmentStatus.FAILED }),
       }),
     );

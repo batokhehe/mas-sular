@@ -86,6 +86,8 @@ export interface UnrecordedBooking {
   bookedAt: string;
   /** Why the local write failed. */
   persistError: string;
+  /** The booking attempt (Shipment.bookingAttemptId) that received it. */
+  attemptId?: string;
 }
 
 /** An operator's reconciliation of an UNKNOWN shipment (ShipmentService.reconcileBooking). */
@@ -94,6 +96,10 @@ export interface BookingReconciliation {
   trackingNumber?: string;
   /** not_booked only: the operator confirmed the courier booking was cancelled. */
   cancelledAtCourier?: boolean;
+  /** not_booked only: the AWB (or integration-log reference) that was cancelled. */
+  cancelledTrackingNumber?: string;
+  /** not_booked only: where the courier's "no active booking" confirmation came from. */
+  courierCheckReference?: string;
   resolvedAt: string;
   resolvedBy?: string;
   note?: string;
@@ -101,13 +107,9 @@ export interface BookingReconciliation {
 
 /** System-owned booking lifecycle records. */
 export interface BookingMetadata {
-  /**
-   * Written after the booking claim and BEFORE the courier is called. A PENDING
-   * shipment that still carries it once the lease has expired may have reached the
-   * courier (crash window W2), so it is parked as UNKNOWN, never re-booked.
-   */
-  attemptStartedAt?: string;
-  attemptProvider?: string;
+  // Attempt ownership lives in Shipment.bookingAttemptId / bookingAttemptStartedAt,
+  // written atomically by the claim - never in this JSON, which other writers
+  // read-modify-write.
   unrecorded?: UnrecordedBooking;
   reconciliation?: BookingReconciliation;
 }

@@ -961,6 +961,14 @@ model Shipment {
   /// transaction as the AWB of a SUCCESSFUL booking. Null before booking and on
   /// shipments booked before it existed (no backfill).
   destinationSnapshot Json?
+  /// Ownership of the current courier booking attempt. Written ATOMICALLY by the
+  /// booking claim (the same UPDATE that sets status PENDING); every write the
+  /// attempt makes afterwards is compare-and-set on this id, so a stale or losing
+  /// process can never call the courier for, or overwrite, another attempt.
+  /// Null on shipments never claimed since it existed (legacy lease rules apply).
+  bookingAttemptId   String?           @db.VarChar(36)
+  /// When that attempt claimed the shipment: the booking lease is measured from it.
+  bookingAttemptStartedAt DateTime?
   order              Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
   history            ShipmentHistory[]
   createdAt          DateTime          @default(now())
