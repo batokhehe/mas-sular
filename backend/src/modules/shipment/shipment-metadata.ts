@@ -72,6 +72,48 @@ export interface TrackingMetadata {
   rejected?: TrackingObservation[];
 }
 
+/**
+ * What the courier accepted but this database could not record (failure window W1):
+ * the courier's identifiers, kept so the booking is never lost and never re-sent.
+ * NOT written to Shipment.trackingNumber - the shipment and the order are recorded
+ * together only through reconciliation (ShipmentService.reconcileBooking).
+ */
+export interface UnrecordedBooking {
+  provider: string;
+  trackingNumber: string;
+  providerShipmentId: string | null;
+  /** When the courier's success answer was received (ISO, our clock). */
+  bookedAt: string;
+  /** Why the local write failed. */
+  persistError: string;
+  /** The booking attempt (Shipment.bookingAttemptId) that received it. */
+  attemptId?: string;
+}
+
+/** An operator's reconciliation of an UNKNOWN shipment (ShipmentService.reconcileBooking). */
+export interface BookingReconciliation {
+  outcome: 'booked' | 'not_booked';
+  trackingNumber?: string;
+  /** not_booked only: the operator confirmed the courier booking was cancelled. */
+  cancelledAtCourier?: boolean;
+  /** not_booked only: the AWB (or integration-log reference) that was cancelled. */
+  cancelledTrackingNumber?: string;
+  /** not_booked only: where the courier's "no active booking" confirmation came from. */
+  courierCheckReference?: string;
+  resolvedAt: string;
+  resolvedBy?: string;
+  note?: string;
+}
+
+/** System-owned booking lifecycle records. */
+export interface BookingMetadata {
+  // Attempt ownership lives in Shipment.bookingAttemptId / bookingAttemptStartedAt,
+  // written atomically by the claim - never in this JSON, which other writers
+  // read-modify-write.
+  unrecorded?: UnrecordedBooking;
+  reconciliation?: BookingReconciliation;
+}
+
 export interface ShipmentMetadata {
   paxel?: PaxelShipmentMetadata;
   jne?: JneShipmentMetadata;
@@ -85,14 +127,24 @@ export interface ShipmentMetadata {
   reconciliationRequired?: boolean;
   /** Written by the tracking pollers only (see TrackingObservation). */
   tracking?: TrackingMetadata;
+  /** Booking attempt / recovery / reconciliation records (system-owned). */
+  booking?: BookingMetadata;
 }
 
 /**
  * Metadata paths owned by the system, not by operators: the courier webhook records
- * (what JNE / Paxel reported) and the pollers' rejected observations. An admin
+ * (what JNE / Paxel reported), the pollers' rejected observations and the booking
+ * attempt/recovery records (an AWB the courier issued must never be edited away). An admin
  * metadata edit can never overwrite or delete them.
  */
-const SYSTEM_OWNED_PATHS: ReadonlyArray<readonly string[]> = [['jne', 'webhook'], ['paxel', 'webhook'], ['tracking']];
+const SYSTEM_OWNED_PATHS: ReadonlyArray<readonly string[]> = [
+  ['jne', 'webhook'],
+  ['paxel', 'webhook'],
+  ['tracking'],
+  ['booking'],
+  // Set and cleared only by the booking/reconciliation workflow.
+  ['reconciliationRequired'],
+];
 
 /** Narrow the loosely-typed Json column without throwing on legacy shapes. */
 export function readShipmentMetadata(value: Prisma.JsonValue | null | undefined): ShipmentMetadata {

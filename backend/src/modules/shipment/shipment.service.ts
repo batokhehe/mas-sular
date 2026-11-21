@@ -1,5 +1,5 @@
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
-import { ConflictException, Inject, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import type { Cache } from 'cache-manager';
 import { NotificationChannel, OrderStatus, Prisma, ShipmentStatus } from '@prisma/client';
 import { randomUUID } from 'crypto';
@@ -10,10 +10,12 @@ import { recordRejectedObservation } from './shipment-observation.recorder';
 import { CreateShipmentInput, ShipmentItem } from './domain/shipment-provider.interface';
 import { ShipmentProviderFactory } from './shipment-provider.factory';
 import { trackingCacheKey } from './shipment-sync.service';
-import { readPickupDatetime, readShipmentMetadata, withPickupDatetime } from './shipment-metadata';
+import { BookingReconciliation, readPickupDatetime, readShipmentMetadata, ShipmentMetadata, withPickupDatetime } from './shipment-metadata';
 import { PaxelPickupScheduler } from './paxel-pickup-scheduler';
 import { buildOutboxEvent } from '../../infrastructure/outbox/outbox-event.builder';
 import { AmbiguousBookingError } from '../shipping/domain/shipping-errors';
+import { JNE_PICKUP_CASHLESS_OPERATION } from './infrastructure/providers/jne-shipment.provider';
+import { bookingRecoveryLock } from './shipment-recovery-lock';
 
 /** Region names only; ids mean nothing to a courier. */
 const ADDRESS_REGION_NAMES = {
@@ -61,6 +63,58 @@ export const AWAITING_MANUAL_FULFILMENT = 'Awaiting manual courier booking (admi
  */
 export const RECONCILIATION_REQUIRED = 'Courier booking outcome unknown: reconcile with the courier before retrying';
 
+/**
+ * The courier ACCEPTED the booking (it returned an AWB) but this database could not
+ * record it. Ambiguous by construction for every caller: the shipment must never be
+ * booked again until an operator reconciles it (ShipmentService.reconcileBooking).
+ */
+export class BookedNotRecordedError extends AmbiguousBookingError {
+  constructor(
+    message: string,
+    provider: string,
+    readonly trackingNumber: string,
+    readonly providerShipmentId: string | null = null,
+    readonly persistError: string = message,
+  ) {
+    super(message, provider);
+  }
+}
+
+/**
+ * The booking attempt a call is running. `id` is set once - and only once - the
+ * atomic claim has made this call the owner of the shipment's booking; every write
+ * the attempt makes afterwards is compare-and-set on it.
+ */
+interface BookingAttempt {
+  id?: string;
+}
+
+/** Manual reconciliation of an UNKNOWN shipment, after an operator checked with the courier. */
+export type ReconcileBookingInput =
+  | { outcome: 'booked'; trackingNumber: string; providerShipmentId?: string; note?: string }
+  | {
+      outcome: 'not_booked';
+      /** The operator affirms the courier confirmed there is NO active booking for this order. */
+      confirmNoActiveBooking?: boolean;
+      /** Where that confirmation came from: courier ticket / case id / portal search reference. */
+      courierCheckReference?: string;
+      /** Required when this system saw the courier accept a booking: it was cancelled with the courier. */
+      cancelledAtCourier?: boolean;
+      note?: string;
+    };
+
+/** Courier create operations whose ACCEPTED outcome means a booking may exist. */
+const COURIER_CREATE_ACCEPTED: Prisma.IntegrationApiLogWhereInput[] = [
+  // Paxel: one record per HTTP attempt; OK = a 2xx create response.
+  { provider: 'PAXEL', operation: 'CREATE_SHIPMENT', applicationOutcome: 'OK' },
+  // JNE answers 2xx for refusals too: only the application-outcome record (attempt
+  // null) says whether /pickupcashless actually issued a cnote.
+  { provider: 'JNE', operation: JNE_PICKUP_CASHLESS_OPERATION, attempt: null, applicationOutcome: 'OK' },
+];
+
+/** What a courier AWB may look like (JNE digits, Paxel `CO.MERCHANT-YYYYMMDD-N-XXXX`). */
+const AWB_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$/;
+
 export interface ShipmentOutcome {
   ok: boolean;
   status: ShipmentStatus;
@@ -104,6 +158,10 @@ export class ShipmentService {
    * (callers that must not surface errors use createForOrderSafe).
    */
   async createForOrder(orderId: string): Promise<ShipmentOutcome> {
+    return this.book(orderId, {});
+  }
+
+  private async book(orderId: string, attempt: BookingAttempt): Promise<ShipmentOutcome> {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
       include: {
@@ -156,6 +214,20 @@ export class ShipmentService {
     // refuses UNKNOWN as well; this only gives the caller the precise reason.
     if (shipment.status === ShipmentStatus.UNKNOWN) {
       return { ok: false, status: shipment.status, error: RECONCILIATION_REQUIRED };
+    }
+
+    // Crash window (W2): an OWNED attempt (bookingAttemptId) whose lease expired may
+    // have reached the courier - the process died, hung, or neither the success nor
+    // the recovery write landed. Park it for reconciliation instead of reclaiming it;
+    // a second courier call could issue a second AWB. Legacy PENDING rows without an
+    // owner keep the old reclaim behaviour (the claim below).
+    if (
+      shipment.status === ShipmentStatus.PENDING &&
+      shipment.bookingAttemptId &&
+      shipment.bookingAttemptStartedAt &&
+      shipment.bookingAttemptStartedAt.getTime() <= Date.now() - BOOKING_LEASE_MS
+    ) {
+      return this.parkInterruptedAttempt(shipment.id, shipment.bookingAttemptId, shipment.metadata, orderId);
     }
 
     const providerName = order.shippingProvider ?? shipment.provider;
@@ -220,16 +292,28 @@ export class ShipmentService {
     // PENDING; everyone else loses the claim and never reaches the provider — no
     // duplicate courier bookings. A stale PENDING (crashed attempt) is reclaimable
     // after the lease; the failure path releases the claim by marking FAILED.
+    //
+    // The claim and the attempt's ownership token are ONE atomic UPDATE: PostgreSQL
+    // re-checks the WHERE of a concurrent claim after the first one commits, finds a
+    // PENDING row WITH an owner, and matches nothing. An owned PENDING row is never
+    // claimable again - once its lease expires it is parked (above), not reclaimed -
+    // so no two attempts can ever both own, or both book, the same shipment.
+    const attemptId = randomUUID();
     const claim = await this.prisma.shipment.updateMany({
       where: {
         id: shipment.id,
         trackingNumber: null,
         OR: [
           { status: { in: [ShipmentStatus.RATE_SELECTED, ShipmentStatus.FAILED] } },
-          { status: ShipmentStatus.PENDING, updatedAt: { lte: new Date(Date.now() - BOOKING_LEASE_MS) } },
+          // Legacy only: a stale claim taken before ownership existed.
+          {
+            status: ShipmentStatus.PENDING,
+            bookingAttemptId: null,
+            updatedAt: { lte: new Date(Date.now() - BOOKING_LEASE_MS) },
+          },
         ],
       },
-      data: { status: ShipmentStatus.PENDING },
+      data: { status: ShipmentStatus.PENDING, bookingAttemptId: attemptId, bookingAttemptStartedAt: new Date() },
     });
     if (claim.count !== 1) {
       // Lost the race: either a concurrent booking finished (return its tracking —
@@ -240,6 +324,8 @@ export class ShipmentService {
       }
       return { ok: false, status: current?.status ?? shipment.status, error: BOOKING_IN_PROGRESS };
     }
+
+    attempt.id = attemptId;
 
     const totalItems = order.items.reduce((sum, i) => sum + i.quantity, 0);
     const items: ShipmentItem[] = order.items.map((item) => ({
@@ -305,8 +391,12 @@ export class ShipmentService {
 
     try {
       await this.prisma.$transaction(async (tx) => {
+        // CAS on ownership: a stale attempt (parked and since re-claimed by another)
+        // must never overwrite the newer attempt's row. No match throws P2025 and
+        // rolls the order flip back. Any status is accepted while this attempt still
+        // owns the row - an UNKNOWN it was parked as is exactly what it resolves.
         await tx.shipment.update({
-          where: { id: shipment.id },
+          where: { id: shipment.id, bookingAttemptId: attemptId, trackingNumber: null },
           data: {
             status: result.status,
             trackingNumber: result.trackingNumber,
@@ -317,66 +407,42 @@ export class ShipmentService {
             ...(result.destinationSnapshot ? { destinationSnapshot: this.json(result.destinationSnapshot) } : {}),
           },
         });
-        // Legal-transition CAS (audit F4): only an order still in a shippable state
-        // flips to SHIPPED. An order cancelled while the courier call was in flight
-        // keeps CANCELLED (tracking stays recorded on the shipment for ops) and the
-        // customer is NOT told it shipped.
-        const flip = await tx.order.updateMany({
-          where: { id: order.id, status: { in: orderStatusSourcesFor(OrderStatus.SHIPPED) } },
-          data: { status: OrderStatus.SHIPPED, trackingNumber: result.trackingNumber },
+        await this.markOrderShippedInTx(tx, order, {
+          shipmentId: shipment.id,
+          provider: providerName,
+          trackingNumber: result.trackingNumber,
+          service: shipment.service,
+          eventNote: `Shipment created (${providerName})`,
+          source: 'shipment.auto_booking',
         });
-        if (flip.count === 1) {
-          await tx.orderEvent.create({
-            data: { orderId: order.id, status: OrderStatus.SHIPPED, note: `Shipment created (${providerName})` },
-          });
-          await this.enqueueWhatsApp(tx, 'order.shipped', order, {
-            provider: providerName,
-            service: order.shippingServiceName ?? order.shippingService ?? shipment.service,
-            tracking: result.trackingNumber,
-          });
-          // P1 #15: the order's SHIPPED transition, announced on the same contract an
-          // admin-driven transition uses, so the admin "Order Shipped" notification
-          // fires for automatic bookings too - carrying the OFFICIAL AWB the courier
-          // just returned. Inside this branch on purpose: it commits atomically with
-          // the CAS'd SHIPPED flip, so it is emitted exactly once, never on a failed
-          // booking, and never for an order cancelled while the courier call was in
-          // flight. Only the admin consumer listens to it (the customer's shipped
-          // WhatsApp is the row enqueued above), so nobody is notified twice.
-          await tx.outboxEvent.create({
-            data: buildOutboxEvent({
-              aggregateType: 'order',
-              aggregateId: order.id,
-              eventName: 'order.status_updated',
-              exchange: 'orders',
-              routingKey: 'order.status_updated',
-              payload: {
-                orderId: order.id,
-                orderNumber: order.orderNumber,
-                status: OrderStatus.SHIPPED,
-                shipmentId: shipment.id,
-                trackingNumber: result.trackingNumber,
-                shippingProvider: providerName,
-              },
-              metadata: { source: 'shipment.auto_booking' },
-            }),
-          });
-        } else {
-          this.logger.warn({ event: 'shipment.order_not_shippable', orderId: order.id, tracking: result.trackingNumber });
-        }
       });
     } catch (err) {
-      // The courier ACCEPTED the booking but it could not be recorded here. Recovery is
-      // unchanged (the error propagates to createForOrderSafe exactly as before); this
-      // line only makes sure the issued AWB is never lost silently - it is the key an
-      // operator needs to reconcile with the courier.
+      // The courier ACCEPTED the booking but it could not be recorded here (W1). The
+      // shipment must NOT become a retryable FAILED: the AWB is kept in metadata and
+      // the shipment parked as UNKNOWN for reconciliation. trackingNumber and the
+      // order stay untouched - they are written together only by reconcileBooking.
+      const superseded = err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025';
+      const persistError = superseded
+        ? 'this booking attempt no longer owns the shipment (it was parked and re-claimed, or recorded by another path)'
+        : err instanceof Error
+          ? err.message
+          : String(err);
       this.logger.error({
-        event: 'shipment.persist_failed_after_booking',
+        event: superseded ? 'shipment.booking_superseded' : 'shipment.persist_failed_after_booking',
         orderId: order.id,
         provider: providerName,
         tracking: result.trackingNumber,
-        error: err instanceof Error ? err.message : String(err),
+        attemptId,
+        error: persistError,
       });
-      throw err;
+      await this.recordUnrecordedBooking(shipment.id, attemptId, order.id, providerName, result, persistError);
+      throw new BookedNotRecordedError(
+        `${providerName} accepted the booking (AWB ${result.trackingNumber}) but it could not be recorded: ${persistError}`,
+        providerName,
+        result.trackingNumber,
+        result.providerShipmentId ?? null,
+        persistError,
+      );
     }
 
     this.logger.log({ event: 'shipment.created', orderId, provider: providerName, tracking: result.trackingNumber });
@@ -466,37 +532,408 @@ export class ShipmentService {
     return pickupAtIso;
   }
 
+  /**
+   * The order's SHIPPED transition for a booked shipment, inside the caller's
+   * transaction. Shared by the automatic booking and manual reconciliation so both
+   * record a booking identically.
+   *
+   * Legal-transition CAS (audit F4): only an order still in a shippable state flips
+   * to SHIPPED. An order cancelled while the courier call was in flight keeps
+   * CANCELLED (tracking stays recorded on the shipment for ops) and the customer is
+   * NOT told it shipped.
+   */
+  private async markOrderShippedInTx(
+    tx: Prisma.TransactionClient,
+    order: {
+      id: string;
+      orderNumber: string;
+      shippingServiceName?: string | null;
+      shippingService?: string | null;
+      user?: { name: string; email: string; phone: string | null } | null;
+      address?: { phone: string | null } | null;
+    },
+    ctx: { shipmentId: string; provider: string; trackingNumber: string; service: string; eventNote: string; source: string },
+  ): Promise<void> {
+    const flip = await tx.order.updateMany({
+      where: { id: order.id, status: { in: orderStatusSourcesFor(OrderStatus.SHIPPED) } },
+      data: { status: OrderStatus.SHIPPED, trackingNumber: ctx.trackingNumber },
+    });
+    if (flip.count !== 1) {
+      this.logger.warn({ event: 'shipment.order_not_shippable', orderId: order.id, tracking: ctx.trackingNumber });
+      return;
+    }
+    await tx.orderEvent.create({
+      data: { orderId: order.id, status: OrderStatus.SHIPPED, note: ctx.eventNote },
+    });
+    await this.enqueueWhatsApp(tx, 'order.shipped', order, {
+      provider: ctx.provider,
+      service: order.shippingServiceName ?? order.shippingService ?? ctx.service,
+      tracking: ctx.trackingNumber,
+    });
+    // P1 #15: the order's SHIPPED transition, announced on the same contract an
+    // admin-driven transition uses, so the admin "Order Shipped" notification fires
+    // for automatic bookings too - carrying the OFFICIAL AWB. Inside the CAS'd branch
+    // on purpose: emitted exactly once, never on a failed booking, never for an order
+    // cancelled meanwhile. Only the admin consumer listens to it (the customer's
+    // shipped WhatsApp is the row enqueued above), so nobody is notified twice.
+    await tx.outboxEvent.create({
+      data: buildOutboxEvent({
+        aggregateType: 'order',
+        aggregateId: order.id,
+        eventName: 'order.status_updated',
+        exchange: 'orders',
+        routingKey: 'order.status_updated',
+        payload: {
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          status: OrderStatus.SHIPPED,
+          shipmentId: ctx.shipmentId,
+          trackingNumber: ctx.trackingNumber,
+          shippingProvider: ctx.provider,
+        },
+        metadata: { source: ctx.source },
+      }),
+    });
+  }
+
+  /**
+   * W1: keep what the courier accepted, and park the shipment as UNKNOWN. Best
+   * effort and never throws - if this write fails too, the owned PENDING claim still
+   * keeps the shipment from being re-booked (createForOrderSafe retries this record,
+   * and the next pass parks it), and the AWB is in the error log above and in the
+   * integration log. CAS on ownership: never written over another attempt's row.
+   */
+  private async recordUnrecordedBooking(
+    shipmentId: string,
+    attemptId: string,
+    orderId: string,
+    provider: string,
+    result: { trackingNumber: string; providerShipmentId?: string | null },
+    persistError: string,
+  ): Promise<void> {
+    try {
+      const current = await this.prisma.shipment.findUnique({ where: { id: shipmentId }, select: { metadata: true } });
+      const meta = readShipmentMetadata(current?.metadata);
+      const written = await this.prisma.shipment.updateMany({
+        where: { id: shipmentId, bookingAttemptId: attemptId, trackingNumber: null },
+        data: {
+          status: ShipmentStatus.UNKNOWN,
+          metadata: this.json({
+            ...meta,
+            reconciliationRequired: true,
+            error: `Courier accepted the booking but it could not be recorded: ${persistError}`,
+            failedAt: new Date().toISOString(),
+            booking: {
+              ...(meta.booking ?? {}),
+              unrecorded: {
+                provider,
+                trackingNumber: result.trackingNumber,
+                providerShipmentId: result.providerShipmentId ?? null,
+                bookedAt: new Date().toISOString(),
+                persistError,
+                attemptId,
+              },
+            },
+          }),
+        },
+      });
+      if (written.count !== 1) {
+        // Another attempt owns the row now: its state is not ours to change. This
+        // AWB exists only in the logs - an operator must cancel it with the courier.
+        this.logger.error({ event: 'shipment.unrecorded_booking_superseded', orderId, provider, tracking: result.trackingNumber, attemptId });
+      }
+    } catch (err) {
+      this.logger.error({
+        event: 'shipment.unrecorded_booking_write_failed',
+        orderId,
+        provider,
+        tracking: result.trackingNumber,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  /** W2: an interrupted attempt (owned PENDING past its lease) becomes UNKNOWN. */
+  private async parkInterruptedAttempt(
+    shipmentId: string,
+    attemptId: string,
+    metadata: Prisma.JsonValue | null,
+    orderId: string,
+  ): Promise<ShipmentOutcome> {
+    const parked = await this.prisma.shipment.updateMany({
+      // CAS on the attempt that was observed stale: a newer attempt has a different
+      // id and is never touched by an observer of an older one.
+      where: {
+        id: shipmentId,
+        status: ShipmentStatus.PENDING,
+        trackingNumber: null,
+        bookingAttemptId: attemptId,
+        bookingAttemptStartedAt: { lte: new Date(Date.now() - BOOKING_LEASE_MS) },
+      },
+      data: {
+        status: ShipmentStatus.UNKNOWN,
+        metadata: this.json({
+          ...readShipmentMetadata(metadata),
+          reconciliationRequired: true,
+          error: 'Booking attempt was interrupted after it may have reached the courier',
+          failedAt: new Date().toISOString(),
+        }),
+      },
+    });
+    if (parked.count !== 1) {
+      const current = await this.prisma.shipment.findUnique({ where: { id: shipmentId } });
+      if (current?.trackingNumber) {
+        return { ok: true, status: current.status, trackingNumber: current.trackingNumber };
+      }
+      return { ok: false, status: current?.status ?? ShipmentStatus.PENDING, error: BOOKING_IN_PROGRESS };
+    }
+    this.logger.error({ event: 'shipment.attempt_interrupted', orderId, shipmentId, attemptId });
+    return { ok: false, status: ShipmentStatus.UNKNOWN, error: RECONCILIATION_REQUIRED };
+  }
+
+  /**
+   * Manual reconciliation of an UNKNOWN shipment, after an operator has checked
+   * with the courier. Never calls the courier.
+   *
+   *  - booked:     the courier holds the booking. Records its AWB and ships the order
+   *                in ONE transaction, exactly like an automatic booking. When the
+   *                courier's AWB was already captured (booking.unrecorded), the
+   *                operator must enter that same AWB.
+   *  - not_booked: the courier holds no booking. The shipment becomes FAILED and
+   *                retryable - the next attempt is a REAL courier booking, so this is
+   *                the one irreversible decision here and needs evidence, never an
+   *                assumption (a timeout does not mean nothing was booked):
+   *                  * the operator confirms the courier holds no active booking and
+   *                    cites where that came from (courierCheckReference);
+   *                  * refused while the last attempt could still be in flight;
+   *                  * when this system saw the courier ACCEPT a booking - an AWB in
+   *                    metadata, or an accepted create in the integration log - it
+   *                    must also be confirmed cancelled with the courier;
+   *                  * if that evidence cannot be read, refused (fail closed).
+   *
+   * Both are CAS'd on UNKNOWN and on the attempt that was inspected, so a second,
+   * concurrent reconciliation (or a late attempt) makes the other one fail.
+   */
+  async reconcileBooking(orderId: string, input: ReconcileBookingInput, actor?: string): Promise<ShipmentOutcome> {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { shipment: true, user: { select: { name: true, email: true, phone: true } }, address: { select: { phone: true } } },
+    });
+    if (!order) throw new NotFoundException('Order not found');
+    const shipment = order.shipment;
+    if (!shipment) throw new NotFoundException('Order has no shipment row');
+    if (shipment.status !== ShipmentStatus.UNKNOWN || shipment.trackingNumber) {
+      throw new ConflictException(`Only an UNKNOWN shipment without an airwaybill can be reconciled (status ${shipment.status})`);
+    }
+
+    const meta: ShipmentMetadata = readShipmentMetadata(shipment.metadata);
+    const captured = meta.booking?.unrecorded;
+    const note = input.note?.trim() ? input.note.trim().slice(0, 500) : undefined;
+    const resolvedAt = new Date().toISOString();
+
+    if (input.outcome === 'not_booked') {
+      const reference = input.courierCheckReference?.trim() ?? '';
+      if (input.confirmNoActiveBooking !== true || reference.length < 3) {
+        throw new BadRequestException(
+          'not_booked reopens the booking: confirm with the courier that no booking is active for this order, then send ' +
+            'confirmNoActiveBooking=true and courierCheckReference (ticket / case id / portal reference). A timeout or a ' +
+            'missing AWB is not evidence that nothing was booked.',
+        );
+      }
+      if (
+        shipment.bookingAttemptStartedAt &&
+        shipment.bookingAttemptStartedAt.getTime() > Date.now() - BOOKING_LEASE_MS
+      ) {
+        throw new ConflictException('The last booking attempt may still be in progress; reconcile once its lease has expired.');
+      }
+      const accepted = await this.findAcceptedCourierCreate(order.id);
+      // JNE logs the cnote as the correlation id; Paxel logs the order number, so its
+      // AWB is only in that log record's response.
+      const awbSeen =
+        captured?.trackingNumber ??
+        (accepted
+          ? accepted.provider === 'JNE' && accepted.correlationId
+            ? accepted.correlationId
+            : `AWB in integration log ${accepted.createdAt.toISOString()}`
+          : null);
+      if (awbSeen && input.cancelledAtCourier !== true) {
+        throw new BadRequestException(
+          captured
+            ? `The courier issued AWB ${captured.trackingNumber} for this shipment. Cancel it with the courier first, then confirm cancelledAtCourier.`
+            : `The integration log shows ${accepted!.provider} accepted a booking for this order at ${accepted!.createdAt.toISOString()} ` +
+              `(${awbSeen}). Cancel that booking with the courier first, then confirm cancelledAtCourier.`,
+        );
+      }
+      const reconciliation: BookingReconciliation = {
+        outcome: 'not_booked',
+        resolvedAt,
+        resolvedBy: actor,
+        note,
+        courierCheckReference: reference.slice(0, 200),
+        ...(awbSeen ? { cancelledAtCourier: true, cancelledTrackingNumber: awbSeen } : {}),
+      };
+      const { reconciliationRequired: _cleared, ...rest } = meta;
+      const done = await this.prisma.shipment.updateMany({
+        where: { id: shipment.id, status: ShipmentStatus.UNKNOWN, trackingNumber: null, bookingAttemptId: shipment.bookingAttemptId },
+        data: {
+          status: ShipmentStatus.FAILED,
+          metadata: this.json({ ...rest, booking: { ...(meta.booking ?? {}), reconciliation } }),
+        },
+      });
+      if (done.count !== 1) throw new ConflictException('The shipment changed while it was being reconciled');
+      this.logger.log({ event: 'shipment.reconciled', orderId, outcome: 'not_booked', actor, courierCheckReference: reference, awbSeen });
+      return { ok: true, status: ShipmentStatus.FAILED, trackingNumber: null };
+    }
+
+    const trackingNumber = input.trackingNumber?.trim() ?? '';
+    if (!AWB_PATTERN.test(trackingNumber)) {
+      throw new BadRequestException('A valid airwaybill (3-64 letters, digits, ".", "_" or "-") is required');
+    }
+    if (captured && captured.trackingNumber !== trackingNumber) {
+      throw new BadRequestException(
+        `The courier already issued AWB ${captured.trackingNumber} for this shipment; record that one (got ${trackingNumber}).`,
+      );
+    }
+    const providerShipmentId = input.providerShipmentId?.trim() || captured?.providerShipmentId || trackingNumber;
+    const reconciliation: BookingReconciliation = { outcome: 'booked', trackingNumber, resolvedAt, resolvedBy: actor, note };
+    const { reconciliationRequired: _cleared, ...rest } = meta;
+
+    await this.prisma.$transaction(async (tx) => {
+      const recorded = await tx.shipment.updateMany({
+        where: { id: shipment.id, status: ShipmentStatus.UNKNOWN, trackingNumber: null, bookingAttemptId: shipment.bookingAttemptId },
+        data: {
+          status: ShipmentStatus.CREATED,
+          trackingNumber,
+          providerShipmentId,
+          metadata: this.json({ ...rest, booking: { ...(meta.booking ?? {}), reconciliation } }),
+        },
+      });
+      if (recorded.count !== 1) throw new ConflictException('The shipment changed while it was being reconciled');
+      await this.markOrderShippedInTx(tx, order, {
+        shipmentId: shipment.id,
+        provider: shipment.provider,
+        trackingNumber,
+        service: shipment.service,
+        eventNote: `Shipment reconciled (${shipment.provider})`,
+        source: 'shipment.reconciliation',
+      });
+    });
+    this.logger.log({ event: 'shipment.reconciled', orderId, outcome: 'booked', tracking: trackingNumber, actor });
+    return { ok: true, status: ShipmentStatus.CREATED, trackingNumber };
+  }
+
+  /**
+   * The latest courier create for this order that the courier ACCEPTED, from the
+   * integration log. Errors propagate: not_booked must not proceed on evidence it
+   * could not read.
+   */
+  private async findAcceptedCourierCreate(orderId: string) {
+    return this.prisma.integrationApiLog.findFirst({
+      where: { orderId, direction: 'OUTBOUND', OR: COURIER_CREATE_ACCEPTED },
+      orderBy: { createdAt: 'desc' },
+      select: { provider: true, createdAt: true, correlationId: true },
+    });
+  }
+
   /** Never-throwing variant used by the payment-verify flow and the retry endpoint.
    *  On failure the shipment is marked FAILED (Retry becomes available). */
   async createForOrderSafe(orderId: string): Promise<ShipmentOutcome> {
+    const attempt: BookingAttempt = {};
     try {
-      return await this.createForOrder(orderId);
+      return await this.book(orderId, attempt);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       // Ambiguous courier answer: park as UNKNOWN (never claimable, so neither a retry
       // nor the reconciliation worker can book twice) instead of FAILED (retryable).
       const ambiguous = err instanceof AmbiguousBookingError;
-      this.logger.error({ event: ambiguous ? 'shipment.create_ambiguous' : 'shipment.create_failed', orderId, error: message });
+      this.logger.error({
+        event: ambiguous ? 'shipment.create_ambiguous' : 'shipment.create_failed',
+        orderId,
+        attemptId: attempt.id,
+        error: message,
+      });
       // Merge, never replace: metadata also carries the admin-selected pickup
       // time, and overwriting it here would strand the shipment - the schedule
       // would be gone and every retry would refuse for want of a pickup slot.
+      // A metadata read that FAILED (as opposed to an empty one) must not be followed
+      // by a metadata write: it would replace the stored pickup slot and any AWB the
+      // courier issued with the error alone. The status still moves.
       const existing = await this.prisma.shipment
         .findUnique({ where: { orderId }, select: { metadata: true } })
-        .catch(() => null);
-      await this.prisma.shipment
+        .then((row) => ({ readable: true as const, metadata: row?.metadata ?? null }))
+        .catch(() => ({ readable: false as const, metadata: null }));
+      const meta = readShipmentMetadata(existing.metadata);
+      // Second chance to keep an AWB the courier issued, should the recovery write
+      // in createForOrder itself have failed.
+      const unrecorded =
+        err instanceof BookedNotRecordedError && attempt.id
+          ? {
+              booking: {
+                ...(meta.booking ?? {}),
+                unrecorded: meta.booking?.unrecorded ?? {
+                  provider: err.provider,
+                  trackingNumber: err.trackingNumber,
+                  providerShipmentId: err.providerShipmentId,
+                  bookedAt: new Date().toISOString(),
+                  persistError: err.persistError,
+                  attemptId: attempt.id,
+                },
+              },
+            }
+          : {};
+      // Only ever the row this call may change:
+      //  - it owns the attempt: CAS on that ownership. A failure leaves the claim only
+      //    while still PENDING; an ambiguous outcome may also refresh its own UNKNOWN.
+      //    A row parked or re-claimed by anyone else is left exactly as it is.
+      //  - it never claimed (failed before the claim): only an unowned, idle row -
+      //    never another process's live claim, never an UNKNOWN awaiting
+      //    reconciliation. Either would make a possibly-booked shipment retryable.
+      const where: Prisma.ShipmentWhereInput = attempt.id
+        ? {
+            orderId,
+            trackingNumber: null,
+            bookingAttemptId: attempt.id,
+            status: ambiguous ? { in: [ShipmentStatus.PENDING, ShipmentStatus.UNKNOWN] } : ShipmentStatus.PENDING,
+          }
+        : {
+            orderId,
+            trackingNumber: null,
+            OR: [
+              { status: { in: [ShipmentStatus.RATE_SELECTED, ShipmentStatus.FAILED] } },
+              { status: ShipmentStatus.PENDING, bookingAttemptId: null, updatedAt: { lte: new Date(Date.now() - BOOKING_LEASE_MS) } },
+            ],
+          };
+      const marked = await this.prisma.shipment
         .updateMany({
-          where: { orderId, trackingNumber: null },
+          where,
           data: {
             status: ambiguous ? ShipmentStatus.UNKNOWN : ShipmentStatus.FAILED,
-            metadata: this.json({
-              ...readShipmentMetadata(existing?.metadata),
-              error: message,
-              failedAt: new Date().toISOString(),
-              reconciliationRequired: ambiguous ? true : undefined,
-            }),
+            ...(existing.readable
+              ? {
+                  metadata: this.json({
+                    ...meta,
+                    ...unrecorded,
+                    error: message,
+                    failedAt: new Date().toISOString(),
+                    reconciliationRequired: ambiguous ? true : undefined,
+                  }),
+                }
+              : {}),
           },
         })
-        .catch(() => undefined);
+        .catch((writeErr) => {
+          // Left PENDING with its owner: the next pass parks it as UNKNOWN.
+          this.logger.error({
+            event: 'shipment.failure_mark_failed',
+            orderId,
+            attemptId: attempt.id,
+            error: writeErr instanceof Error ? writeErr.message : String(writeErr),
+          });
+          return null;
+        });
+      if (marked && marked.count === 0) {
+        this.logger.warn({ event: 'shipment.failure_mark_skipped', orderId, attemptId: attempt.id, reason: 'row not owned by this attempt' });
+      }
       return ambiguous
         ? { ok: false, status: ShipmentStatus.UNKNOWN, error: `${RECONCILIATION_REQUIRED} (${message})` }
         : { ok: false, status: ShipmentStatus.FAILED, error: message };
@@ -524,6 +961,13 @@ export class ShipmentService {
       // Already booked — never book twice because an admin clicked again.
       return { ok: true, status: shipment.status, trackingNumber: shipment.trackingNumber };
     }
+    // Duplicate-booking recovery: neither the pickup slot nor the service of a shipment
+    // awaiting reconciliation, or owned by a booking attempt, is rewritten here - the
+    // booking below would refuse anyway, and the attempt / reconciliation must see the
+    // shipment exactly as it was booked.
+    const lock = bookingRecoveryLock(shipment);
+    if (lock === 'reconciliation') return { ok: false, status: shipment.status, error: RECONCILIATION_REQUIRED };
+    if (lock === 'booking_in_progress') return { ok: false, status: shipment.status, error: BOOKING_IN_PROGRESS };
 
     await this.prisma.shipment.update({
       where: { id: shipment.id },

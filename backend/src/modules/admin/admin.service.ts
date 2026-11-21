@@ -8,6 +8,7 @@ import { ShipmentService } from '../shipment/shipment.service';
 import { trackingCacheKey } from '../shipment/shipment-sync.service';
 import { mergeAdminShipmentMetadata } from '../shipment/shipment-metadata';
 import { lockShipmentRow } from '../shipment/shipment-row-lock';
+import { bookingRecoveryLock, bookingRecoveryLockMessage, hasUnrecordedBookingEvidence } from '../shipment/shipment-recovery-lock';
 import { InventoryReservationService } from '../inventory/inventory-reservation.service';
 import { loadStockLevels } from '../inventory/stock-levels';
 import { CreateBannerDto } from '../cms/application/dto/banner.dto';
@@ -1116,6 +1117,23 @@ export class AdminService {
   async updateShipment(id: string, dto: UpdateShipmentDto) {
     const existing = await this.getShipment(id);
 
+    // Duplicate-booking recovery: an UNKNOWN shipment (the courier may hold a booking)
+    // is resolved ONLY by the reconciliation workflow, and a PENDING shipment owned by
+    // a booking attempt may be at the courier right now. Any effective change through
+    // this generic edit - a status that reopens booking, an AWB that skips the
+    // captured-AWB match, a reset that releases the claim - could book the order twice.
+    // The edit form resubmits every field, so unchanged values are not a change.
+    const lock = bookingRecoveryLock(existing);
+    if (lock) {
+      const changed = this.changedShipmentFields(existing, dto);
+      if (changed.length > 0) {
+        throw new ConflictException(`${bookingRecoveryLockMessage(lock, existing.orderId)} (attempted: ${changed.join(', ')})`);
+      }
+      // Nothing to change: write nothing. (Even a no-op write could normalise an empty
+      // AWB field to '' - and the booking claim only matches trackingNumber NULL.)
+      return existing;
+    }
+
     // A shipment that already carries an airwaybill describes a booking a
     // courier has accepted. Re-pointing it at a different provider or service
     // would leave the record describing something nobody agreed to ship, while
@@ -1178,23 +1196,67 @@ export class AdminService {
       trackingNumber: dto.trackingNumber,
       trackingUrl: dto.trackingUrl,
     };
-    if (dto.metadata === undefined) {
-      return this.prisma.shipment.update({ where: { id }, data: fields, include: { order: true } });
-    }
+    // Compare-and-set on what the checks above read: a booking claim, a parking or a
+    // reconciliation landing between that read and this write makes the edit fail
+    // instead of silently overwriting the recovery state (P2025 -> 409).
+    const unchangedSince: Prisma.ShipmentWhereUniqueInput = {
+      id,
+      status: existing.status,
+      trackingNumber: existing.trackingNumber,
+      bookingAttemptId: existing.bookingAttemptId,
+    };
+    try {
+      if (dto.metadata === undefined) {
+        return await this.prisma.shipment.update({ where: unchangedSince, data: fields, include: { order: true } });
+      }
 
-    // A metadata edit MERGES into what is stored (never a wholesale replace), under
-    // the shipment row lock so it cannot overwrite what the JNE webhook or a poller
-    // is writing at the same moment. System-owned paths (jne.webhook, tracking) keep
-    // their stored value whatever the edit contains.
-    return this.prisma.$transaction(async (tx) => {
-      await lockShipmentRow(tx, id);
-      const current = await tx.shipment.findUnique({ where: { id }, select: { metadata: true } });
-      return tx.shipment.update({
-        where: { id },
-        data: { ...fields, metadata: mergeAdminShipmentMetadata(current?.metadata, dto.metadata as Record<string, unknown>) },
-        include: { order: true },
+      // A metadata edit MERGES into what is stored (never a wholesale replace), under
+      // the shipment row lock so it cannot overwrite what the JNE webhook or a poller
+      // is writing at the same moment. System-owned paths (jne.webhook, tracking,
+      // booking, reconciliationRequired) keep their stored value whatever the edit contains.
+      return await this.prisma.$transaction(async (tx) => {
+        await lockShipmentRow(tx, id);
+        const current = await tx.shipment.findUnique({ where: { id }, select: { metadata: true } });
+        return tx.shipment.update({
+          where: unchangedSince,
+          data: { ...fields, metadata: mergeAdminShipmentMetadata(current?.metadata, dto.metadata as Record<string, unknown>) },
+          include: { order: true },
+        });
       });
-    });
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') {
+        throw new ConflictException('The shipment changed while it was being edited (booking or reconciliation in progress). Reload and try again.');
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * The fields a generic shipment edit would ACTUALLY change. Compared by value - the
+   * edit form resubmits every field - with an empty string meaning "no value". A
+   * metadata edit counts when merging it would change what is stored.
+   */
+  private changedShipmentFields(
+    existing: { provider: string; service: string; cost: number; status: string; trackingNumber: string | null; trackingUrl: string | null; metadata: Prisma.JsonValue | null },
+    dto: UpdateShipmentDto,
+  ): string[] {
+    const norm = (v: unknown) => (v === '' || v === undefined ? null : v);
+    const changed: string[] = [];
+    for (const key of ['provider', 'service', 'cost', 'status', 'trackingNumber', 'trackingUrl'] as const) {
+      if (dto[key] !== undefined && norm(dto[key]) !== norm(existing[key])) changed.push(key);
+    }
+    if (dto.metadata !== undefined) {
+      const merged = mergeAdminShipmentMetadata(existing.metadata, dto.metadata as Record<string, unknown>);
+      // Key order is not a change: compare canonical (sorted-key) JSON.
+      const canonical = (v: unknown): string =>
+        JSON.stringify(v, (_k, val: unknown) =>
+          val && typeof val === 'object' && !Array.isArray(val)
+            ? Object.fromEntries(Object.entries(val as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)))
+            : val,
+        );
+      if (canonical(merged) !== canonical(existing.metadata ?? {})) changed.push('metadata');
+    }
+    return changed;
   }
 
   async deleteShipment(id: string) {
@@ -1219,7 +1281,29 @@ export class AdminService {
       );
     }
 
-    return this.prisma.shipment.delete({ where: { id } });
+    // Duplicate-booking recovery: deleting an UNKNOWN or claimed shipment (then
+    // re-creating it) would reopen booking without reconciliation, and would destroy
+    // the only record of an AWB the courier issued but this system could not store.
+    const lock = bookingRecoveryLock(existing);
+    if (lock) throw new ConflictException(bookingRecoveryLockMessage(lock, existing.orderId));
+    if (hasUnrecordedBookingEvidence(existing.metadata)) {
+      throw new ConflictException(
+        'Cannot delete this shipment: it records an airwaybill the courier issued (metadata.booking.unrecorded). ' +
+          'That record is the audit trail of a courier booking and is kept.',
+      );
+    }
+
+    try {
+      // Compare-and-set on the state checked above (a claim landing meanwhile -> 409).
+      return await this.prisma.shipment.delete({
+        where: { id, status: existing.status, trackingNumber: null, bookingAttemptId: existing.bookingAttemptId },
+      });
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') {
+        throw new ConflictException('The shipment changed while it was being deleted (booking in progress). Reload and try again.');
+      }
+      throw err;
+    }
   }
 
   listUsers() {

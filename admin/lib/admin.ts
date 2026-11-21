@@ -28,6 +28,7 @@ export type AdminCategory = {
 };
 
 import type { AdminTopping, ToppingPayload } from './toppings/topping-form';
+import type { ReconcileShipmentInput } from './shipments/reconcile';
 export type { AdminTopping, ToppingPayload };
 
 // No `sku` (P2 #5): the API still returns it (it is the courier item code), but it is
@@ -596,6 +597,8 @@ export type AdminOrderDetail = AdminOrder & {
     history?: Array<{ id: string; providerStatus: string; mappedStatus: string; changedAt: string }>;
     /** Receiver fields actually submitted to the courier (null before booking / legacy). */
     destinationSnapshot?: ShipmentDestinationSnapshot | null;
+    /** Loosely typed; read through lib/shipments/reconcile.ts (captured AWB, etc.). */
+    metadata?: unknown;
   } | null;
   events: Array<{ id: string; status: string; note?: string | null; createdAt: string }>;
 };
@@ -1043,6 +1046,17 @@ export type ShipmentRetryResult = {
 /** Retry courier shipment creation for an order whose shipment is FAILED. */
 export function retryShipment(orderId: string) {
   return api<ShipmentRetryResult>(`/admin/orders/${orderId}/shipment/retry`, { method: 'POST' });
+}
+
+/**
+ * Resolve an UNKNOWN shipment after checking with the courier (never calls the
+ * courier). The ONLY way to resolve one - a generic shipment edit is refused.
+ */
+export function reconcileShipment(orderId: string, input: ReconcileShipmentInput) {
+  return api<ShipmentRetryResult>(`/admin/orders/${orderId}/shipment/reconcile`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
 }
 
 // ---------------- Inventory reservations ----------------

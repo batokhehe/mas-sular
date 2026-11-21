@@ -26,6 +26,8 @@ import { formatRupiah } from '@/lib/utils/number';
 import { feeModeLabel, feeRuleLabel } from '@/lib/orders/service-fee-view';
 import { orderItemPricing } from '@/lib/orders/order-item-view';
 import { PrintResiAction } from '@/components/orders/print-resi';
+import { ReconcileShipmentAction } from '@/components/orders/reconcile-shipment';
+import { needsReconciliation } from '@/lib/shipments/reconcile';
 import {
   ADMIN_LOADING_MESSAGES, ADMIN_SUCCESS_MESSAGES, confirmApprove, confirmReject, runWithFeedback,
 } from '@/lib/admin-alert';
@@ -133,17 +135,18 @@ export default function OrderDetailPage() {
               <ActionButton onClick={() => runWithFeedback({ confirm: () => confirmReject({ title: 'Tolak pembayaran?', text: 'Menolak pembayaran dan mengembalikan stok.' }), loading: ADMIN_LOADING_MESSAGES.reject, success: ADMIN_SUCCESS_MESSAGES.paymentRejected, action: () => rejectM.mutateAsync(payment.id) })} disabled={rejectM.isPending}>Tolak Pembayaran</ActionButton>
             </PermissionGate>
           ) : null}
-          {actions?.retryShipment ? (
+          {actions?.retryShipment && !needsReconciliation(order.shipment) ? (
             <PermissionGate permissions={ROUTE_PERMISSIONS.shipmentCreate}>
               <ActionButton icon={RefreshCw} onClick={() => runWithFeedback({ loading: 'Membuat pengiriman...', success: 'Percobaan ulang pengiriman selesai', action: () => retryM.mutateAsync() })} disabled={retryM.isPending}>Coba Ulang Pengiriman</ActionButton>
             </PermissionGate>
           ) : null}
-          {order.shipment?.status === 'UNKNOWN' && !order.shipment.trackingNumber ? (
-            // Ambiguous courier answer: the booking may exist at the courier. Retry is
-            // withheld until an operator has reconciled it (see the shipment runbook).
-            <p className="w-full text-xs text-amber-700">
-              Hasil booking kurir tidak pasti. Cek ke kurir terlebih dahulu: jika sudah ada AWB, catat AWB tersebut; jika tidak ada, ubah status pengiriman menjadi Gagal agar dapat dicoba ulang.
-            </p>
+          {order.shipment && needsReconciliation(order.shipment) ? (
+            // The courier may already hold a booking. No Retry and no manual status
+            // edit (both are refused server-side): only the reconciliation workflow,
+            // which collects the courier's evidence, may resolve it.
+            <PermissionGate permissions={ROUTE_PERMISSIONS.shipmentUpdate}>
+              <ReconcileShipmentAction orderId={orderId as string} shipment={order.shipment} onDone={refresh} />
+            </PermissionGate>
           ) : null}
           {actions?.cancelOrder ? (
             <PermissionGate permissions={ROUTE_PERMISSIONS.orderUpdate}>

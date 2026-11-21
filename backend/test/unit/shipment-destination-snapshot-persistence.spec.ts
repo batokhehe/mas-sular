@@ -109,6 +109,11 @@ describe('ShipmentService — destination snapshot persistence', () => {
     tx.shipment.update.mockRejectedValueOnce(new Error('connection reset'));
     const outcome = await service.createForOrderSafe('o1');
     expect(outcome.ok).toBe(false);
-    expect(prisma.shipment.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({ where: { orderId: 'o1', trackingNumber: null } }));
+    expect(prisma.shipment.updateMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: { orderId: 'o1', trackingNumber: null, bookingAttemptId: expect.any(String), status: { in: [ShipmentStatus.PENDING, ShipmentStatus.UNKNOWN] } },
+        data: expect.objectContaining({ status: ShipmentStatus.UNKNOWN }),
+      }),
+    );
   });
 });

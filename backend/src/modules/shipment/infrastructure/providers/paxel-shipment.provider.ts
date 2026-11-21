@@ -3,7 +3,7 @@ import { IntegrationProvider } from '@prisma/client';
 import { IntegrationLogService } from '../../../../infrastructure/integration-log/integration-log.service';
 import { ShipmentStatus } from '@prisma/client';
 import { paxelBoxSpec, selectPaxelBox } from '../../../shipping/domain/paxel-box';
-import { PermanentError } from '../../../shipping/domain/shipping-errors';
+import { AmbiguousBookingError, PermanentError, TransientError } from '../../../shipping/domain/shipping-errors';
 import {
   defaultShippingHttpClient,
   executeShippingRequest,
@@ -332,12 +332,25 @@ export class PaxelShipmentProvider implements ShipmentProvider {
         destination: payload.destination.city,
         service: payload.service_type,
       },
+    }).catch((err: unknown) => {
+      // Timeout, network failure or 5xx: the request may have reached Paxel and been
+      // booked, and Paxel has no idempotency key to make a retry safe. Only a 429
+      // (refused at the gateway) and a 4xx PermanentError are definitive.
+      if (err instanceof TransientError && !/^provider 429:/.test(err.message)) {
+        throw new AmbiguousBookingError(`Paxel booking outcome unknown - reconcile with Paxel before retrying: ${err.message}`, this.name);
+      }
+      throw err;
     });
 
     const parsed = safeParse<PaxelCreateResponse>(text);
     const airwaybill = parsed?.data?.airwaybill_code;
     if (!airwaybill) {
-      throw new PermanentError('Paxel create response has no airwaybill_code', this.name);
+      // A 2xx is Paxel accepting the request; without the airwaybill we cannot tell
+      // whether a shipment exists. Not a refusal, so never retried blindly.
+      throw new AmbiguousBookingError(
+        'Paxel booking outcome unknown - reconcile with Paxel before retrying: create response has no airwaybill_code',
+        this.name,
+      );
     }
     return {
       trackingNumber: airwaybill,
