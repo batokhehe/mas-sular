@@ -1,7 +1,7 @@
 import { ShipmentStatus } from '@prisma/client';
 import { PaxelShipmentProvider } from '../../src/modules/shipment/infrastructure/providers/paxel-shipment.provider';
 import { JneShipmentProvider } from '../../src/modules/shipment/infrastructure/providers/jne-shipment.provider';
-import { PermanentError, TransientError } from '../../src/modules/shipping/domain/shipping-errors';
+import { AmbiguousBookingError, PermanentError } from '../../src/modules/shipping/domain/shipping-errors';
 import { ShippingConfig } from '../../src/modules/shipping/shipping.config';
 import { ShippingHttpResponse } from '../../src/modules/shipping/infrastructure/http/shipping-http-client';
 import { CreateShipmentInput } from '../../src/modules/shipment/domain/shipment-provider.interface';
@@ -124,9 +124,9 @@ describe('PaxelShipmentProvider', () => {
   it('does NOT retry a 5xx create — Paxel has no idempotency key', async () => {
     const { provider, http } = build();
     http.mockResolvedValue(res(502, 'bad gateway'));
-    // Still a TransientError for the caller, but issued exactly ONCE: retrying a
+    // Issued exactly ONCE, and reported as ambiguous (not retryable): retrying a
     // create whose response was lost can mint a second airwaybill.
-    await expect(provider.createShipment(PAXEL_INPUT)).rejects.toBeInstanceOf(TransientError);
+    await expect(provider.createShipment(PAXEL_INPUT)).rejects.toBeInstanceOf(AmbiguousBookingError);
     expect(http).toHaveBeenCalledTimes(1);
   });
 });

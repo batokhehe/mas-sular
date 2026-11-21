@@ -1,9 +1,11 @@
 import { Body, Controller, Param, Post, UseGuards } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
+import { AdminUser, CurrentAdmin } from '../../../common/decorators/current-admin.decorator';
 import { Permissions } from '../../../common/decorators/permissions.decorator';
 import { AdminGuard } from '../../../common/guards/admin.guard';
 import { PermissionGuard } from '../../../common/guards/permission.guard';
 import { PrepareShipmentDto } from '../application/dto/prepare-shipment.dto';
+import { ReconcileShipmentDto } from '../application/dto/reconcile-shipment.dto';
 import { ShipmentService } from '../shipment.service';
 
 @ApiTags('admin-shipment')
@@ -17,6 +19,27 @@ export class ShipmentAdminController {
   @Post(':orderId/shipment/retry')
   retry(@Param('orderId') orderId: string) {
     return this.shipments.retry(orderId);
+  }
+
+  /**
+   * Manual reconciliation of an UNKNOWN shipment (courier outcome unknown, or the
+   * courier accepted a booking this system could not record). The operator checks
+   * with the courier first; this never calls the courier. `booked` records the AWB
+   * and ships the order in one transaction; `not_booked` makes the shipment FAILED
+   * so Retry is offered again.
+   */
+  @Permissions('Shipment.update')
+  @Post(':orderId/shipment/reconcile')
+  reconcile(@CurrentAdmin() admin: AdminUser, @Param('orderId') orderId: string, @Body() dto: ReconcileShipmentDto) {
+    const actor = admin?.email ?? admin?.sub;
+    if (dto.outcome === 'booked') {
+      return this.shipments.reconcileBooking(
+        orderId,
+        { outcome: 'booked', trackingNumber: dto.trackingNumber ?? '', providerShipmentId: dto.providerShipmentId, note: dto.note },
+        actor,
+      );
+    }
+    return this.shipments.reconcileBooking(orderId, { outcome: 'not_booked', cancelledAtCourier: dto.cancelledAtCourier, note: dto.note }, actor);
   }
 
   /**

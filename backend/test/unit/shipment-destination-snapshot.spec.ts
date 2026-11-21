@@ -8,7 +8,7 @@ import {
 } from '../../src/modules/shipment/infrastructure/providers/jne-pickup-cashless';
 import { PaxelShipmentProvider } from '../../src/modules/shipment/infrastructure/providers/paxel-shipment.provider';
 import { CreateShipmentInput } from '../../src/modules/shipment/domain/shipment-provider.interface';
-import { PermanentError } from '../../src/modules/shipping/domain/shipping-errors';
+import { AmbiguousBookingError, PermanentError } from '../../src/modules/shipping/domain/shipping-errors';
 import { JnePickupConfig, ShippingConfig } from '../../src/modules/shipping/shipping.config';
 import { ShippingHttpClient, ShippingHttpRequest } from '../../src/modules/shipping/infrastructure/http/shipping-http-client';
 
@@ -226,6 +226,7 @@ describe('Paxel booking — destination snapshot of the submitted `destination`'
 
   it('a failed booking returns no snapshot (it throws)', async () => {
     await expect(paxelBooking(422, '{"message":"invalid"}').provider.createShipment(paxelInput())).rejects.toBeInstanceOf(PermanentError);
-    await expect(paxelBooking(200, '{"data":{}}').provider.createShipment(paxelInput())).rejects.toBeInstanceOf(PermanentError);
+    // 2xx without an airwaybill: ambiguous (reconcile), still no snapshot.
+    await expect(paxelBooking(200, '{"data":{}}').provider.createShipment(paxelInput())).rejects.toBeInstanceOf(AmbiguousBookingError);
   });
 });

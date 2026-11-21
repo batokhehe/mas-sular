@@ -2,7 +2,7 @@ import { ShipmentStatus } from '@prisma/client';
 import { PaxelShipmentProvider } from '../../src/modules/shipment/infrastructure/providers/paxel-shipment.provider';
 import { paxelCreateSignature } from '../../src/modules/shipment/infrastructure/providers/paxel-signature';
 import { CreateShipmentInput } from '../../src/modules/shipment/domain/shipment-provider.interface';
-import { PermanentError, TransientError } from '../../src/modules/shipping/domain/shipping-errors';
+import { AmbiguousBookingError, PermanentError, TransientError } from '../../src/modules/shipping/domain/shipping-errors';
 import { ShippingConfig } from '../../src/modules/shipping/shipping.config';
 import { ShippingHttpRequest, ShippingHttpResponse } from '../../src/modules/shipping/infrastructure/http/shipping-http-client';
 
@@ -619,23 +619,26 @@ describe('Paxel create — response', () => {
     expect(result).not.toHaveProperty('cost');
   });
 
-  it('fails when the response has no airwaybill_code', async () => {
+  // A 2xx means Paxel accepted the request; without an airwaybill we cannot tell
+  // whether a shipment exists, so it is ambiguous (reconcile), never retryable.
+  it('a response without airwaybill_code is ambiguous, not a refusal', async () => {
     const { provider } = build(config(), () => res(200, JSON.stringify({ data: { shipping_cost: 30000 } })));
-    await expect(provider.createShipment(input())).rejects.toBeInstanceOf(PermanentError);
+    await expect(provider.createShipment(input())).rejects.toBeInstanceOf(AmbiguousBookingError);
   });
 
-  it('fails on a malformed body', async () => {
+  it('a malformed 2xx body is ambiguous, not a refusal', async () => {
     const { provider } = build(config(), () => res(200, 'not-json'));
-    await expect(provider.createShipment(input())).rejects.toBeInstanceOf(PermanentError);
+    await expect(provider.createShipment(input())).rejects.toBeInstanceOf(AmbiguousBookingError);
   });
 });
 
 // =============================================================== retry safety ==
 
 describe('Paxel create — never retried', () => {
-  it('issues exactly ONE request on 5xx even though maxRetry is 2', async () => {
+  it('issues exactly ONE request on 5xx even though maxRetry is 2, and calls the outcome AMBIGUOUS', async () => {
     const { provider, calls } = build(config({ maxRetry: 2 }), () => res(503, 'upstream down'));
-    await expect(provider.createShipment(input())).rejects.toBeInstanceOf(TransientError);
+    // Paxel may have booked before failing: reconcile first, never a blind retry.
+    await expect(provider.createShipment(input())).rejects.toBeInstanceOf(AmbiguousBookingError);
     expect(calls).toHaveLength(1);
   });
 
@@ -647,8 +650,22 @@ describe('Paxel create — never retried', () => {
       attempts += 1;
       throw new Error('AbortError');
     };
-    await expect(provider.createShipment(input())).rejects.toBeInstanceOf(TransientError);
+    await expect(provider.createShipment(input())).rejects.toBeInstanceOf(AmbiguousBookingError);
     expect(attempts).toBe(1);
+  });
+
+  it('a 429 is refused at the gateway: definitive TransientError, NOT ambiguous', async () => {
+    const { provider, calls } = build(config(), () => res(429, 'slow down'));
+    const error = await provider.createShipment(input()).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(TransientError);
+    expect(error).not.toBeInstanceOf(AmbiguousBookingError);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('a 2xx without airwaybill_code is AMBIGUOUS (Paxel accepted the request)', async () => {
+    const { provider, calls } = build(config(), () => res(200, JSON.stringify({ message: 'OK', status_code: 200, data: {} })));
+    await expect(provider.createShipment(input())).rejects.toBeInstanceOf(AmbiguousBookingError);
+    expect(calls).toHaveLength(1);
   });
 
   it('does not retry a 4xx either', async () => {
